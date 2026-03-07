@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { socket } from './socket';
 import './App.css';
 
@@ -114,7 +115,9 @@ function App() {
                 {msg.type === 'dm1' && <span className="msg-tag">DM</span>}
                 {msg.type === 'player' && <span className="msg-tag player-tag">You</span>}
                 {msg.type === 'error' && <span className="msg-tag error-tag">!</span>}
-                <p>{msg.text}</p>
+                {msg.type === 'dm1'
+                  ? <div className="markdown-body"><ReactMarkdown>{msg.text}</ReactMarkdown></div>
+                  : <p>{msg.text}</p>}
               </div>
             ))}
             {dm1Typing && (
@@ -165,7 +168,9 @@ function App() {
               <div key={msg.id} className={`message message--${msg.type}`}>
                 {msg.type === 'dm2' && <span className="msg-tag dm2-tag">Rules</span>}
                 {msg.type === 'player' && <span className="msg-tag player-tag">You</span>}
-                <p>{msg.text}</p>
+                {msg.type === 'dm2'
+                  ? <div className="markdown-body"><ReactMarkdown>{msg.text}</ReactMarkdown></div>
+                  : <p>{msg.text}</p>}
               </div>
             ))}
             {dm2Typing && (
