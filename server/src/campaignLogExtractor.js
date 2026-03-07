@@ -6,8 +6,9 @@
 
 require('dotenv').config({ override: true });
 const Anthropic = require('@anthropic-ai/sdk');
-const db        = require('./db');
-const { HAIKU } = require('./models');
+const db                   = require('./db');
+const { HAIKU }            = require('./models');
+const { retryWithBackoff } = require('./retryUtils');
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -45,12 +46,12 @@ async function extract(sessionId, playerMessage, dm1Reply, turnNumber) {
   try {
     const userContent = `Player action: ${playerMessage}\n\nDM response: ${dm1Reply}`;
 
-    const response = await anthropic.messages.create({
+    const response = await retryWithBackoff(() => anthropic.messages.create({
       model:      HAIKU,
       max_tokens: 256,
       system:     SYSTEM_PROMPT,
       messages:   [{ role: 'user', content: userContent }],
-    });
+    }));
 
     const rawText = response.content[0].text.trim();
 

@@ -14,6 +14,7 @@ const worldStateExtractor  = require('./worldStateExtractor');
 const campaignLogExtractor = require('./campaignLogExtractor');
 const chapterSummarizer    = require('./chapterSummarizer');
 const { SONNET, HAIKU }    = require('./models');
+const { retryWithBackoff } = require('./retryUtils');
 
 // ── Setup ──────────────────────────────────────────────────────────────────
 const app    = express();
@@ -235,12 +236,12 @@ io.on('connection', (socket) => {
 
       let response;
       try {
-        response = await anthropic.messages.create({
+        response = await retryWithBackoff(() => anthropic.messages.create({
           model:      HAIKU,
           max_tokens: 1024,
           system:     DM2_PROMPT,
           messages:   [{ role: 'user', content: message }],
-        });
+        }));
       } catch (apiErr) {
         console.error('rules_input: anthropic.messages.create failed:', apiErr.message, '| status:', apiErr.status, '| error:', JSON.stringify(apiErr.error));
         socket.emit('dm2_typing', false);
