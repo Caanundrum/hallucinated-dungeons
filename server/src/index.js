@@ -1,24 +1,28 @@
 require('dotenv').config({ override: true });
-const express = require('express');
-const http = require('http');
+const express   = require('express');
+const http      = require('http');
 const { Server } = require('socket.io');
-const cors = require('cors');
+const cors      = require('cors');
 const { v4: uuidv4 } = require('uuid');
 const Anthropic = require('@anthropic-ai/sdk');
-const fs = require('fs');
-const path = require('path');
+const fs        = require('fs');
+const path      = require('path');
+
+const db                   = require('./db');
+const contextBuilder       = require('./contextBuilder');
+const worldStateExtractor  = require('./worldStateExtractor');
+const campaignLogExtractor = require('./campaignLogExtractor');
+const chapterSummarizer    = require('./chapterSummarizer');
+const { SONNET, HAIKU }    = require('./models');
 
 // ── Setup ──────────────────────────────────────────────────────────────────
-const app = express();
+const app    = express();
 const server = http.createServer(app);
 
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
 
 const io = new Server(server, {
-  cors: {
-    origin: CLIENT_URL,
-    methods: ['GET', 'POST'],
-  },
+  cors: { origin: CLIENT_URL, methods: ['GET', 'POST'] },
 });
 
 app.use(cors({ origin: CLIENT_URL }));
@@ -34,68 +38,78 @@ const DM2_PROMPT = fs.readFileSync(
   path.join(__dirname, '../prompts/dm2.txt'), 'utf8'
 );
 
-// ── In-memory session store (Phase 1) ─────────────────────────────────────
-// Phase 2 will replace this with Supabase persistence
-const sessions = {};
+// ── Async post-response pipeline ───────────────────────────────────────────
+// Fires after DM1 response is already emitted to the client.
+// All steps have silent failure — never blocks gameplay.
+// Known race condition: if a player submits their next action before these
+// Haiku calls complete, the next DM1 context will be one turn behind on
+// world state and campaign log. Acceptable for Phase 2 single player.
+async function runPostResponsePipeline(sessionId, playerMessage, dm1Reply, newTurn) {
+  await Promise.allSettled([
+    worldStateExtractor.extract(sessionId, playerMessage, dm1Reply),
+    campaignLogExtractor.extract(sessionId, playerMessage, dm1Reply, newTurn),
+  ]);
 
-function getOrCreateSession(sessionId) {
-  if (!sessions[sessionId]) {
-    sessions[sessionId] = {
-      id: sessionId,
-      dm1History: [],
-      dm2History: [],
-      createdAt: new Date().toISOString(),
-    };
+  if (newTurn % 50 === 0) {
+    await chapterSummarizer.summarize(sessionId, newTurn).catch(console.error);
   }
-  return sessions[sessionId];
-}
-
-// ── Claude API calls ───────────────────────────────────────────────────────
-async function callDM1(session, playerMessage) {
-  session.dm1History.push({ role: 'user', content: playerMessage });
-
-  const response = await anthropic.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 1024,
-    system: DM1_PROMPT,
-    messages: session.dm1History,
-  });
-
-  const reply = response.content[0].text;
-  session.dm1History.push({ role: 'assistant', content: reply });
-  return reply;
-}
-
-async function callDM2(session, playerMessage) {
-  session.dm2History.push({ role: 'user', content: playerMessage });
-
-  const response = await anthropic.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 1024,
-    system: DM2_PROMPT,
-    messages: session.dm2History,
-  });
-
-  const reply = response.content[0].text;
-  session.dm2History.push({ role: 'assistant', content: reply });
-  return reply;
 }
 
 // ── Socket.io events ───────────────────────────────────────────────────────
 io.on('connection', (socket) => {
   console.log(`Client connected: ${socket.id}`);
 
-  // Player joins or creates a session
-  socket.on('join_session', ({ sessionId }) => {
-    const id = sessionId || uuidv4();
-    const session = getOrCreateSession(id);
-    socket.join(id);
-    socket.sessionId = id;
-    console.log(`Socket ${socket.id} joined session ${id}`);
-    socket.emit('session_joined', { sessionId: id });
+  // ── join_session ──────────────────────────────────────────────────────
+  socket.on('join_session', async ({ sessionId }) => {
+    try {
+      let id       = sessionId;
+      let isResume = false;
+
+      if (id) {
+        const existing = await db.getSession(id);
+        if (existing) {
+          isResume = true;
+        } else {
+          console.log(`Session ${id} not found in DB, creating new session`);
+          id = uuidv4();
+        }
+      } else {
+        id = uuidv4();
+      }
+
+      if (!isResume) {
+        await db.createSession(id);
+        await db.initWorldState(id);
+      }
+
+      await db.updateLastActive(id);
+      socket.join(id);
+      socket.sessionId = id;
+      console.log(`Socket ${socket.id} ${isResume ? 'resumed' : 'joined'} session ${id}`);
+
+      if (isResume) {
+        const history = await db.getSessionHistory(id);
+        socket.emit('session_resumed', { sessionId: id, history });
+      } else {
+        socket.emit('session_joined', { sessionId: id });
+      }
+
+    } catch (err) {
+      console.error('join_session error:', err);
+      const fallbackId = uuidv4();
+      try {
+        await db.createSession(fallbackId);
+        await db.initWorldState(fallbackId);
+      } catch (dbErr) {
+        console.error('join_session fallback DB error:', dbErr);
+      }
+      socket.join(fallbackId);
+      socket.sessionId = fallbackId;
+      socket.emit('session_joined', { sessionId: fallbackId });
+    }
   });
 
-  // Player sends a story action (routes to DM1)
+  // ── story_input ───────────────────────────────────────────────────────
   socket.on('story_input', async ({ message }) => {
     const sessionId = socket.sessionId;
     if (!sessionId) {
@@ -104,19 +118,94 @@ io.on('connection', (socket) => {
     }
 
     try {
-      const session = getOrCreateSession(sessionId);
+      await db.updateLastActive(sessionId);
+
+      // Get pre-increment session_turn — both messages for this exchange share it
+      const worldStateRow = await db.getWorldState(sessionId);
+      const currentTurn   = worldStateRow?.state?.session_turn ?? 0;
+
+      // Save player message with pre-increment turn_number
+      await db.saveMessage(sessionId, 'player_dm1', message, currentTurn);
+
+      // Assemble three-tier DM1 context
+      const { systemPrompt, messages } = await contextBuilder.build({
+        sessionId,
+        dm1Prompt:     DM1_PROMPT,
+        playerMessage: message,
+      });
+
       socket.emit('dm1_typing', true);
-      const reply = await callDM1(session, message);
+
+      let dm1Reply, inputTokens, outputTokens;
+      try {
+        const response = await anthropic.messages.create({
+          model:      SONNET,
+          max_tokens: 1024,
+          system:     systemPrompt,
+          messages,
+        });
+        dm1Reply     = response.content[0].text;
+        inputTokens  = response.usage?.input_tokens;
+        outputTokens = response.usage?.output_tokens;
+
+      } catch (apiErr) {
+        // DM1 API failure — emit error, leave orphaned player_dm1 in DB,
+        // do NOT increment session_turn (spec §12).
+        console.error('DM1 API error:', apiErr.message);
+        socket.emit('dm1_typing', false);
+        socket.emit('error', { message: 'The Dungeon Master encountered an error. Please try again.' });
+
+        // Store assembled prompt; append error details (spec §12)
+        const fullPromptForLog = [
+          systemPrompt,
+          '[MESSAGES]: ' + JSON.stringify(messages),
+          '[ERROR]: '    + (apiErr.message || String(apiErr)),
+        ].join('\n\n');
+
+        await db.logDmCall({
+          sessionId,
+          dm:           'dm1',
+          model:        SONNET,
+          playerInput:  message,
+          fullPrompt:   fullPromptForLog,
+          dmResponse:   null,
+          inputTokens:  null,
+          outputTokens: null,
+        }).catch(console.error);
+        return;
+      }
+
+      // Save DM1 response with the SAME pre-increment turn_number (spec §3.2)
+      await db.saveMessage(sessionId, 'dm1', dm1Reply, currentTurn);
+
+      // Increment session_turn AFTER both messages are saved (spec §10.2)
+      const newTurn = await db.incrementSessionTurn(sessionId);
+
       socket.emit('dm1_typing', false);
-      socket.emit('dm1_response', { message: reply });
+      socket.emit('dm1_response', { message: dm1Reply });
+
+      await db.logDmCall({
+        sessionId,
+        dm:           'dm1',
+        model:        SONNET,
+        playerInput:  message,
+        fullPrompt:   systemPrompt + '\n\n[MESSAGES]: ' + JSON.stringify(messages),
+        dmResponse:   dm1Reply,
+        inputTokens,
+        outputTokens,
+      }).catch(console.error);
+
+      // Fire async post-response pipeline — do NOT await (would add latency)
+      runPostResponsePipeline(sessionId, message, dm1Reply, newTurn).catch(console.error);
+
     } catch (err) {
-      console.error('DM1 error:', err);
+      console.error('story_input error:', err);
       socket.emit('dm1_typing', false);
       socket.emit('error', { message: 'The Dungeon Master encountered an error. Please try again.' });
     }
   });
 
-  // Player sends a rules question (routes to DM2)
+  // ── rules_input ───────────────────────────────────────────────────────
   socket.on('rules_input', async ({ message }) => {
     const sessionId = socket.sessionId;
     if (!sessionId) {
@@ -125,13 +214,43 @@ io.on('connection', (socket) => {
     }
 
     try {
-      const session = getOrCreateSession(sessionId);
+      await db.updateLastActive(sessionId);
+
+      // Save player DM2 message — no turn_number (DM2 is stateless)
+      await db.saveMessage(sessionId, 'player_dm2', message, null);
+
+      // Call DM2 (Haiku, stateless — no history, no world state, no campaign log)
       socket.emit('dm2_typing', true);
-      const reply = await callDM2(session, message);
+
+      const response = await anthropic.messages.create({
+        model:      HAIKU,
+        max_tokens: 1024,
+        system:     DM2_PROMPT,
+        messages:   [{ role: 'user', content: message }],
+      });
+
+      const reply     = response.content[0].text;
+      const inputTok  = response.usage?.input_tokens;
+      const outputTok = response.usage?.output_tokens;
+
+      await db.saveMessage(sessionId, 'dm2', reply, null);
+
       socket.emit('dm2_typing', false);
       socket.emit('dm2_response', { message: reply });
+
+      await db.logDmCall({
+        sessionId,
+        dm:           'dm2',
+        model:        HAIKU,
+        playerInput:  message,
+        fullPrompt:   DM2_PROMPT + '\n\n' + message,
+        dmResponse:   reply,
+        inputTokens:  inputTok,
+        outputTokens: outputTok,
+      }).catch(console.error);
+
     } catch (err) {
-      console.error('DM2 error:', err);
+      console.error('rules_input error:', err);
       socket.emit('dm2_typing', false);
       socket.emit('error', { message: 'The Rules Arbiter encountered an error. Please try again.' });
     }

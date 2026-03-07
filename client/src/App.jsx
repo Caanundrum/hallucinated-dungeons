@@ -26,7 +26,7 @@ function App() {
 
     socket.on('connect', () => {
       setConnected(true);
-      const savedSession = sessionStorage.getItem('hd_session_id');
+      const savedSession = localStorage.getItem('hd_session_id');
       socket.emit('join_session', { sessionId: savedSession || null });
     });
 
@@ -34,12 +34,40 @@ function App() {
 
     socket.on('session_joined', ({ sessionId }) => {
       setSessionId(sessionId);
-      sessionStorage.setItem('hd_session_id', sessionId);
+      localStorage.setItem('hd_session_id', sessionId);
       setNarrative([{
         type: 'dm1',
         text: 'The candle flickers. Shadows press close. Your adventure is about to begin...\n\nDescribe your character or type what you do to start your journey.',
         id: 'intro',
       }]);
+    });
+
+    socket.on('session_resumed', ({ sessionId, history }) => {
+      setSessionId(sessionId);
+      localStorage.setItem('hd_session_id', sessionId);
+
+      // Rebuild narrative feed from DM1-track history
+      const narrativeHistory = history
+        .filter((m) => m.role === 'player_dm1' || m.role === 'dm1')
+        .map((m) => ({
+          type: m.role === 'dm1' ? 'dm1' : 'player',
+          text: m.content,
+          id:   m.id,
+        }));
+
+      // Rebuild rules feed from DM2-track history
+      const rulesHistory = history
+        .filter((m) => m.role === 'player_dm2' || m.role === 'dm2')
+        .map((m) => ({
+          type: m.role === 'dm2' ? 'dm2' : 'player',
+          text: m.content,
+          id:   m.id,
+        }));
+
+      // Add a divider before restored history, then show it
+      const divider = { type: 'divider', text: '— Session resumed —', id: 'divider-resume' };
+      setNarrative([...narrativeHistory, divider]);
+      setRulesLog(rulesHistory);
     });
 
     socket.on('dm1_typing', (val) => setDm1Typing(val));
@@ -111,14 +139,16 @@ function App() {
 
           <div className="message-feed" id="narrative-feed">
             {narrative.map((msg) => (
-              <div key={msg.id} className={`message message--${msg.type}`}>
-                {msg.type === 'dm1' && <span className="msg-tag">DM</span>}
-                {msg.type === 'player' && <span className="msg-tag player-tag">You</span>}
-                {msg.type === 'error' && <span className="msg-tag error-tag">!</span>}
-                {msg.type === 'dm1'
-                  ? <div className="markdown-body"><ReactMarkdown>{msg.text}</ReactMarkdown></div>
-                  : <p>{msg.text}</p>}
-              </div>
+              msg.type === 'divider'
+                ? <div key={msg.id} className="session-divider"><span>{msg.text}</span></div>
+                : <div key={msg.id} className={`message message--${msg.type}`}>
+                    {msg.type === 'dm1' && <span className="msg-tag">DM</span>}
+                    {msg.type === 'player' && <span className="msg-tag player-tag">You</span>}
+                    {msg.type === 'error' && <span className="msg-tag error-tag">!</span>}
+                    {msg.type === 'dm1'
+                      ? <div className="markdown-body"><ReactMarkdown>{msg.text}</ReactMarkdown></div>
+                      : <p>{msg.text}</p>}
+                  </div>
             ))}
             {dm1Typing && (
               <div className="message message--dm1 typing-indicator">

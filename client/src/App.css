@@ -243,6 +243,25 @@ textarea:disabled { opacity: 0.4; cursor: not-allowed; }
 .dm1-btn { background: var(--dm1-accent); color: #1a1200; }
 .dm2-btn { background: var(--dm2-accent); color: #001833; }
 
+/* ── Session resume divider ──────────────────────────────────────────────── */
+.session-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1rem 0;
+  color: var(--text-muted, #888);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.session-divider::before,
+.session-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
 /* ── Scrollbar ───────────────────────────────────────────────────────────── */
 .message-feed::-webkit-scrollbar       { width: 4px; }
 .message-feed::-webkit-scrollbar-track { background: transparent; }
