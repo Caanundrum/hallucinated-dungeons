@@ -209,31 +209,66 @@ io.on('connection', (socket) => {
   socket.on('rules_input', async ({ message }) => {
     const sessionId = socket.sessionId;
     if (!sessionId) {
-      socket.emit('error', { message: 'No active session. Please refresh.' });
+      socket.emit('dm2_error', { message: 'No active session. Please refresh.' });
       return;
     }
 
     try {
-      await db.updateLastActive(sessionId);
+      // Step 1: update last active
+      try {
+        await db.updateLastActive(sessionId);
+      } catch (dbErr) {
+        console.error('rules_input: db.updateLastActive failed:', dbErr.message);
+        throw dbErr;
+      }
 
-      // Save player DM2 message — no turn_number (DM2 is stateless)
-      await db.saveMessage(sessionId, 'player_dm2', message, null);
+      // Step 2: save player DM2 message — no turn_number (DM2 is stateless)
+      try {
+        await db.saveMessage(sessionId, 'player_dm2', message, null);
+      } catch (dbErr) {
+        console.error('rules_input: db.saveMessage(player_dm2) failed:', dbErr.message);
+        throw dbErr;
+      }
 
-      // Call DM2 (Haiku, stateless — no history, no world state, no campaign log)
+      // Step 3: Call DM2 (Haiku, stateless — no history, no world state, no campaign log)
       socket.emit('dm2_typing', true);
 
-      const response = await anthropic.messages.create({
-        model:      HAIKU,
-        max_tokens: 1024,
-        system:     DM2_PROMPT,
-        messages:   [{ role: 'user', content: message }],
-      });
+      let response;
+      try {
+        response = await anthropic.messages.create({
+          model:      HAIKU,
+          max_tokens: 1024,
+          system:     DM2_PROMPT,
+          messages:   [{ role: 'user', content: message }],
+        });
+      } catch (apiErr) {
+        console.error('rules_input: anthropic.messages.create failed:', apiErr.message, '| status:', apiErr.status, '| error:', JSON.stringify(apiErr.error));
+        socket.emit('dm2_typing', false);
+        socket.emit('dm2_error', { message: 'The Rules Arbiter encountered an error. Please try again.' });
+        await db.logDmCall({
+          sessionId,
+          dm:           'dm2',
+          model:        HAIKU,
+          playerInput:  message,
+          fullPrompt:   DM2_PROMPT + '\n\n' + message + '\n\n[ERROR]: ' + (apiErr.message || String(apiErr)),
+          dmResponse:   null,
+          inputTokens:  null,
+          outputTokens: null,
+        }).catch(console.error);
+        return;
+      }
 
       const reply     = response.content[0].text;
       const inputTok  = response.usage?.input_tokens;
       const outputTok = response.usage?.output_tokens;
 
-      await db.saveMessage(sessionId, 'dm2', reply, null);
+      // Step 4: save DM2 response
+      try {
+        await db.saveMessage(sessionId, 'dm2', reply, null);
+      } catch (dbErr) {
+        console.error('rules_input: db.saveMessage(dm2) failed:', dbErr.message);
+        // Non-fatal: response was received — still emit to client
+      }
 
       socket.emit('dm2_typing', false);
       socket.emit('dm2_response', { message: reply });
@@ -250,9 +285,9 @@ io.on('connection', (socket) => {
       }).catch(console.error);
 
     } catch (err) {
-      console.error('rules_input error:', err);
+      console.error('rules_input error:', err.message, err);
       socket.emit('dm2_typing', false);
-      socket.emit('error', { message: 'The Rules Arbiter encountered an error. Please try again.' });
+      socket.emit('dm2_error', { message: 'The Rules Arbiter encountered an error. Please try again.' });
     }
   });
 

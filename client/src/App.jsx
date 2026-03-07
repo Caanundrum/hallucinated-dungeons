@@ -64,7 +64,18 @@ function App() {
           id:   m.id,
         }));
 
-      // Add a divider before restored history, then show it
+      // BUG-012: if no history exists, fall back to new-session intro (don't show orphaned divider)
+      if (narrativeHistory.length === 0 && rulesHistory.length === 0) {
+        setNarrative([{
+          type: 'dm1',
+          text: 'The candle flickers. Shadows press close. Your adventure is about to begin...\n\nDescribe your character or type what you do to start your journey.',
+          id: 'intro',
+        }]);
+        setRulesLog([]);
+        return;
+      }
+
+      // Add a divider after restored history to mark where the new session continues
       const divider = { type: 'divider', text: '— Session resumed —', id: 'divider-resume' };
       setNarrative([...narrativeHistory, divider]);
       setRulesLog(rulesHistory);
@@ -81,8 +92,14 @@ function App() {
       setRulesLog((prev) => [...prev, { type: 'dm2', text: message, id: Date.now() }]);
     });
 
+    // DM1-track errors → narrative feed
     socket.on('error', ({ message }) => {
       setNarrative((prev) => [...prev, { type: 'error', text: message, id: Date.now() }]);
+    });
+
+    // DM2-track errors → rules feed (BUG-011)
+    socket.on('dm2_error', ({ message }) => {
+      setRulesLog((prev) => [...prev, { type: 'error', text: message, id: Date.now() }]);
     });
 
     return () => socket.disconnect();
@@ -116,6 +133,8 @@ function App() {
     setRulesInput('');
   };
 
+  // BUG-009: textarea stays active during DM loading; only the submit button locks
+  const storyTextareaDisabled = !connected || !sessionId;
   const storyDisabled = dm1Typing || !connected || !sessionId;
   const rulesDisabled = dm2Typing || !connected || !sessionId;
 
@@ -170,7 +189,7 @@ function App() {
                   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleStorySubmit(e); }
                 }}
                 placeholder="Describe your action..."
-                disabled={storyDisabled}
+                disabled={storyTextareaDisabled}
                 rows={3}
               />
               <button
@@ -196,8 +215,9 @@ function App() {
             )}
             {rulesLog.map((msg) => (
               <div key={msg.id} className={`message message--${msg.type}`}>
-                {msg.type === 'dm2' && <span className="msg-tag dm2-tag">Rules</span>}
+                {msg.type === 'dm2'    && <span className="msg-tag dm2-tag">Rules</span>}
                 {msg.type === 'player' && <span className="msg-tag player-tag">You</span>}
+                {msg.type === 'error'  && <span className="msg-tag error-tag">!</span>}
                 {msg.type === 'dm2'
                   ? <div className="markdown-body"><ReactMarkdown>{msg.text}</ReactMarkdown></div>
                   : <p>{msg.text}</p>}
