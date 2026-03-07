@@ -25,7 +25,7 @@ async function retryWithBackoff(fn, { maxAttempts = 3, baseDelayMs = 1000 } = {}
         throw err;
       }
 
-      const delayMs = baseDelayMs * Math.pow(2, attempt - 1);
+      const delayMs = baseDelayMs * Math.pow(2, attempt - 1) + Math.floor(Math.random() * baseDelayMs);
       console.warn(
         `retryWithBackoff: attempt ${attempt}/${maxAttempts} got HTTP ${status}, ` +
         `retrying in ${delayMs}ms...`

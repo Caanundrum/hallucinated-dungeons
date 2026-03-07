@@ -1,5 +1,4 @@
 // ── Supabase client & all database operations ──────────────────────────────
-require('dotenv').config({ override: true });
 const { createClient } = require('@supabase/supabase-js');
 
 const supabase = createClient(
@@ -166,40 +165,50 @@ async function addCampaignLogEntry(sessionId, turnNumber, summary) {
       type:        'entry',
     });
   if (error) throw error;
-
-  // Check cap and compress if needed
-  await compressCampaignLogIfNeeded(sessionId);
+  // Compression is now triggered from campaignLogExtractor after insertion (spec §BUG-015).
 }
 
-async function compressCampaignLogIfNeeded(sessionId) {
+/**
+ * Returns the total number of campaign_log rows for a session.
+ */
+async function getCampaignLogCount(sessionId) {
   const { count, error } = await supabase
     .from('campaign_log')
     .select('*', { count: 'exact', head: true })
     .eq('session_id', sessionId);
-  if (error || count === null) return;
-
-  if (count >= 60) {
-    await compressCampaignLog(sessionId);
-  }
+  if (error) throw error;
+  return count || 0;
 }
 
-async function compressCampaignLog(sessionId) {
-  // Select oldest entry-type records (up to 10 — or all if fewer than 10 exist)
-  const { data: entries, error } = await supabase
+/**
+ * Returns the oldest `limit` entry-type campaign log rows, ascending by created_at.
+ */
+async function getOldestCampaignEntries(sessionId, limit = 10) {
+  const { data, error } = await supabase
     .from('campaign_log')
     .select('*')
     .eq('session_id', sessionId)
     .eq('type', 'entry')
     .order('created_at', { ascending: true })
-    .limit(10);
+    .limit(limit);
+  if (error) throw error;
+  return data || [];
+}
 
-  if (error || !entries || entries.length === 0) return;
+/**
+ * Delete `entries` and replace them with a single archive row using the
+ * AI-generated `archiveSummary`. Caller is responsible for generating the summary.
+ *
+ * @param {string}   sessionId
+ * @param {object[]} entries       — rows to compress (must include .id and .turn_number)
+ * @param {string}   archiveSummary — AI-generated summary text
+ */
+async function compressCampaignLog(sessionId, entries, archiveSummary) {
+  if (!entries || entries.length === 0) return;
 
-  // Build archive summary by concatenating entry text
   const minTurn = entries[0].turn_number;
   const maxTurn = entries[entries.length - 1].turn_number;
-  const combined = entries.map((e) => e.summary).join(' ');
-  const archiveSummary = `[Archive turns ${minTurn}–${maxTurn}] ${combined}`;
+  const archiveText = `[Archive turns ${minTurn}–${maxTurn}] ${archiveSummary}`;
 
   // Delete the compressed entries
   const idsToDelete = entries.map((e) => e.id);
@@ -215,7 +224,7 @@ async function compressCampaignLog(sessionId) {
     .insert({
       session_id:  sessionId,
       turn_number: minTurn,
-      summary:     archiveSummary,
+      summary:     archiveText,
       type:        'archive',
     });
   if (insErr) throw insErr;
@@ -294,6 +303,9 @@ module.exports = {
   // campaign_log
   getCampaignLog,
   addCampaignLogEntry,
+  getCampaignLogCount,
+  getOldestCampaignEntries,
+  compressCampaignLog,
   // chapter_summaries
   getChapterSummaries,
   addChapterSummary,

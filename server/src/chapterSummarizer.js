@@ -9,12 +9,10 @@
 //   turn_start = session_turn - 50
 // Example: at session_turn = 100, covers turns 50–99.
 
-require('dotenv').config({ override: true });
-const Anthropic = require('@anthropic-ai/sdk');
-const db        = require('./db');
-const { HAIKU } = require('./models');
-
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const anthropic            = require('./anthropic');
+const db                   = require('./db');
+const { HAIKU }            = require('./models');
+const { retryWithBackoff } = require('./retryUtils');
 
 const SYSTEM_PROMPT = `You are a campaign archivist for a D&D 5e adventure game.
 Given a sequence of player actions and DM responses from one chapter of gameplay, write a concise paragraph-length narrative summary capturing the key events, decisions, and story developments.
@@ -48,12 +46,12 @@ async function summarize(sessionId, sessionTurn) {
 
     const userContent = `Chapter covering turns ${turnStart} to ${turnEnd}:\n\n${transcript}`;
 
-    const response = await anthropic.messages.create({
+    const response = await retryWithBackoff(() => anthropic.messages.create({
       model:      HAIKU,
       max_tokens: 512,
       system:     SYSTEM_PROMPT,
       messages:   [{ role: 'user', content: userContent }],
-    });
+    }));
 
     const summary = response.content[0].text.trim();
 

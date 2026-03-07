@@ -4,10 +4,10 @@ const http      = require('http');
 const { Server } = require('socket.io');
 const cors      = require('cors');
 const { v4: uuidv4 } = require('uuid');
-const Anthropic = require('@anthropic-ai/sdk');
 const fs        = require('fs');
 const path      = require('path');
 
+const anthropic            = require('./anthropic');
 const db                   = require('./db');
 const contextBuilder       = require('./contextBuilder');
 const worldStateExtractor  = require('./worldStateExtractor');
@@ -28,8 +28,6 @@ const io = new Server(server, {
 
 app.use(cors({ origin: CLIENT_URL }));
 app.use(express.json());
-
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 // ── Load prompts ───────────────────────────────────────────────────────────
 const DM1_PROMPT = fs.readFileSync(
@@ -139,12 +137,12 @@ io.on('connection', (socket) => {
 
       let dm1Reply, inputTokens, outputTokens;
       try {
-        const response = await anthropic.messages.create({
+        const response = await retryWithBackoff(() => anthropic.messages.create({
           model:      SONNET,
           max_tokens: 1024,
           system:     systemPrompt,
           messages,
-        });
+        }));
         dm1Reply     = response.content[0].text;
         inputTokens  = response.usage?.input_tokens;
         outputTokens = response.usage?.output_tokens;

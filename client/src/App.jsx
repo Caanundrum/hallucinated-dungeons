@@ -136,6 +136,8 @@ function App() {
   // BUG-009: textarea stays active during DM loading; only the submit button locks
   const storyTextareaDisabled = !connected || !sessionId;
   const storyDisabled = dm1Typing || !connected || !sessionId;
+  // BUG-017: rules textarea stays active during DM2 typing; only the ASK button locks
+  const rulesTextareaDisabled = !connected || !sessionId;
   const rulesDisabled = dm2Typing || !connected || !sessionId;
 
   // ── Render ───────────────────────────────────────────────────────────────
@@ -243,7 +245,7 @@ function App() {
                   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleRulesSubmit(e); }
                 }}
                 placeholder="How does... / Can I... / What is..."
-                disabled={rulesDisabled}
+                disabled={rulesTextareaDisabled}
                 rows={3}
               />
               <button

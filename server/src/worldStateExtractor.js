@@ -4,13 +4,10 @@
 // merge strategy from spec Section 5.2.
 // All failures are silent — the game continues unchanged.
 
-require('dotenv').config({ override: true });
-const Anthropic = require('@anthropic-ai/sdk');
+const anthropic            = require('./anthropic');
 const db                   = require('./db');
 const { HAIKU }            = require('./models');
 const { retryWithBackoff } = require('./retryUtils');
-
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const SYSTEM_PROMPT = `You are a world state extractor for a D&D 5e adventure game.
 Given a player action and the DM's narrative response, extract any changes to the world state as a JSON patch.
