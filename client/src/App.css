@@ -398,15 +398,22 @@ textarea:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .fallback-mod-input {
   width: 5rem;
-  background: var(--bg);
-  border: 1px solid #6a3fa0;
-  border-radius: var(--radius);
-  color: #c8b0f0;
+  height: 2rem;
+  background: #2a1f42;
+  border: 1px solid #8a5fc0;
+  border-radius: 6px;
+  color: #d4b8ff;
   font-family: var(--font-ui);
-  font-size: 1rem;
+  font-size: 0.9rem;
   font-weight: 700;
   padding: 0.25rem 0.5rem;
   text-align: center;
   outline: none;
+  -webkit-appearance: none;
+  -moz-appearance: textfield;
+  appearance: none;
+  box-shadow: 0 0 0 1px #6a3fa044;
 }
-.fallback-mod-input:focus { border-color: #a070e0; }
+.fallback-mod-input::-webkit-inner-spin-button,
+.fallback-mod-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.fallback-mod-input:focus { border-color: #a070e0; box-shadow: 0 0 0 2px #6a3fa055; }
