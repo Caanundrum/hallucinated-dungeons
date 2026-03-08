@@ -43,6 +43,20 @@ const DEFAULT_WORLD_STATE = {
   story_flags:       {},
   active_quest:      '',
   session_turn:      0,
+  player_stats: {
+    name:         '',
+    class:        '',
+    level:        1,
+    hp:           null,
+    max_hp:       null,
+    temp_hp:      0,
+    armor_class:  10,
+    speed:        30,
+    conditions:   [],
+    spell_slots:  {},
+    death_saves:  { successes: 0, failures: 0 },
+  },
+  combat_state: null,
 };
 
 async function initWorldState(sessionId) {

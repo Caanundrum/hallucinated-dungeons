@@ -266,3 +266,114 @@ textarea:disabled { opacity: 0.4; cursor: not-allowed; }
 .message-feed::-webkit-scrollbar       { width: 4px; }
 .message-feed::-webkit-scrollbar-track { background: transparent; }
 .message-feed::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* ── Dice Roller ─────────────────────────────────────────────────────────── */
+.dice-roller {
+  background: #1e1a2e;
+  border: 1px solid #6a3fa0;
+  border-radius: var(--radius);
+  padding: 1rem 1.25rem;
+  margin-top: 0.5rem;
+  animation: fadeIn 0.25s ease;
+}
+
+.dice-roller-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.dice-roller-label {
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #a070e0;
+}
+
+.dice-roller-spec {
+  font-family: var(--font-ui);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #c8b0f0;
+  background: #2e1a50;
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  border: 1px solid #6a3fa044;
+}
+
+.roll-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: linear-gradient(135deg, #6a3fa0, #8b5cc8);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  font-family: var(--font-ui);
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 0.65rem 1.5rem;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s;
+  width: 100%;
+  justify-content: center;
+}
+
+.roll-btn:hover  { opacity: 0.9; }
+.roll-btn:active { transform: scale(0.97); }
+
+.roll-btn-mod {
+  font-weight: 400;
+  opacity: 0.85;
+}
+
+.roll-result-area {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.roll-result {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex: 1;
+}
+
+.roll-result-total {
+  font-family: var(--font-ui);
+  font-size: 2rem;
+  font-weight: 800;
+  color: #d4a0ff;
+  line-height: 1;
+}
+
+.roll-result-breakdown {
+  font-family: var(--font-ui);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.submit-roll-btn {
+  background: #6a3fa0;
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  font-family: var(--font-ui);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.5rem 1.1rem;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.submit-roll-btn:hover  { opacity: 0.85; }
+.submit-roll-btn:active { transform: scale(0.97); }

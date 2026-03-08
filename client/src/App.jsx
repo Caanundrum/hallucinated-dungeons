@@ -1,7 +1,35 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { socket } from './socket';
 import './App.css';
+
+// ── ROLL sentinel parser ──────────────────────────────────────────────────
+// Parses [ROLL: XdY+Z] or [ROLL: XdY-Z] from DM1 response text.
+// Returns { diceCount, dieSides, modifier, raw } or null if not found.
+function parseRollTag(text) {
+  const match = text.match(/\[ROLL:\s*(\d+)d(\d+)([+-]\d+)?\]/i);
+  if (!match) return null;
+  return {
+    diceCount: parseInt(match[1], 10),
+    dieSides:  parseInt(match[2], 10),
+    modifier:  match[3] ? parseInt(match[3], 10) : 0,
+    raw:       match[0],
+  };
+}
+
+// Strip [ROLL: ...] tags from text shown to the player
+function stripRollTag(text) {
+  return text.replace(/\s*\[ROLL:\s*\d+d\d+[+-]?\d*\]/gi, '').trim();
+}
+
+// Roll dice client-side using Math.random()
+function rollDice(diceCount, dieSides) {
+  let total = 0;
+  for (let i = 0; i < diceCount; i++) {
+    total += Math.floor(Math.random() * dieSides) + 1;
+  }
+  return total;
+}
 
 function App() {
   const [sessionId, setSessionId] = useState(null);
@@ -17,11 +45,29 @@ function App() {
   const [rulesInput, setRulesInput] = useState('');
   const [dm2Typing, setDm2Typing] = useState(false);
 
+  // Dice roller state
+  const [pendingRoll, setPendingRoll] = useState(null); // { diceCount, dieSides, modifier } | null
+  const [rollResult, setRollResult] = useState(null);   // { rolled, modifier, total } | null
+
   const narrativeEndRef = useRef(null);
   const rulesEndRef = useRef(null);
 
   // ── Socket lifecycle ─────────────────────────────────────────────────────
   useEffect(() => {
+    // Remove any stale listeners before re-registering (spec §9.1 — prevents
+    // React 18 StrictMode double-mount from creating duplicate handlers)
+    socket.off('connect');
+    socket.off('disconnect');
+    socket.off('session_joined');
+    socket.off('session_resumed');
+    socket.off('session_start_ack');
+    socket.off('dm1_typing');
+    socket.off('dm2_typing');
+    socket.off('dm1_response');
+    socket.off('dm2_response');
+    socket.off('error');
+    socket.off('dm2_error');
+
     socket.connect();
 
     socket.on('connect', () => {
@@ -32,26 +78,24 @@ function App() {
 
     socket.on('disconnect', () => setConnected(false));
 
-    socket.on('session_joined', ({ sessionId }) => {
-      setSessionId(sessionId);
-      localStorage.setItem('hd_session_id', sessionId);
-      setNarrative([{
-        type: 'dm1',
-        text: 'The candle flickers. Shadows press close. Your adventure is about to begin...\n\nDescribe your character or type what you do to start your journey.',
-        id: 'intro',
-      }]);
+    socket.on('session_joined', ({ sessionId: id }) => {
+      setSessionId(id);
+      localStorage.setItem('hd_session_id', id);
+      // New session — emit session_start so DM1 generates the campaign opening.
+      // Guard is enforced server-side too, but we only emit here on fresh join.
+      socket.emit('session_start');
     });
 
-    socket.on('session_resumed', ({ sessionId, history }) => {
-      setSessionId(sessionId);
-      localStorage.setItem('hd_session_id', sessionId);
+    socket.on('session_resumed', ({ sessionId: id, history }) => {
+      setSessionId(id);
+      localStorage.setItem('hd_session_id', id);
 
       // Rebuild narrative feed from DM1-track history
       const narrativeHistory = history
         .filter((m) => m.role === 'player_dm1' || m.role === 'dm1')
         .map((m) => ({
           type: m.role === 'dm1' ? 'dm1' : 'player',
-          text: m.content,
+          text: stripRollTag(m.content),
           id:   m.id,
         }));
 
@@ -64,18 +108,14 @@ function App() {
           id:   m.id,
         }));
 
-      // BUG-012: if no history exists, fall back to new-session intro (don't show orphaned divider)
+      // BUG-012: if no history exists, treat as new session
       if (narrativeHistory.length === 0 && rulesHistory.length === 0) {
-        setNarrative([{
-          type: 'dm1',
-          text: 'The candle flickers. Shadows press close. Your adventure is about to begin...\n\nDescribe your character or type what you do to start your journey.',
-          id: 'intro',
-        }]);
+        socket.emit('session_start');
         setRulesLog([]);
         return;
       }
 
-      // Add a divider after restored history to mark where the new session continues
+      // Add a divider after restored history to mark the resumed session boundary
       const divider = { type: 'divider', text: '— Session resumed —', id: 'divider-resume' };
       setNarrative([...narrativeHistory, divider]);
       setRulesLog(rulesHistory);
@@ -85,7 +125,21 @@ function App() {
     socket.on('dm2_typing', (val) => setDm2Typing(val));
 
     socket.on('dm1_response', ({ message }) => {
-      setNarrative((prev) => [...prev, { type: 'dm1', text: message, id: Date.now() }]);
+      // Parse any [ROLL: ...] sentinel tag before displaying
+      const rollTag = parseRollTag(message);
+      const displayText = stripRollTag(message);
+
+      setNarrative((prev) => [...prev, { type: 'dm1', text: displayText, id: Date.now() }]);
+
+      if (rollTag) {
+        // Activate the dice roller
+        setPendingRoll({
+          diceCount: rollTag.diceCount,
+          dieSides:  rollTag.dieSides,
+          modifier:  rollTag.modifier,
+        });
+        setRollResult(null);
+      }
     });
 
     socket.on('dm2_response', ({ message }) => {
@@ -102,13 +156,27 @@ function App() {
       setRulesLog((prev) => [...prev, { type: 'error', text: message, id: Date.now() }]);
     });
 
-    return () => socket.disconnect();
+    // Spec §9.1 cleanup — remove all listeners and disconnect on unmount
+    return () => {
+      socket.off('connect');
+      socket.off('disconnect');
+      socket.off('session_joined');
+      socket.off('session_resumed');
+      socket.off('session_start_ack');
+      socket.off('dm1_typing');
+      socket.off('dm2_typing');
+      socket.off('dm1_response');
+      socket.off('dm2_response');
+      socket.off('error');
+      socket.off('dm2_error');
+      socket.disconnect();
+    };
   }, []);
 
   // ── Auto-scroll ──────────────────────────────────────────────────────────
   useEffect(() => {
     narrativeEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [narrative, dm1Typing]);
+  }, [narrative, dm1Typing, pendingRoll]);
 
   useEffect(() => {
     rulesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -133,9 +201,36 @@ function App() {
     setRulesInput('');
   };
 
+  // ── Dice roller handlers ─────────────────────────────────────────────────
+  const handleRoll = useCallback(() => {
+    if (!pendingRoll) return;
+    const { diceCount, dieSides, modifier } = pendingRoll;
+    const rolled = rollDice(diceCount, dieSides);
+    const total  = rolled + modifier;
+    setRollResult({ rolled, modifier, total });
+  }, [pendingRoll]);
+
+  const handleSubmitRoll = useCallback(() => {
+    if (!rollResult || !pendingRoll) return;
+    const { diceCount, dieSides, modifier } = pendingRoll;
+    const { total } = rollResult;
+
+    // Format the roll result message
+    const modStr = modifier > 0 ? ` + ${modifier}` : modifier < 0 ? ` - ${Math.abs(modifier)}` : '';
+    const rollMsg = `I rolled a ${total} (${diceCount}d${dieSides}${modStr} = ${total})`;
+
+    setNarrative((prev) => [...prev, { type: 'player', text: rollMsg, id: Date.now() }]);
+    socket.emit('story_input', { message: rollMsg });
+
+    // Clear the dice roller
+    setPendingRoll(null);
+    setRollResult(null);
+  }, [rollResult, pendingRoll]);
+
   // BUG-009: textarea stays active during DM loading; only the submit button locks
   const storyTextareaDisabled = !connected || !sessionId;
-  const storyDisabled = dm1Typing || !connected || !sessionId;
+  // During a pending roll, the story input is hidden — the dice roller takes over
+  const storyDisabled = dm1Typing || !connected || !sessionId || !!pendingRoll;
   // BUG-017: rules textarea stays active during DM2 typing; only the ASK button locks
   const rulesTextareaDisabled = !connected || !sessionId;
   const rulesDisabled = dm2Typing || !connected || !sessionId;
@@ -177,6 +272,47 @@ function App() {
                 <p><span className="dot" /><span className="dot" /><span className="dot" /></p>
               </div>
             )}
+
+            {/* ── Dice roller ──────────────────────────────────────────── */}
+            {pendingRoll && !dm1Typing && (
+              <div className="dice-roller" id="dice-roller">
+                <div className="dice-roller-header">
+                  <span className="dice-roller-label">🎲 Roll Required</span>
+                  <span className="dice-roller-spec">
+                    {pendingRoll.diceCount}d{pendingRoll.dieSides}
+                    {pendingRoll.modifier > 0 && ` + ${pendingRoll.modifier}`}
+                    {pendingRoll.modifier < 0 && ` − ${Math.abs(pendingRoll.modifier)}`}
+                  </span>
+                </div>
+
+                {!rollResult ? (
+                  <button className="roll-btn" onClick={handleRoll}>
+                    Roll {pendingRoll.diceCount}d{pendingRoll.dieSides}
+                    {pendingRoll.modifier !== 0 && (
+                      <span className="roll-btn-mod">
+                        {pendingRoll.modifier > 0 ? ` +${pendingRoll.modifier}` : ` ${pendingRoll.modifier}`}
+                      </span>
+                    )}
+                  </button>
+                ) : (
+                  <div className="roll-result-area">
+                    <div className="roll-result">
+                      <span className="roll-result-total">{rollResult.total}</span>
+                      <span className="roll-result-breakdown">
+                        (rolled {rollResult.rolled}
+                        {rollResult.modifier > 0 && ` + ${rollResult.modifier}`}
+                        {rollResult.modifier < 0 && ` − ${Math.abs(rollResult.modifier)}`}
+                        )
+                      </span>
+                    </div>
+                    <button className="submit-roll-btn" onClick={handleSubmitRoll}>
+                      Submit Roll
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div ref={narrativeEndRef} />
           </div>
 
@@ -190,8 +326,8 @@ function App() {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleStorySubmit(e); }
                 }}
-                placeholder="Describe your action..."
-                disabled={storyTextareaDisabled}
+                placeholder={pendingRoll ? 'Use the dice roller above to roll...' : 'Describe your action...'}
+                disabled={storyTextareaDisabled || !!pendingRoll}
                 rows={3}
               />
               <button

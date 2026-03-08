@@ -108,6 +108,75 @@ io.on('connection', (socket) => {
     }
   });
 
+  // ── session_start ─────────────────────────────────────────────────────
+  // Generates the DM1 campaign opening for genuinely new sessions.
+  // Guard: only valid on new sessions (history must be empty).
+  // Never emit this on resume/reload — the session_resumed flow handles that.
+  socket.on('session_start', async () => {
+    const sessionId = socket.sessionId;
+    if (!sessionId) return;
+
+    try {
+      // Safety guard — if there is already history, ignore this event
+      const history = await db.getSessionHistory(sessionId);
+      const narrativeHistory = history.filter((m) => m.role === 'player_dm1' || m.role === 'dm1');
+      if (narrativeHistory.length > 0) {
+        console.log(`session_start ignored — session ${sessionId} already has history`);
+        return;
+      }
+
+      socket.emit('dm1_typing', true);
+
+      const openingPrompt = 'Begin the campaign. Set the scene, establish the world and tone, and drop the player into their first moment of the adventure. End with an open prompt that invites their first action.';
+
+      const { systemPrompt, messages } = await contextBuilder.build({
+        sessionId,
+        dm1Prompt:     DM1_PROMPT,
+        playerMessage: openingPrompt,
+      });
+
+      let dm1Reply, inputTokens, outputTokens;
+      try {
+        const response = await retryWithBackoff(() => anthropic.messages.create({
+          model:      SONNET,
+          max_tokens: 2048,
+          system:     systemPrompt,
+          messages,
+        }));
+        dm1Reply     = response.content[0].text;
+        inputTokens  = response.usage?.input_tokens;
+        outputTokens = response.usage?.output_tokens;
+      } catch (apiErr) {
+        console.error('session_start DM1 API error:', apiErr.message);
+        socket.emit('dm1_typing', false);
+        socket.emit('error', { message: 'The Dungeon Master encountered an error starting your session. Please refresh.' });
+        return;
+      }
+
+      // Save the opening as a DM1 message (no player_dm1 counterpart)
+      await db.saveMessage(sessionId, 'dm1', dm1Reply, 0);
+
+      socket.emit('dm1_typing', false);
+      socket.emit('dm1_response', { message: dm1Reply });
+
+      await db.logDmCall({
+        sessionId,
+        dm:           'dm1',
+        model:        SONNET,
+        playerInput:  '[session_start]',
+        fullPrompt:   systemPrompt + '\n\n[MESSAGES]: ' + JSON.stringify(messages),
+        dmResponse:   dm1Reply,
+        inputTokens,
+        outputTokens,
+      }).catch(console.error);
+
+    } catch (err) {
+      console.error('session_start error:', err);
+      socket.emit('dm1_typing', false);
+      socket.emit('error', { message: 'The Dungeon Master encountered an error. Please refresh.' });
+    }
+  });
+
   // ── story_input ───────────────────────────────────────────────────────
   socket.on('story_input', async ({ message }) => {
     const sessionId = socket.sessionId;
@@ -139,7 +208,7 @@ io.on('connection', (socket) => {
       try {
         const response = await retryWithBackoff(() => anthropic.messages.create({
           model:      SONNET,
-          max_tokens: 1024,
+          max_tokens: 2048,
           system:     systemPrompt,
           messages,
         }));
@@ -229,16 +298,58 @@ io.on('connection', (socket) => {
         throw dbErr;
       }
 
-      // Step 3: Call DM2 (Haiku, stateless — no history, no world state, no campaign log)
+      // Step 3: Fetch world state for context injection (spec §8.5)
+      // If this fails, fall back gracefully — DM2 still answers without context.
+      let worldStateContext = '';
+      try {
+        const worldStateRow = await db.getWorldState(sessionId);
+        const ws = worldStateRow?.state;
+        if (ws) {
+          const contextParts = [];
+          if (ws.current_location) {
+            contextParts.push(`Current location: ${ws.current_location}`);
+          }
+          const activeNpcs = (ws.npcs_encountered || []).filter((n) => n?.name);
+          if (activeNpcs.length > 0) {
+            contextParts.push(`NPCs present: ${activeNpcs.map((n) => `${n.name} (${n.disposition || 'unknown'})`).join(', ')}`);
+          }
+          if (ws.combat_state && ws.combat_state.active) {
+            contextParts.push(`COMBAT ACTIVE — Round ${ws.combat_state.round}. Combatants: ${
+              (ws.combat_state.combatants || [])
+                .map((c) => `${c.name} (HP: ${c.hp}/${c.max_hp}, Initiative: ${c.initiative}${c.conditions?.length ? ', conditions: ' + c.conditions.join(', ') : ''})`)
+                .join('; ')
+            }`);
+          }
+          if (ws.player_stats) {
+            const ps = ws.player_stats;
+            const statParts = [];
+            if (ps.name) statParts.push(`Name: ${ps.name}`);
+            if (ps.class) statParts.push(`Class: ${ps.class} (level ${ps.level || 1})`);
+            if (ps.hp !== null) statParts.push(`HP: ${ps.hp}/${ps.max_hp}`);
+            if (ps.armor_class) statParts.push(`AC: ${ps.armor_class}`);
+            if (ps.speed) statParts.push(`Speed: ${ps.speed} ft`);
+            if (ps.conditions?.length) statParts.push(`Conditions: ${ps.conditions.join(', ')}`);
+            if (statParts.length > 0) contextParts.push(`Player: ${statParts.join(', ')}`);
+          }
+          if (contextParts.length > 0) {
+            worldStateContext = '\n\n[CURRENT GAME CONTEXT]\n' + contextParts.join('\n');
+          }
+        }
+      } catch (wsErr) {
+        console.warn('rules_input: world state fetch failed (non-fatal):', wsErr.message);
+      }
+
+      // Step 4: Call DM2 (Haiku — with world state context injected)
       socket.emit('dm2_typing', true);
 
       let response;
       try {
+        const dm2UserMessage = message + worldStateContext;
         response = await retryWithBackoff(() => anthropic.messages.create({
           model:      HAIKU,
           max_tokens: 1024,
           system:     DM2_PROMPT,
-          messages:   [{ role: 'user', content: message }],
+          messages:   [{ role: 'user', content: dm2UserMessage }],
         }));
       } catch (apiErr) {
         console.error('rules_input: anthropic.messages.create failed:', apiErr.message, '| status:', apiErr.status, '| error:', JSON.stringify(apiErr.error));
@@ -249,7 +360,7 @@ io.on('connection', (socket) => {
           dm:           'dm2',
           model:        HAIKU,
           playerInput:  message,
-          fullPrompt:   DM2_PROMPT + '\n\n' + message + '\n\n[ERROR]: ' + (apiErr.message || String(apiErr)),
+          fullPrompt:   DM2_PROMPT + '\n\n' + message + worldStateContext + '\n\n[ERROR]: ' + (apiErr.message || String(apiErr)),
           dmResponse:   null,
           inputTokens:  null,
           outputTokens: null,
@@ -261,7 +372,7 @@ io.on('connection', (socket) => {
       const inputTok  = response.usage?.input_tokens;
       const outputTok = response.usage?.output_tokens;
 
-      // Step 4: save DM2 response
+      // Step 5: save DM2 response
       try {
         await db.saveMessage(sessionId, 'dm2', reply, null);
       } catch (dbErr) {
@@ -277,7 +388,7 @@ io.on('connection', (socket) => {
         dm:           'dm2',
         model:        HAIKU,
         playerInput:  message,
-        fullPrompt:   DM2_PROMPT + '\n\n' + message,
+        fullPrompt:   DM2_PROMPT + '\n\n' + message + worldStateContext,
         dmResponse:   reply,
         inputTokens:  inputTok,
         outputTokens: outputTok,
