@@ -329,6 +329,14 @@ io.on('connection', (socket) => {
             if (ps.armor_class) statParts.push(`AC: ${ps.armor_class}`);
             if (ps.speed) statParts.push(`Speed: ${ps.speed} ft`);
             if (ps.conditions?.length) statParts.push(`Conditions: ${ps.conditions.join(', ')}`);
+            // BUG-023: weapon and ability scores so DM2 can answer damage/attack questions without asking
+            if (ps.weapon_name) statParts.push(`Weapon: ${ps.weapon_name}`);
+            if (ps.ability_scores && Object.keys(ps.ability_scores).length > 0) {
+              const modStr = Object.entries(ps.ability_scores)
+                .map(([k, v]) => `${k.toUpperCase()} ${v >= 0 ? '+' : ''}${v}`)
+                .join(', ');
+              statParts.push(`Ability modifiers: ${modStr}`);
+            }
             if (statParts.length > 0) contextParts.push(`Player: ${statParts.join(', ')}`);
           }
           if (contextParts.length > 0) {

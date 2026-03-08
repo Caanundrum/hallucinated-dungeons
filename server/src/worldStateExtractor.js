@@ -36,6 +36,8 @@ Extract only the fields that changed. Use the HP narration standard "(before →
 - player_stats.conditions: string[] (FULL current conditions array — replace entirely, do not append. Use [] if no conditions remain.)
 - player_stats.spell_slots: object (changed slot levels only — e.g. {"1": 2} means level-1 slots now at 2)
 - player_stats.death_saves: object (current totals — e.g. {"successes": 1, "failures": 0})
+- player_stats.weapon_name: string (primary weapon name if mentioned or established — e.g. "longsword", "shortbow", "dagger")
+- player_stats.ability_scores: object (ability modifiers as integers, only update if established — e.g. {"str": 3, "dex": 1, "con": 2, "int": -1, "wis": 0, "cha": 1}. Use modifier values not raw scores. Key-merge: only include ability keys that changed or were established.)
 
 COMBAT STATE (combat_state):
 When combat is active, return the FULL updated combat_state object (full replace — never partial).
@@ -70,6 +72,8 @@ MERGE RULES:
 - player_stats: key-merge (only include fields that changed)
 - player_stats.conditions: FULL REPLACE — return the complete current conditions array
 - player_stats.spell_slots: key-merge (only changed slot levels)
+- player_stats.weapon_name: replace if established or changed
+- player_stats.ability_scores: key-merge (only include ability keys that were established or changed)
 - combat_state: FULL REPLACE when combat changes; null when combat ends; OMIT if unchanged
 
 If nothing changed, return: {}
@@ -197,10 +201,15 @@ function mergeWorldState(current, patch) {
     const newStats = { ...currentStats };
 
     // Scalar fields — replace if present
-    for (const scalar of ['name', 'class', 'level', 'hp', 'max_hp', 'temp_hp', 'armor_class', 'speed']) {
+    for (const scalar of ['name', 'class', 'level', 'hp', 'max_hp', 'temp_hp', 'armor_class', 'speed', 'weapon_name']) {
       if (patchStats[scalar] !== undefined && patchStats[scalar] !== null) {
         newStats[scalar] = patchStats[scalar];
       }
+    }
+
+    // ability_scores — key-merge (only update established ability modifier keys)
+    if (patchStats.ability_scores && typeof patchStats.ability_scores === 'object' && !Array.isArray(patchStats.ability_scores)) {
+      newStats.ability_scores = { ...(currentStats.ability_scores || {}), ...patchStats.ability_scores };
     }
 
     // conditions — full replace if provided (never append)

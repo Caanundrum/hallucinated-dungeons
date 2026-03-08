@@ -377,3 +377,36 @@ textarea:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .submit-roll-btn:hover  { opacity: 0.85; }
 .submit-roll-btn:active { transform: scale(0.97); }
+
+/* ── BUG-021: Fallback dice roller (modifier input) ──────────────────────── */
+.dice-roller--fallback {
+  border-color: #5a3f90;
+}
+
+.fallback-modifier-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.fallback-mod-label {
+  font-family: var(--font-ui);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.fallback-mod-input {
+  width: 5rem;
+  background: var(--bg);
+  border: 1px solid #6a3fa0;
+  border-radius: var(--radius);
+  color: #c8b0f0;
+  font-family: var(--font-ui);
+  font-size: 1rem;
+  font-weight: 700;
+  padding: 0.25rem 0.5rem;
+  text-align: center;
+  outline: none;
+}
+.fallback-mod-input:focus { border-color: #a070e0; }

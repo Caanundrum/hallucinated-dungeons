@@ -31,6 +31,29 @@ function rollDice(diceCount, dieSides) {
   return total;
 }
 
+// ── BUG-021: Fallback roll detector ──────────────────────────────────────
+// When DM1 requests a roll in natural language but the [ROLL:] sentinel tag
+// is absent or unparseable, detect the roll request and show a generic roller.
+// Returns { dieSides } if a roll request is detected, or null otherwise.
+function detectFallbackRoll(text) {
+  // Match patterns like "roll a d20", "roll 1d20", "make a ... saving throw",
+  // "roll a d8 for damage", "roll for initiative", etc.
+  const dieMatch = text.match(/roll\s+(?:a\s+)?(?:\d+d(\d+)|d(\d+))/i);
+  if (dieMatch) {
+    const sides = parseInt(dieMatch[1] || dieMatch[2], 10);
+    if (sides > 0) return { dieSides: sides };
+  }
+  // Catch "make a ... saving throw / check" — default to d20
+  if (/make\s+a\s+\w+(?:\s+\w+)?\s+(?:saving\s+throw|ability\s+check|check|save)/i.test(text)) {
+    return { dieSides: 20 };
+  }
+  // Catch "roll for initiative"
+  if (/roll\s+(?:for\s+)?initiative/i.test(text)) {
+    return { dieSides: 20 };
+  }
+  return null;
+}
+
 function App() {
   const [sessionId, setSessionId] = useState(null);
   const [connected, setConnected] = useState(false);
@@ -46,8 +69,12 @@ function App() {
   const [dm2Typing, setDm2Typing] = useState(false);
 
   // Dice roller state
-  const [pendingRoll, setPendingRoll] = useState(null); // { diceCount, dieSides, modifier } | null
-  const [rollResult, setRollResult] = useState(null);   // { rolled, modifier, total } | null
+  const [pendingRoll, setPendingRoll] = useState(null);     // { diceCount, dieSides, modifier } | null
+  const [rollResult, setRollResult] = useState(null);       // { rolled, modifier, total } | null
+  // BUG-021: fallback roller state for natural-language roll detection without sentinel tag
+  const [fallbackRoll, setFallbackRoll] = useState(null);   // { dieSides, modifier } | null — modifier is user-entered
+  const [fallbackModInput, setFallbackModInput] = useState('0'); // controlled input for modifier
+  const [fallbackResult, setFallbackResult] = useState(null); // { rolled, modifier, total } | null
 
   const narrativeEndRef = useRef(null);
   const rulesEndRef = useRef(null);
@@ -132,13 +159,25 @@ function App() {
       setNarrative((prev) => [...prev, { type: 'dm1', text: displayText, id: Date.now() }]);
 
       if (rollTag) {
-        // Activate the dice roller
+        // Primary path: sentinel tag parsed successfully — activate the dice roller
         setPendingRoll({
           diceCount: rollTag.diceCount,
           dieSides:  rollTag.dieSides,
           modifier:  rollTag.modifier,
         });
         setRollResult(null);
+        // Clear any stale fallback state
+        setFallbackRoll(null);
+        setFallbackResult(null);
+        setFallbackModInput('0');
+      } else {
+        // BUG-021 fallback: no parseable sentinel — scan natural language for roll request
+        const fallback = detectFallbackRoll(message);
+        if (fallback) {
+          setFallbackRoll(fallback);
+          setFallbackResult(null);
+          setFallbackModInput('0');
+        }
       }
     });
 
@@ -176,7 +215,7 @@ function App() {
   // ── Auto-scroll ──────────────────────────────────────────────────────────
   useEffect(() => {
     narrativeEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [narrative, dm1Typing, pendingRoll]);
+  }, [narrative, dm1Typing, pendingRoll, fallbackRoll]);
 
   useEffect(() => {
     rulesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -210,16 +249,42 @@ function App() {
     setRollResult({ rolled, modifier, total });
   }, [pendingRoll]);
 
+  // ── BUG-021: Fallback roller handlers ────────────────────────────────────
+  const handleFallbackRoll = useCallback(() => {
+    if (!fallbackRoll) return;
+    const modifier = parseInt(fallbackModInput, 10) || 0;
+    const rolled = rollDice(1, fallbackRoll.dieSides);
+    const total  = rolled + modifier;
+    setFallbackResult({ rolled, modifier, total });
+  }, [fallbackRoll, fallbackModInput]);
+
+  const handleSubmitFallbackRoll = useCallback(() => {
+    if (!fallbackResult || !fallbackRoll) return;
+    const { dieSides } = fallbackRoll;
+    const { rolled, modifier, total } = fallbackResult;
+    const modStr = modifier > 0 ? ` + ${modifier}` : modifier < 0 ? ` - ${Math.abs(modifier)}` : '';
+    const rollMsg = `[ROLL RESULT: ${total}] I rolled a ${total} (1d${dieSides}${modStr} = ${total})`;
+    const displayRollMsg = rollMsg.replace(/^\[ROLL RESULT: \d+\]\s*/, '');
+    setNarrative((prev) => [...prev, { type: 'player', text: displayRollMsg, id: Date.now() }]);
+    socket.emit('story_input', { message: rollMsg });
+    setFallbackRoll(null);
+    setFallbackResult(null);
+    setFallbackModInput('0');
+  }, [fallbackResult, fallbackRoll]);
+
   const handleSubmitRoll = useCallback(() => {
     if (!rollResult || !pendingRoll) return;
     const { diceCount, dieSides, modifier } = pendingRoll;
     const { total } = rollResult;
 
-    // Format the roll result message
+    // Format the roll result message — [ROLL RESULT: X] prefix authenticates this as a
+    // dice-roller submission (not a player-typed claim). DM1 only accepts rolls with this prefix.
     const modStr = modifier > 0 ? ` + ${modifier}` : modifier < 0 ? ` - ${Math.abs(modifier)}` : '';
-    const rollMsg = `I rolled a ${total} (${diceCount}d${dieSides}${modStr} = ${total})`;
+    const rollMsg = `[ROLL RESULT: ${total}] I rolled a ${total} (${diceCount}d${dieSides}${modStr} = ${total})`;
 
-    setNarrative((prev) => [...prev, { type: 'player', text: rollMsg, id: Date.now() }]);
+    // Display message strips the machine-readable prefix; server message keeps it for DM1 integrity check
+    const displayRollMsg = rollMsg.replace(/^\[ROLL RESULT: \d+\]\s*/, '');
+    setNarrative((prev) => [...prev, { type: 'player', text: displayRollMsg, id: Date.now() }]);
     socket.emit('story_input', { message: rollMsg });
 
     // Clear the dice roller
@@ -229,8 +294,8 @@ function App() {
 
   // BUG-009: textarea stays active during DM loading; only the submit button locks
   const storyTextareaDisabled = !connected || !sessionId;
-  // During a pending roll, the story input is hidden — the dice roller takes over
-  const storyDisabled = dm1Typing || !connected || !sessionId || !!pendingRoll;
+  // During a pending roll (primary or fallback), the story input is locked — the dice roller takes over
+  const storyDisabled = dm1Typing || !connected || !sessionId || !!pendingRoll || !!fallbackRoll;
   // BUG-017: rules textarea stays active during DM2 typing; only the ASK button locks
   const rulesTextareaDisabled = !connected || !sessionId;
   const rulesDisabled = dm2Typing || !connected || !sessionId;
@@ -313,6 +378,54 @@ function App() {
               </div>
             )}
 
+            {/* ── BUG-021: Fallback generic dice roller ──────────────────── */}
+            {fallbackRoll && !pendingRoll && !dm1Typing && (
+              <div className="dice-roller dice-roller--fallback" id="dice-roller-fallback">
+                <div className="dice-roller-header">
+                  <span className="dice-roller-label">🎲 Roll Required</span>
+                  <span className="dice-roller-spec">d{fallbackRoll.dieSides}</span>
+                </div>
+                <div className="fallback-modifier-row">
+                  <label className="fallback-mod-label">Add your modifier:</label>
+                  <input
+                    className="fallback-mod-input"
+                    type="number"
+                    value={fallbackModInput}
+                    onChange={(e) => { setFallbackModInput(e.target.value); setFallbackResult(null); }}
+                    min="-10"
+                    max="20"
+                  />
+                </div>
+                {!fallbackResult ? (
+                  <button className="roll-btn" onClick={handleFallbackRoll}>
+                    Roll 1d{fallbackRoll.dieSides}
+                    {parseInt(fallbackModInput, 10) !== 0 && (
+                      <span className="roll-btn-mod">
+                        {parseInt(fallbackModInput, 10) > 0
+                          ? ` +${fallbackModInput}`
+                          : ` ${fallbackModInput}`}
+                      </span>
+                    )}
+                  </button>
+                ) : (
+                  <div className="roll-result-area">
+                    <div className="roll-result">
+                      <span className="roll-result-total">{fallbackResult.total}</span>
+                      <span className="roll-result-breakdown">
+                        (rolled {fallbackResult.rolled}
+                        {fallbackResult.modifier > 0 && ` + ${fallbackResult.modifier}`}
+                        {fallbackResult.modifier < 0 && ` − ${Math.abs(fallbackResult.modifier)}`}
+                        )
+                      </span>
+                    </div>
+                    <button className="submit-roll-btn" onClick={handleSubmitFallbackRoll}>
+                      Submit Roll
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div ref={narrativeEndRef} />
           </div>
 
@@ -326,8 +439,8 @@ function App() {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleStorySubmit(e); }
                 }}
-                placeholder={pendingRoll ? 'Use the dice roller above to roll...' : 'Describe your action...'}
-                disabled={storyTextareaDisabled || !!pendingRoll}
+                placeholder={(pendingRoll || fallbackRoll) ? 'Use the dice roller above to roll...' : 'Describe your action...'}
+                disabled={storyTextareaDisabled || !!pendingRoll || !!fallbackRoll}
                 rows={3}
               />
               <button
