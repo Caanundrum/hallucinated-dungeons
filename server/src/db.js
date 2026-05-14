@@ -273,7 +273,7 @@ async function addChapterSummary(sessionId, turnStart, turnEnd, summary) {
 // ── dm_logs ────────────────────────────────────────────────────────────────
 
 /**
- * Log a Claude API call. Never throws — logging failures must not disrupt gameplay.
+ * Log an AI provider call. Never throws — logging failures must not disrupt gameplay.
  */
 async function logDmCall({
   sessionId,

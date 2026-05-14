@@ -41,7 +41,7 @@ const DM2_PROMPT = fs.readFileSync(
 // Fires after DM1 response is already emitted to the client.
 // All steps have silent failure — never blocks gameplay.
 // Known race condition: if a player submits their next action before these
-// Haiku calls complete, the next DM1 context will be one turn behind on
+// utility model calls complete, the next DM1 context will be one turn behind on
 // world state and campaign log. Acceptable for Phase 2 single player.
 async function runPostResponsePipeline(sessionId, playerMessage, dm1Reply, newTurn) {
   await Promise.allSettled([
@@ -382,7 +382,7 @@ io.on('connection', (socket) => {
         console.warn('rules_input: world state fetch failed (non-fatal):', wsErr.message);
       }
 
-      // Step 4: Call DM2 (Haiku — with world state context injected)
+      // Step 4: Call DM2 (utility model — with world state context injected)
       socket.emit('dm2_typing', true);
 
       let response;

@@ -16,7 +16,7 @@ hallucinated-dungeons/
 ```bash
 cd server
 npm install
-cp .env.example .env   # add your ANTHROPIC_API_KEY
+cp .env.example .env   # add your OPENAI_API_KEY and Supabase settings
 npm run dev
 ```
 
@@ -30,7 +30,11 @@ npm run dev
 ## Environment Variables
 
 ### Server
-- `ANTHROPIC_API_KEY` — your Anthropic API key
+- `OPENAI_API_KEY` — your OpenAI API key
+- `DM1_MODEL` — main Dungeon Master model
+- `UTILITY_MODEL` — utility model for rules, summaries, and state extraction
+- `SUPABASE_URL` — your Supabase project URL
+- `SUPABASE_SERVICE_ROLE_KEY` — your Supabase service role key
 - `PORT` — port to run on (Railway sets this automatically)
 - `CLIENT_URL` — the deployed Vercel frontend URL (for CORS)
 

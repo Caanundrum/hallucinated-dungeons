@@ -1,6 +1,6 @@
 // ── Retry utility ──────────────────────────────────────────────────────────
 // Wraps an async function with exponential backoff retry logic for transient
-// Anthropic API errors (HTTP 429 Too Many Requests, 529 Overloaded).
+// transient AI provider errors (HTTP 429 Too Many Requests, 529 Overloaded).
 
 /**
  * Call fn(), retrying on 429/529 with exponential backoff.

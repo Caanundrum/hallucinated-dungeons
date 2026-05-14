@@ -1,5 +1,5 @@
 // ── Campaign log extractor ─────────────────────────────────────────────────
-// After each DM1 response, asks Haiku whether anything story-defining happened.
+// After each DM1 response, asks the utility model whether anything story-defining happened.
 // If yes, saves a one-to-two sentence entry to the campaign_log table.
 // Also triggers AI-powered compression if the 60-entry cap is reached (BUG-015).
 // All failures are silent — the game continues unchanged.

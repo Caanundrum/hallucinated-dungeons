@@ -1,7 +1,7 @@
 // ── Chapter summarizer ─────────────────────────────────────────────────────
 // Triggered when session_turn % 50 === 0 (after increment).
 // Queries the messages table for the completed chapter's turn range,
-// asks Haiku to write a paragraph summary, and saves it to chapter_summaries.
+// asks the utility model to write a paragraph summary, and saves it to chapter_summaries.
 // All failures are silent — the game continues unchanged.
 //
 // Turn range formula (spec §4.5):

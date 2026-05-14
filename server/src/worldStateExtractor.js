@@ -1,5 +1,5 @@
 // ── World state extractor ──────────────────────────────────────────────────
-// After each DM1 response, asks Haiku to extract a JSON patch of world state
+// After each DM1 response, asks the utility model to extract a JSON patch of world state
 // changes and merges it into the persisted state using the explicit per-field
 // merge strategy from spec Section 5.2 (Phase 2) and Section 5.2 (Phase 3).
 // All failures are silent — the game continues unchanged.
@@ -141,7 +141,7 @@ async function extract(sessionId, playerMessage, dm1Reply) {
 // ── Merge strategy ─────────────────────────────────────────────────────────
 
 /**
- * Merge a Haiku-returned patch into the current world state.
+ * Merge a utility-model-returned patch into the current world state.
  * NEVER uses naive Object.assign() or spread on top-level — each field has its
  * own merge rule to prevent wiping arrays. (spec §5.2 Phase 2 + Phase 3)
  */
@@ -189,7 +189,7 @@ function mergeWorldState(current, patch) {
     merged.active_quest = patch.active_quest;
   }
 
-  // session_turn — NEVER set by Haiku; always managed by backend (preserved via spread above)
+  // session_turn — NEVER set by the utility model; always managed by backend (preserved via spread above)
 
   // ── Phase 3 fields ────────────────────────────────────────────────────
 
@@ -231,7 +231,7 @@ function mergeWorldState(current, patch) {
   }
 
   // combat_state — full replace or null
-  // Haiku either returns the full updated object, null, or omits it entirely.
+  // The utility model either returns the full updated object, null, or omits it entirely.
   if ('combat_state' in patch) {
     if (patch.combat_state === null) {
       merged.combat_state = null;
@@ -241,7 +241,7 @@ function mergeWorldState(current, patch) {
   }
 
   // active:false → null transition (spec §5.3)
-  // If Haiku returned a combat_state with active:false, collapse it to null immediately.
+  // If the utility model returned a combat_state with active:false, collapse it to null immediately.
   // Do not persist an active:false intermediate state to Supabase.
   if (merged.combat_state && merged.combat_state.active === false) {
     merged.combat_state = null;
