@@ -304,7 +304,10 @@ function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>Hallucinated Dungeons</h1>
+        <div className="brand-block">
+          <h1>Hallucinated Dungeons</h1>
+          <p className="ai-disclosure">AI-generated adventure and rules responses</p>
+        </div>
         <span className={`connection-status ${connected ? 'online' : 'offline'}`}>
           {connected ? '⚔ Connected' : '✖ Disconnected'}
         </span>

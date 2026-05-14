@@ -50,6 +50,19 @@ html, body, #root {
   font-family: var(--font);
 }
 
+.brand-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.ai-disclosure {
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  letter-spacing: 0;
+}
+
 .connection-status {
   font-family: var(--font-ui);
   font-size: 0.8rem;
