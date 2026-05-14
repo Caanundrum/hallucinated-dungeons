@@ -16,7 +16,6 @@ const BLOCKED_MODERATION_CATEGORIES = new Set([
   'self-harm',
   'self-harm/intent',
   'self-harm/instructions',
-  'sexual',
   'sexual/minors',
   'violence/graphic',
 ]);
