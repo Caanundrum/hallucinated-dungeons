@@ -5,12 +5,15 @@ const OpenAI = require('openai');
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const MODERATION_MODEL = process.env.MODERATION_MODEL || 'omni-moderation-latest';
-const MODERATION_ENABLED = process.env.MODERATION_ENABLED !== 'false';
 
 const BLOCKED_MODERATION_CATEGORIES = new Set([
+  'harassment',
   'harassment/threatening',
   'hate',
   'hate/threatening',
+  'illicit',
+  'illicit/violent',
+  'self-harm',
   'self-harm/intent',
   'self-harm/instructions',
   'sexual',
@@ -64,7 +67,7 @@ async function generateText({ model, system, messages, maxTokens }) {
 }
 
 async function moderateText(text) {
-  if (!MODERATION_ENABLED || !text || !text.trim()) {
+  if (!text || !text.trim()) {
     return { ok: true, flaggedCategories: [] };
   }
   if (!process.env.OPENAI_API_KEY) {
