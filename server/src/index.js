@@ -271,7 +271,7 @@ io.on('connection', (socket) => {
 
       dm1Reply = await moderateAssistantReply(
         dm1Reply,
-        'The Dungeon Master pauses, steers the scene away from unsafe territory, and invites you to choose a different fantasy-focused action.'
+        'The Dungeon Master lowers the screen and stares at you over it. That idea has been denied entry to the campaign, the tavern, and polite society. Try something else.'
       );
 
       // Save DM1 response with the SAME pre-increment turn_number (spec §3.2)
@@ -416,7 +416,7 @@ io.on('connection', (socket) => {
       const outputTok = response.outputTokens;
       const safeReply = await moderateAssistantReply(
         reply,
-        'I cannot help with that request. Please ask a fantasy game rules question or reframe it in a safe, non-real-world way.'
+        'The Rules Arbiter declines. Repeating the request will not unlock a secret answer; it will only make the silence more judgmental. Ask a fantasy rules question instead.'
       );
 
       // Step 5: save DM2 response
