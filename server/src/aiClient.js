@@ -4,6 +4,24 @@
 const OpenAI = require('openai');
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const MODERATION_MODEL = process.env.MODERATION_MODEL || 'omni-moderation-latest';
+const MODERATION_ENABLED = process.env.MODERATION_ENABLED !== 'false';
+
+const BLOCKED_MODERATION_CATEGORIES = new Set([
+  'harassment/threatening',
+  'hate',
+  'hate/threatening',
+  'self-harm/intent',
+  'self-harm/instructions',
+  'sexual',
+  'sexual/minors',
+  'violence/graphic',
+]);
+
+const PUBLIC_SAFETY_MESSAGE = [
+  'That action is outside what this public campaign can safely handle.',
+  'Please choose a different action and keep the adventure fantasy-focused.',
+].join(' ');
 
 function toResponseInput(messages) {
   return messages.map((message) => ({
@@ -45,4 +63,30 @@ async function generateText({ model, system, messages, maxTokens }) {
   };
 }
 
-module.exports = { generateText };
+async function moderateText(text) {
+  if (!MODERATION_ENABLED || !text || !text.trim()) {
+    return { ok: true, flaggedCategories: [] };
+  }
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY is not configured');
+  }
+
+  const response = await openai.moderations.create({
+    model: MODERATION_MODEL,
+    input: text,
+  });
+
+  const result = response.results?.[0];
+  const categories = result?.categories || {};
+  const flaggedCategories = Object.entries(categories)
+    .filter(([category, flagged]) => flagged && BLOCKED_MODERATION_CATEGORIES.has(category))
+    .map(([category]) => category);
+
+  return {
+    ok: flaggedCategories.length === 0,
+    flaggedCategories,
+    publicMessage: PUBLIC_SAFETY_MESSAGE,
+  };
+}
+
+module.exports = { generateText, moderateText };

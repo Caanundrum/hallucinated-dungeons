@@ -54,6 +54,23 @@ async function runPostResponsePipeline(sessionId, playerMessage, dm1Reply, newTu
   }
 }
 
+async function moderateUserMessage(socket, errorEvent, message) {
+  const moderation = await ai.moderateText(message);
+  if (moderation.ok) return true;
+
+  console.warn('User input blocked by moderation:', moderation.flaggedCategories.join(', '));
+  socket.emit(errorEvent, { message: moderation.publicMessage });
+  return false;
+}
+
+async function moderateAssistantReply(reply, fallbackReply) {
+  const moderation = await ai.moderateText(reply);
+  if (moderation.ok) return reply;
+
+  console.warn('Assistant output replaced by moderation:', moderation.flaggedCategories.join(', '));
+  return fallbackReply;
+}
+
 // ── Socket.io events ───────────────────────────────────────────────────────
 io.on('connection', (socket) => {
   console.log(`Client connected: ${socket.id}`);
@@ -153,6 +170,11 @@ io.on('connection', (socket) => {
         return;
       }
 
+      dm1Reply = await moderateAssistantReply(
+        dm1Reply,
+        'The road ahead is momentarily veiled. Try refreshing the adventure, and the Dungeon Master will gather the threads again.'
+      );
+
       // Save the opening as a DM1 message (no player_dm1 counterpart)
       await db.saveMessage(sessionId, 'dm1', dm1Reply, 0);
 
@@ -187,6 +209,10 @@ io.on('connection', (socket) => {
 
     try {
       await db.updateLastActive(sessionId);
+
+      if (!(await moderateUserMessage(socket, 'error', message))) {
+        return;
+      }
 
       // Get pre-increment session_turn — both messages for this exchange share it
       const worldStateRow = await db.getWorldState(sessionId);
@@ -243,6 +269,11 @@ io.on('connection', (socket) => {
         return;
       }
 
+      dm1Reply = await moderateAssistantReply(
+        dm1Reply,
+        'The Dungeon Master pauses, steers the scene away from unsafe territory, and invites you to choose a different fantasy-focused action.'
+      );
+
       // Save DM1 response with the SAME pre-increment turn_number (spec §3.2)
       await db.saveMessage(sessionId, 'dm1', dm1Reply, currentTurn);
 
@@ -282,6 +313,10 @@ io.on('connection', (socket) => {
     }
 
     try {
+      if (!(await moderateUserMessage(socket, 'dm2_error', message))) {
+        return;
+      }
+
       // Step 1: update last active
       try {
         await db.updateLastActive(sessionId);
@@ -379,17 +414,21 @@ io.on('connection', (socket) => {
       const reply     = response.text;
       const inputTok  = response.inputTokens;
       const outputTok = response.outputTokens;
+      const safeReply = await moderateAssistantReply(
+        reply,
+        'I cannot help with that request. Please ask a fantasy game rules question or reframe it in a safe, non-real-world way.'
+      );
 
       // Step 5: save DM2 response
       try {
-        await db.saveMessage(sessionId, 'dm2', reply, null);
+        await db.saveMessage(sessionId, 'dm2', safeReply, null);
       } catch (dbErr) {
         console.error('rules_input: db.saveMessage(dm2) failed:', dbErr.message);
         // Non-fatal: response was received — still emit to client
       }
 
       socket.emit('dm2_typing', false);
-      socket.emit('dm2_response', { message: reply });
+      socket.emit('dm2_response', { message: safeReply });
 
       await db.logDmCall({
         sessionId,
@@ -397,7 +436,7 @@ io.on('connection', (socket) => {
         model:        UTILITY_MODEL,
         playerInput:  message,
         fullPrompt:   DM2_PROMPT + '\n\n' + message + worldStateContext,
-        dmResponse:   reply,
+        dmResponse:   safeReply,
         inputTokens:  inputTok,
         outputTokens: outputTok,
       }).catch(console.error);
