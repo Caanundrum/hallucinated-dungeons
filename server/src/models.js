@@ -1,7 +1,7 @@
-// ── Claude model constants ─────────────────────────────────────────────────
-// Change model assignments here; do not hardcode strings elsewhere.
+// AI model constants.
+// Override these in Railway/local env if you want to tune quality or cost.
 
-const SONNET = 'claude-sonnet-4-6';         // DM1 narrative
-const HAIKU  = 'claude-haiku-4-5-20251001'; // DM2 + all extractions
+const DM1_MODEL     = process.env.DM1_MODEL     || 'gpt-5.4-mini';
+const UTILITY_MODEL = process.env.UTILITY_MODEL || 'gpt-5.4-nano';
 
-module.exports = { SONNET, HAIKU };
+module.exports = { DM1_MODEL, UTILITY_MODEL };

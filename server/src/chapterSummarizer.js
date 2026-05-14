@@ -9,9 +9,9 @@
 //   turn_start = session_turn - 50
 // Example: at session_turn = 100, covers turns 50–99.
 
-const anthropic            = require('./anthropic');
+const ai                   = require('./aiClient');
 const db                   = require('./db');
-const { HAIKU }            = require('./models');
+const { UTILITY_MODEL }    = require('./models');
 const { retryWithBackoff } = require('./retryUtils');
 
 const SYSTEM_PROMPT = `You are a campaign archivist for a D&D 5e adventure game.
@@ -46,26 +46,26 @@ async function summarize(sessionId, sessionTurn) {
 
     const userContent = `Chapter covering turns ${turnStart} to ${turnEnd}:\n\n${transcript}`;
 
-    const response = await retryWithBackoff(() => anthropic.messages.create({
-      model:      HAIKU,
-      max_tokens: 512,
-      system:     SYSTEM_PROMPT,
-      messages:   [{ role: 'user', content: userContent }],
+    const response = await retryWithBackoff(() => ai.generateText({
+      model:     UTILITY_MODEL,
+      maxTokens: 512,
+      system:    SYSTEM_PROMPT,
+      messages:  [{ role: 'user', content: userContent }],
     }));
 
-    const summary = response.content[0].text.trim();
+    const summary = response.text.trim();
 
     await db.addChapterSummary(sessionId, turnStart, turnEnd, summary);
 
     await db.logDmCall({
       sessionId,
       dm:           'chapter_summary',
-      model:        HAIKU,
+      model:        UTILITY_MODEL,
       playerInput:  null,
       fullPrompt:   SYSTEM_PROMPT + '\n\n' + userContent,
       dmResponse:   summary,
-      inputTokens:  response.usage?.input_tokens,
-      outputTokens: response.usage?.output_tokens,
+      inputTokens:  response.inputTokens,
+      outputTokens: response.outputTokens,
     }).catch(() => {});
 
     console.log(`chapterSummarizer: saved summary for turns ${turnStart}–${turnEnd}`);

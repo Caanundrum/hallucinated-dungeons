@@ -7,13 +7,13 @@ const { v4: uuidv4 } = require('uuid');
 const fs        = require('fs');
 const path      = require('path');
 
-const anthropic            = require('./anthropic');
+const ai                   = require('./aiClient');
 const db                   = require('./db');
 const contextBuilder       = require('./contextBuilder');
 const worldStateExtractor  = require('./worldStateExtractor');
 const campaignLogExtractor = require('./campaignLogExtractor');
 const chapterSummarizer    = require('./chapterSummarizer');
-const { SONNET, HAIKU }    = require('./models');
+const { DM1_MODEL, UTILITY_MODEL } = require('./models');
 const { retryWithBackoff } = require('./retryUtils');
 
 // ── Setup ──────────────────────────────────────────────────────────────────
@@ -137,15 +137,15 @@ io.on('connection', (socket) => {
 
       let dm1Reply, inputTokens, outputTokens;
       try {
-        const response = await retryWithBackoff(() => anthropic.messages.create({
-          model:      SONNET,
-          max_tokens: 2048,
-          system:     systemPrompt,
+        const response = await retryWithBackoff(() => ai.generateText({
+          model:     DM1_MODEL,
+          maxTokens: 2048,
+          system:    systemPrompt,
           messages,
         }));
-        dm1Reply     = response.content[0].text;
-        inputTokens  = response.usage?.input_tokens;
-        outputTokens = response.usage?.output_tokens;
+        dm1Reply     = response.text;
+        inputTokens  = response.inputTokens;
+        outputTokens = response.outputTokens;
       } catch (apiErr) {
         console.error('session_start DM1 API error:', apiErr.message);
         socket.emit('dm1_typing', false);
@@ -162,7 +162,7 @@ io.on('connection', (socket) => {
       await db.logDmCall({
         sessionId,
         dm:           'dm1',
-        model:        SONNET,
+        model:        DM1_MODEL,
         playerInput:  '[session_start]',
         fullPrompt:   systemPrompt + '\n\n[MESSAGES]: ' + JSON.stringify(messages),
         dmResponse:   dm1Reply,
@@ -206,15 +206,15 @@ io.on('connection', (socket) => {
 
       let dm1Reply, inputTokens, outputTokens;
       try {
-        const response = await retryWithBackoff(() => anthropic.messages.create({
-          model:      SONNET,
-          max_tokens: 2048,
-          system:     systemPrompt,
+        const response = await retryWithBackoff(() => ai.generateText({
+          model:     DM1_MODEL,
+          maxTokens: 2048,
+          system:    systemPrompt,
           messages,
         }));
-        dm1Reply     = response.content[0].text;
-        inputTokens  = response.usage?.input_tokens;
-        outputTokens = response.usage?.output_tokens;
+        dm1Reply     = response.text;
+        inputTokens  = response.inputTokens;
+        outputTokens = response.outputTokens;
 
       } catch (apiErr) {
         // DM1 API failure — emit error, leave orphaned player_dm1 in DB,
@@ -233,7 +233,7 @@ io.on('connection', (socket) => {
         await db.logDmCall({
           sessionId,
           dm:           'dm1',
-          model:        SONNET,
+          model:        DM1_MODEL,
           playerInput:  message,
           fullPrompt:   fullPromptForLog,
           dmResponse:   null,
@@ -255,7 +255,7 @@ io.on('connection', (socket) => {
       await db.logDmCall({
         sessionId,
         dm:           'dm1',
-        model:        SONNET,
+        model:        DM1_MODEL,
         playerInput:  message,
         fullPrompt:   systemPrompt + '\n\n[MESSAGES]: ' + JSON.stringify(messages),
         dmResponse:   dm1Reply,
@@ -353,20 +353,20 @@ io.on('connection', (socket) => {
       let response;
       try {
         const dm2UserMessage = message + worldStateContext;
-        response = await retryWithBackoff(() => anthropic.messages.create({
-          model:      HAIKU,
-          max_tokens: 1024,
-          system:     DM2_PROMPT,
-          messages:   [{ role: 'user', content: dm2UserMessage }],
+        response = await retryWithBackoff(() => ai.generateText({
+          model:     UTILITY_MODEL,
+          maxTokens: 1024,
+          system:    DM2_PROMPT,
+          messages:  [{ role: 'user', content: dm2UserMessage }],
         }));
       } catch (apiErr) {
-        console.error('rules_input: anthropic.messages.create failed:', apiErr.message, '| status:', apiErr.status, '| error:', JSON.stringify(apiErr.error));
+        console.error('rules_input: AI provider call failed:', apiErr.message, '| status:', apiErr.status, '| error:', JSON.stringify(apiErr.error));
         socket.emit('dm2_typing', false);
         socket.emit('dm2_error', { message: 'The Rules Arbiter encountered an error. Please try again.' });
         await db.logDmCall({
           sessionId,
           dm:           'dm2',
-          model:        HAIKU,
+          model:        UTILITY_MODEL,
           playerInput:  message,
           fullPrompt:   DM2_PROMPT + '\n\n' + message + worldStateContext + '\n\n[ERROR]: ' + (apiErr.message || String(apiErr)),
           dmResponse:   null,
@@ -376,9 +376,9 @@ io.on('connection', (socket) => {
         return;
       }
 
-      const reply     = response.content[0].text;
-      const inputTok  = response.usage?.input_tokens;
-      const outputTok = response.usage?.output_tokens;
+      const reply     = response.text;
+      const inputTok  = response.inputTokens;
+      const outputTok = response.outputTokens;
 
       // Step 5: save DM2 response
       try {
@@ -394,7 +394,7 @@ io.on('connection', (socket) => {
       await db.logDmCall({
         sessionId,
         dm:           'dm2',
-        model:        HAIKU,
+        model:        UTILITY_MODEL,
         playerInput:  message,
         fullPrompt:   DM2_PROMPT + '\n\n' + message + worldStateContext,
         dmResponse:   reply,

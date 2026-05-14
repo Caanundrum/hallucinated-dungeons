@@ -4,9 +4,9 @@
 // Also triggers AI-powered compression if the 60-entry cap is reached (BUG-015).
 // All failures are silent — the game continues unchanged.
 
-const anthropic            = require('./anthropic');
+const ai                   = require('./aiClient');
 const db                   = require('./db');
-const { HAIKU }            = require('./models');
+const { UTILITY_MODEL }    = require('./models');
 const { retryWithBackoff } = require('./retryUtils');
 
 const NOTABILITY_SYSTEM_PROMPT = `You are a campaign historian for a D&D 5e adventure game.
@@ -67,25 +67,25 @@ async function extract(sessionId, playerMessage, dm1Reply, turnNumber) {
       `Current world state: ${worldContext}`,
     ].join('\n\n');
 
-    const response = await retryWithBackoff(() => anthropic.messages.create({
-      model:      HAIKU,
-      max_tokens: 256,
-      system:     NOTABILITY_SYSTEM_PROMPT,
-      messages:   [{ role: 'user', content: userContent }],
+    const response = await retryWithBackoff(() => ai.generateText({
+      model:     UTILITY_MODEL,
+      maxTokens: 256,
+      system:    NOTABILITY_SYSTEM_PROMPT,
+      messages:  [{ role: 'user', content: userContent }],
     }));
 
-    const rawText = response.content[0].text.trim();
+    const rawText = response.text.trim();
 
     // Log regardless of outcome
     await db.logDmCall({
       sessionId,
       dm:           'campaign_log',
-      model:        HAIKU,
+      model:        UTILITY_MODEL,
       playerInput:  playerMessage,
       fullPrompt:   NOTABILITY_SYSTEM_PROMPT + '\n\n' + userContent,
       dmResponse:   rawText,
-      inputTokens:  response.usage?.input_tokens,
-      outputTokens: response.usage?.output_tokens,
+      inputTokens:  response.inputTokens,
+      outputTokens: response.outputTokens,
     }).catch(() => {});
 
     // Parse result
@@ -128,24 +128,24 @@ async function compressIfNeeded(sessionId) {
 
     const entriesText = entries.map((e, i) => `${i + 1}. ${e.summary}`).join('\n');
 
-    const response = await retryWithBackoff(() => anthropic.messages.create({
-      model:      HAIKU,
-      max_tokens: 256,
-      system:     COMPRESSION_SYSTEM_PROMPT,
-      messages:   [{ role: 'user', content: `Campaign log entries to archive:\n\n${entriesText}` }],
+    const response = await retryWithBackoff(() => ai.generateText({
+      model:     UTILITY_MODEL,
+      maxTokens: 256,
+      system:    COMPRESSION_SYSTEM_PROMPT,
+      messages:  [{ role: 'user', content: `Campaign log entries to archive:\n\n${entriesText}` }],
     }));
 
-    const archiveSummary = response.content[0].text.trim();
+    const archiveSummary = response.text.trim();
 
     await db.logDmCall({
       sessionId,
       dm:           'campaign_log_compress',
-      model:        HAIKU,
+      model:        UTILITY_MODEL,
       playerInput:  null,
       fullPrompt:   COMPRESSION_SYSTEM_PROMPT + '\n\nCampaign log entries to archive:\n\n' + entriesText,
       dmResponse:   archiveSummary,
-      inputTokens:  response.usage?.input_tokens,
-      outputTokens: response.usage?.output_tokens,
+      inputTokens:  response.inputTokens,
+      outputTokens: response.outputTokens,
     }).catch(() => {});
 
     await db.compressCampaignLog(sessionId, entries, archiveSummary);

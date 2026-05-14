@@ -4,9 +4,9 @@
 // merge strategy from spec Section 5.2 (Phase 2) and Section 5.2 (Phase 3).
 // All failures are silent — the game continues unchanged.
 
-const anthropic            = require('./anthropic');
+const ai                   = require('./aiClient');
 const db                   = require('./db');
-const { HAIKU }            = require('./models');
+const { UTILITY_MODEL }    = require('./models');
 const { retryWithBackoff } = require('./retryUtils');
 
 const SYSTEM_PROMPT = `You are a world state extractor for a D&D 5e adventure game.
@@ -94,25 +94,25 @@ async function extract(sessionId, playerMessage, dm1Reply) {
       `Current world state: ${JSON.stringify(currentState)}`,
     ].join('\n\n');
 
-    const response = await retryWithBackoff(() => anthropic.messages.create({
-      model:      HAIKU,
-      max_tokens: 512,
-      system:     SYSTEM_PROMPT,
-      messages:   [{ role: 'user', content: userContent }],
+    const response = await retryWithBackoff(() => ai.generateText({
+      model:     UTILITY_MODEL,
+      maxTokens: 512,
+      system:    SYSTEM_PROMPT,
+      messages:  [{ role: 'user', content: userContent }],
     }));
 
-    const rawText = response.content[0].text.trim();
+    const rawText = response.text.trim();
 
     // Log the extraction call
     await db.logDmCall({
       sessionId,
       dm:           'world_state',
-      model:        HAIKU,
+      model:        UTILITY_MODEL,
       playerInput:  playerMessage,
       fullPrompt:   SYSTEM_PROMPT + '\n\n' + userContent,
       dmResponse:   rawText,
-      inputTokens:  response.usage?.input_tokens,
-      outputTokens: response.usage?.output_tokens,
+      inputTokens:  response.inputTokens,
+      outputTokens: response.outputTokens,
     }).catch(() => {});
 
     // Parse JSON patch

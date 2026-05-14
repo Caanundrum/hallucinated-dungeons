@@ -8,7 +8,7 @@
     "dev": "nodemon src/index.js"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.39.0",
+    "openai": "^6.10.0",
     "@supabase/supabase-js": "^2.98.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
