@@ -1,0 +1,8 @@
+[
+  { "id": "alert", "name": "Alert", "description": "React quickly to danger and ambushes.", "prerequisite": null, "effects": [{ "target": "initiative_bonus", "value": 5 }] },
+  { "id": "athlete", "name": "Athlete", "description": "Improve physical movement and one physical ability.", "prerequisite": null, "effects": [] },
+  { "id": "durable", "name": "Durable", "description": "Become harder to wear down and recover more reliably.", "prerequisite": null, "effects": [] },
+  { "id": "lucky", "name": "Lucky", "description": "Gain a small pool of luck to influence risky moments.", "prerequisite": null, "effects": [] },
+  { "id": "magic_initiate", "name": "Magic Initiate", "description": "Learn a small amount of magic from another tradition.", "prerequisite": "Spellcasting ability 13+", "effects": [] },
+  { "id": "tough", "name": "Tough", "description": "Increase maximum hit points as you level.", "prerequisite": null, "effects": [{ "target": "max_hp_per_level_bonus", "value": 2 }] }
+]

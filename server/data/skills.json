@@ -1,0 +1,20 @@
+[
+  { "id": "acrobatics", "name": "Acrobatics", "ability": "dex", "description": "Balance, tumbles, escapes, and staying upright when the floor gets rude." },
+  { "id": "animal_handling", "name": "Animal Handling", "ability": "wis", "description": "Calming, guiding, reading, or working with animals." },
+  { "id": "arcana", "name": "Arcana", "ability": "int", "description": "Knowledge of magic, magical traditions, spell effects, and arcane oddities." },
+  { "id": "athletics", "name": "Athletics", "ability": "str", "description": "Climbing, jumping, swimming, grappling, shoving, and other physical force." },
+  { "id": "deception", "name": "Deception", "ability": "cha", "description": "Lying, misdirection, disguising motives, and keeping a straight face under suspicion." },
+  { "id": "history", "name": "History", "ability": "int", "description": "Recall of past events, old kingdoms, wars, legends, and notable people." },
+  { "id": "insight", "name": "Insight", "ability": "wis", "description": "Reading motives, emotions, lies, and social tension." },
+  { "id": "intimidation", "name": "Intimidation", "ability": "cha", "description": "Coercion through threat, presence, force of will, or terrifying posture." },
+  { "id": "investigation", "name": "Investigation", "ability": "int", "description": "Searching, deduction, connecting clues, and solving practical mysteries." },
+  { "id": "medicine", "name": "Medicine", "ability": "wis", "description": "Stabilizing wounds, diagnosing illness, and understanding injuries." },
+  { "id": "nature", "name": "Nature", "ability": "int", "description": "Knowledge of terrain, plants, animals, weather, and natural hazards." },
+  { "id": "perception", "name": "Perception", "ability": "wis", "description": "Spotting, hearing, smelling, and noticing what is easy to miss." },
+  { "id": "performance", "name": "Performance", "ability": "cha", "description": "Entertaining, acting, music, dance, storytelling, and holding a crowd." },
+  { "id": "persuasion", "name": "Persuasion", "ability": "cha", "description": "Honest influence, negotiation, diplomacy, and getting people to agree." },
+  { "id": "religion", "name": "Religion", "ability": "int", "description": "Knowledge of gods, rites, holy symbols, undead, cults, and sacred customs." },
+  { "id": "sleight_of_hand", "name": "Sleight of Hand", "ability": "dex", "description": "Palming objects, subtle hand work, stage tricks, and quiet pocket business." },
+  { "id": "stealth", "name": "Stealth", "ability": "dex", "description": "Hiding, moving quietly, blending with shadows, and avoiding notice." },
+  { "id": "survival", "name": "Survival", "ability": "wis", "description": "Tracking, foraging, navigation, reading weather, and staying alive outdoors." }
+]

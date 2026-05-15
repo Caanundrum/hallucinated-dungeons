@@ -16,6 +16,8 @@ const campaignLogExtractor = require('./campaignLogExtractor');
 const chapterSummarizer    = require('./chapterSummarizer');
 const { DM1_MODEL, UTILITY_MODEL } = require('./models');
 const { retryWithBackoff } = require('./retryUtils');
+const { getContentBundle } = require('./contentData');
+const { validateCharacter } = require('./characterValidator');
 
 // ── Setup ──────────────────────────────────────────────────────────────────
 const app    = express();
@@ -92,6 +94,15 @@ function isValidSessionToken(sessionId, token) {
   return crypto.timingSafeEqual(expectedBuffer, tokenBuffer);
 }
 
+function hasValidSocketSession(socket, sessionId, sessionToken) {
+  return Boolean(
+    socket.sessionId
+    && sessionId
+    && socket.sessionId === sessionId
+    && isValidSessionToken(sessionId, sessionToken)
+  );
+}
+
 // ── Socket.io events ───────────────────────────────────────────────────────
 io.on('connection', (socket) => {
   console.log(`Client connected: ${socket.id}`);
@@ -99,6 +110,7 @@ io.on('connection', (socket) => {
   // ── join_session ──────────────────────────────────────────────────────
   socket.on('join_session', async ({ sessionId, sessionToken }) => {
     try {
+      await db.getOrCreateDefaultCampaign();
       let id       = sessionId;
       let isResume = false;
 
@@ -161,6 +173,13 @@ io.on('connection', (socket) => {
     activeDm1Sessions.add(sessionId);
 
     try {
+      const existingCharacter = await db.getCharacterForSession(sessionId);
+      if (!existingCharacter) {
+        console.log(`session_start ignored — session ${sessionId} needs character creation first`);
+        socket.emit('character_required', { message: 'Create a character before beginning the campaign.' });
+        return;
+      }
+
       // Safety guard — if there is already history, ignore this event
       const history = await db.getSessionHistory(sessionId);
       const narrativeHistory = history.filter((m) => m.role === 'player_dm1' || m.role === 'dm1');
@@ -225,6 +244,65 @@ io.on('connection', (socket) => {
       socket.emit('error', { message: 'The Dungeon Master encountered an error. Please refresh.' });
     } finally {
       activeDm1Sessions.delete(sessionId);
+    }
+  });
+
+  socket.on('get_character_data', async ({ sessionId, sessionToken } = {}) => {
+    if (!hasValidSocketSession(socket, sessionId, sessionToken)) {
+      socket.emit('character_error', {
+        step: 'session',
+        field: 'sessionToken',
+        message: 'Your character sheet could not be opened for this session. Please refresh.',
+      });
+      return;
+    }
+
+    try {
+      const campaign = await db.getOrCreateDefaultCampaign();
+      const character = await db.getCharacterForSession(sessionId);
+      socket.emit('character_data', {
+        campaign,
+        content: getContentBundle(),
+        character: character?.character_sheet || null,
+      });
+    } catch (err) {
+      console.error('get_character_data error:', err);
+      socket.emit('character_error', {
+        step: 'load',
+        field: 'content',
+        message: 'Character creation data is unavailable. Please try again.',
+      });
+    }
+  });
+
+  socket.on('save_character', async ({ sessionId, sessionToken, characterDraft } = {}) => {
+    if (!hasValidSocketSession(socket, sessionId, sessionToken)) {
+      socket.emit('character_error', {
+        step: 'session',
+        field: 'sessionToken',
+        message: 'Your character could not be saved for this session. Please refresh.',
+      });
+      return;
+    }
+
+    try {
+      const campaign = await db.getOrCreateDefaultCampaign();
+      const characterSheet = validateCharacter(characterDraft, getContentBundle(), {
+        sessionId,
+        campaignId: campaign.id,
+      });
+      const saved = await db.saveCharacterForSession(sessionId, characterSheet);
+      socket.emit('character_ready', {
+        campaign,
+        character: saved.character_sheet,
+      });
+    } catch (err) {
+      console.error('save_character error:', err);
+      socket.emit('character_error', {
+        step: err.step || 'review',
+        field: err.field || 'character',
+        message: err.message || 'Character validation failed.',
+      });
     }
   });
 

@@ -11,7 +11,7 @@ const supabase = createClient(
 async function createSession(sessionId) {
   const { error } = await supabase
     .from('sessions')
-    .insert({ id: sessionId });
+    .insert({ id: sessionId, campaign_id: DEFAULT_CAMPAIGN_ID });
   if (error) throw error;
 }
 
@@ -32,6 +32,67 @@ async function updateLastActive(sessionId) {
     .update({ last_active_at: new Date().toISOString() })
     .eq('id', sessionId);
   if (error) throw error;
+}
+
+// ── campaigns / characters ─────────────────────────────────────────────────
+
+const DEFAULT_CAMPAIGN_ID = '00000000-0000-4000-8000-000000000001';
+
+async function getOrCreateDefaultCampaign() {
+  const payload = {
+    id: DEFAULT_CAMPAIGN_ID,
+    slug: 'main',
+    title: 'Hallucinated Dungeons',
+    status: 'active',
+  };
+  const { data, error } = await supabase
+    .from('campaigns')
+    .upsert(payload, { onConflict: 'slug' })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function getCharacterForSession(sessionId) {
+  const { data, error } = await supabase
+    .from('characters')
+    .select('*')
+    .eq('session_id', sessionId)
+    .eq('campaign_id', DEFAULT_CAMPAIGN_ID)
+    .maybeSingle();
+  if (error && error.code !== 'PGRST116') throw error;
+  return data || null;
+}
+
+async function saveCharacterForSession(sessionId, characterSheet) {
+  await getOrCreateDefaultCampaign();
+  const { data, error } = await supabase
+    .from('characters')
+    .upsert({
+      session_id: sessionId,
+      campaign_id: DEFAULT_CAMPAIGN_ID,
+      owner_session_id: sessionId,
+      name: characterSheet.identity.name,
+      character_sheet: characterSheet,
+      status: 'active',
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'session_id' })
+    .select('*')
+    .single();
+  if (error) throw error;
+
+  const { error: linkError } = await supabase
+    .from('campaign_characters')
+    .upsert({
+      campaign_id: DEFAULT_CAMPAIGN_ID,
+      character_id: data.id,
+      status: 'available',
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'campaign_id,character_id' });
+  if (linkError) throw linkError;
+
+  return data;
 }
 
 // ── world_state ────────────────────────────────────────────────────────────
@@ -305,6 +366,10 @@ module.exports = {
   createSession,
   getSession,
   updateLastActive,
+  DEFAULT_CAMPAIGN_ID,
+  getOrCreateDefaultCampaign,
+  getCharacterForSession,
+  saveCharacterForSession,
   // world_state
   initWorldState,
   getWorldState,

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { socket } from './socket';
+import CharacterWizard from './CharacterWizard';
 import './App.css';
 
 // ── ROLL sentinel parser ──────────────────────────────────────────────────
@@ -56,7 +57,13 @@ function detectFallbackRoll(text) {
 
 function App() {
   const [sessionId, setSessionId] = useState(null);
+  const [sessionToken, setSessionToken] = useState(null);
   const [connected, setConnected] = useState(false);
+  const [characterStatus, setCharacterStatus] = useState('loading'); // loading | required | ready
+  const [characterContent, setCharacterContent] = useState(null);
+  const [character, setCharacter] = useState(null);
+  const [characterError, setCharacterError] = useState(null);
+  const [characterSaving, setCharacterSaving] = useState(false);
 
   // Narrative feed (DM1)
   const [narrative, setNarrative] = useState([]);
@@ -78,6 +85,7 @@ function App() {
 
   const narrativeEndRef = useRef(null);
   const rulesEndRef = useRef(null);
+  const pendingSessionStartRef = useRef(false);
 
   // ── Socket lifecycle ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -94,6 +102,10 @@ function App() {
     socket.off('dm2_response');
     socket.off('error');
     socket.off('dm2_error');
+    socket.off('character_data');
+    socket.off('character_ready');
+    socket.off('character_error');
+    socket.off('character_required');
 
     socket.connect();
 
@@ -108,15 +120,20 @@ function App() {
 
     socket.on('session_joined', ({ sessionId: id, sessionToken }) => {
       setSessionId(id);
+      setSessionToken(sessionToken || null);
       localStorage.setItem('hd_session_id', id);
       if (sessionToken) localStorage.setItem('hd_session_token', sessionToken);
-      // New session — emit session_start so DM1 generates the campaign opening.
-      // Guard is enforced server-side too, but we only emit here on fresh join.
-      socket.emit('session_start');
+      // Phase 4A: character creation gates DM1 session_start.
+      setNarrative([]);
+      setRulesLog([]);
+      setCharacterStatus('loading');
+      pendingSessionStartRef.current = true;
+      socket.emit('get_character_data', { sessionId: id, sessionToken });
     });
 
     socket.on('session_resumed', ({ sessionId: id, sessionToken, history }) => {
       setSessionId(id);
+      setSessionToken(sessionToken || null);
       localStorage.setItem('hd_session_id', id);
       if (sessionToken) localStorage.setItem('hd_session_token', sessionToken);
 
@@ -140,15 +157,53 @@ function App() {
 
       // BUG-012: if no history exists, treat as new session
       if (narrativeHistory.length === 0 && rulesHistory.length === 0) {
-        socket.emit('session_start');
+        pendingSessionStartRef.current = true;
         setRulesLog([]);
-        return;
+      } else {
+        pendingSessionStartRef.current = false;
       }
 
       // Add a divider after restored history to mark the resumed session boundary
       const divider = { type: 'divider', text: '— Session resumed —', id: 'divider-resume' };
       setNarrative([...narrativeHistory, divider]);
       setRulesLog(rulesHistory);
+      setCharacterStatus('loading');
+      socket.emit('get_character_data', { sessionId: id, sessionToken });
+    });
+
+    socket.on('character_data', ({ content, character }) => {
+      setCharacterContent(content);
+      setCharacter(character || null);
+      setCharacterError(null);
+      if (character) {
+        setCharacterStatus('ready');
+        if (pendingSessionStartRef.current) {
+          pendingSessionStartRef.current = false;
+          socket.emit('session_start');
+        }
+      } else {
+        setCharacterStatus('required');
+      }
+    });
+
+    socket.on('character_ready', ({ character }) => {
+      setCharacter(character);
+      setCharacterSaving(false);
+      setCharacterError(null);
+      setCharacterStatus('ready');
+      pendingSessionStartRef.current = false;
+      socket.emit('session_start');
+    });
+
+    socket.on('character_error', (err) => {
+      setCharacterSaving(false);
+      setCharacterError(err);
+      setCharacterStatus((current) => current === 'loading' ? 'required' : current);
+    });
+
+    socket.on('character_required', ({ message }) => {
+      setCharacterStatus('required');
+      setCharacterError({ message });
     });
 
     socket.on('dm1_typing', (val) => setDm1Typing(val));
@@ -221,6 +276,10 @@ function App() {
       socket.off('dm2_response');
       socket.off('error');
       socket.off('dm2_error');
+      socket.off('character_data');
+      socket.off('character_ready');
+      socket.off('character_error');
+      socket.off('character_required');
       socket.disconnect();
     };
   }, []);
@@ -305,6 +364,16 @@ function App() {
     setRollResult(null);
   }, [rollResult, pendingRoll]);
 
+  const handleSaveCharacter = useCallback((characterDraft) => {
+    if (!sessionId || !sessionToken) {
+      setCharacterError({ message: 'No active session. Please refresh.' });
+      return;
+    }
+    setCharacterSaving(true);
+    setCharacterError(null);
+    socket.emit('save_character', { sessionId, sessionToken, characterDraft });
+  }, [sessionId, sessionToken]);
+
   // BUG-009: textarea stays active during DM loading; only the submit button locks
   const storyTextareaDisabled = !connected || !sessionId;
   // During a pending roll (primary or fallback), the story input is locked — the dice roller takes over
@@ -312,6 +381,37 @@ function App() {
   // BUG-017: rules textarea stays active during DM2 typing; only the ASK button locks
   const rulesTextareaDisabled = !connected || !sessionId;
   const rulesDisabled = dm2Typing || !connected || !sessionId;
+
+  if (characterStatus !== 'ready') {
+    return (
+      <div className="app">
+        <header className="app-header">
+          <div className="brand-block">
+            <h1>Hallucinated Dungeons</h1>
+            <p className="ai-disclosure">AI-generated adventure and rules responses</p>
+          </div>
+          <span className={`connection-status ${connected ? 'online' : 'offline'}`}>
+            {connected ? 'Connected' : 'Disconnected'}
+          </span>
+        </header>
+        {characterStatus === 'loading' || !characterContent ? (
+          <main className="creation-loading">
+            <h2>Preparing character creation...</h2>
+            <p>The quills are sharpening themselves. Probably fine.</p>
+          </main>
+        ) : (
+          <CharacterWizard
+            content={characterContent}
+            sessionId={sessionId}
+            sessionToken={sessionToken}
+            error={characterError}
+            saving={characterSaving}
+            onSave={handleSaveCharacter}
+          />
+        )}
+      </div>
+    );
+  }
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (

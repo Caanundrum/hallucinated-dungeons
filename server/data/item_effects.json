@@ -1,0 +1,13 @@
+[
+  { "target": "armor_formula", "description": "Sets armor base AC and possible Dexterity cap." },
+  { "target": "shield_bonus", "description": "Adds to Armor Class while a shield is equipped." },
+  { "target": "weapon_attack_bonus", "description": "Adds to attack rolls with the affected weapon." },
+  { "target": "weapon_damage_bonus", "description": "Adds to damage rolls with the affected weapon." },
+  { "target": "skill_check_bonus", "description": "Adds to a specific skill check while active." },
+  { "target": "skill_advantage", "description": "Grants advantage to a specific skill check while active." },
+  { "target": "saving_throw_bonus", "description": "Adds to saving throws while active." },
+  { "target": "speed_bonus", "description": "Adds to movement speed while active." },
+  { "target": "initiative_bonus", "description": "Adds to initiative while active." },
+  { "target": "spell_attack_bonus", "description": "Adds to spell attack rolls while active." },
+  { "target": "spell_save_dc_bonus", "description": "Adds to spell save DC while active." }
+]
