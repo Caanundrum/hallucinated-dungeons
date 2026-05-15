@@ -11,8 +11,6 @@ const BLOCKED_MODERATION_CATEGORIES = new Set([
   'harassment/threatening',
   'hate',
   'hate/threatening',
-  'illicit',
-  'illicit/violent',
   'self-harm',
   'self-harm/intent',
   'self-harm/instructions',

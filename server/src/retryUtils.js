@@ -3,7 +3,7 @@
 // transient AI provider errors (HTTP 429 Too Many Requests, 529 Overloaded).
 
 /**
- * Call fn(), retrying on 429/529 with exponential backoff.
+ * Call fn(), retrying transient provider failures with exponential backoff.
  *
  * @param {Function} fn           - async function to call (no args; use closure)
  * @param {object}   opts
@@ -19,7 +19,7 @@ async function retryWithBackoff(fn, { maxAttempts = 3, baseDelayMs = 1000 } = {}
       return await fn();
     } catch (err) {
       const status = err.status ?? err.statusCode;
-      const isRetryable = status === 429 || status === 529;
+      const isRetryable = [429, 500, 502, 503, 504, 529].includes(status);
 
       if (!isRetryable || attempt === maxAttempts) {
         throw err;

@@ -100,22 +100,25 @@ function App() {
     socket.on('connect', () => {
       setConnected(true);
       const savedSession = localStorage.getItem('hd_session_id');
-      socket.emit('join_session', { sessionId: savedSession || null });
+      const savedToken = localStorage.getItem('hd_session_token');
+      socket.emit('join_session', { sessionId: savedSession || null, sessionToken: savedToken || null });
     });
 
     socket.on('disconnect', () => setConnected(false));
 
-    socket.on('session_joined', ({ sessionId: id }) => {
+    socket.on('session_joined', ({ sessionId: id, sessionToken }) => {
       setSessionId(id);
       localStorage.setItem('hd_session_id', id);
+      if (sessionToken) localStorage.setItem('hd_session_token', sessionToken);
       // New session — emit session_start so DM1 generates the campaign opening.
       // Guard is enforced server-side too, but we only emit here on fresh join.
       socket.emit('session_start');
     });
 
-    socket.on('session_resumed', ({ sessionId: id, history }) => {
+    socket.on('session_resumed', ({ sessionId: id, sessionToken, history }) => {
       setSessionId(id);
       localStorage.setItem('hd_session_id', id);
+      if (sessionToken) localStorage.setItem('hd_session_token', sessionToken);
 
       // Rebuild narrative feed from DM1-track history
       const narrativeHistory = history
@@ -186,13 +189,23 @@ function App() {
     });
 
     // DM1-track errors → narrative feed
-    socket.on('error', ({ message }) => {
-      setNarrative((prev) => [...prev, { type: 'error', text: message, id: Date.now() }]);
+    socket.on('error', ({ message, code }) => {
+      setNarrative((prev) => {
+        const base = code === 'moderation_blocked' && prev.at(-1)?.type === 'player'
+          ? prev.slice(0, -1)
+          : prev;
+        return [...base, { type: 'error', text: message, id: Date.now() }];
+      });
     });
 
     // DM2-track errors → rules feed (BUG-011)
-    socket.on('dm2_error', ({ message }) => {
-      setRulesLog((prev) => [...prev, { type: 'error', text: message, id: Date.now() }]);
+    socket.on('dm2_error', ({ message, code }) => {
+      setRulesLog((prev) => {
+        const base = code === 'moderation_blocked' && prev.at(-1)?.type === 'player'
+          ? prev.slice(0, -1)
+          : prev;
+        return [...base, { type: 'error', text: message, id: Date.now() }];
+      });
     });
 
     // Spec §9.1 cleanup — remove all listeners and disconnect on unmount

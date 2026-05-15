@@ -7,6 +7,7 @@ const db             = require('./db');
 const { estimateTokens } = require('./tokenUtils');
 
 const TOKEN_BUDGET = 8000; // trim if total estimated input exceeds this
+const CAMPAIGN_LOG_TOKEN_BUDGET = 2000;
 
 /**
  * Assemble the full DM1 context for a player action.
@@ -37,10 +38,11 @@ async function build({ sessionId, dm1Prompt, playerMessage }) {
   staticSystemPrompt += '## CURRENT WORLD STATE\n';
   staticSystemPrompt += JSON.stringify(worldState, null, 2) + '\n\n';
 
-  // Tier 2: campaign log (always included, never trimmed at assembly time)
-  if (campaignLog.length > 0) {
+  // Tier 2: campaign log (latest entries only, capped so long campaigns keep breathing)
+  const campaignLogForPrompt = trimCampaignLog(campaignLog);
+  if (campaignLogForPrompt.length > 0) {
     staticSystemPrompt += '## CAMPAIGN LOG\n';
-    staticSystemPrompt += campaignLog
+    staticSystemPrompt += campaignLogForPrompt
       .map((e, i) => `${i + 1}. [Turn ${e.turn_number}] ${e.summary}`)
       .join('\n');
     staticSystemPrompt += '\n\n';
@@ -93,6 +95,24 @@ function buildChapterSummariesText(summaries) {
     .map((s) => `[Turns ${s.turn_start}–${s.turn_end}] ${s.summary}`)
     .join('\n\n');
   return text + '\n\n';
+}
+
+function trimCampaignLog(entries) {
+  const selected = [];
+  let tokens = 0;
+
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    const entryText = `[Turn ${entry.turn_number}] ${entry.summary}`;
+    const entryTokens = estimateTokens(entryText);
+    if (selected.length > 0 && tokens + entryTokens > CAMPAIGN_LOG_TOKEN_BUDGET) {
+      break;
+    }
+    selected.unshift(entry);
+    tokens += entryTokens;
+  }
+
+  return selected;
 }
 
 /**

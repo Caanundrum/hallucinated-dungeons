@@ -6,6 +6,7 @@ const cors      = require('cors');
 const { v4: uuidv4 } = require('uuid');
 const fs        = require('fs');
 const path      = require('path');
+const crypto    = require('crypto');
 
 const ai                   = require('./aiClient');
 const db                   = require('./db');
@@ -28,6 +29,8 @@ const io = new Server(server, {
 
 app.use(cors({ origin: CLIENT_URL }));
 app.use(express.json());
+
+const activeDm1Sessions = new Set();
 
 // ── Load prompts ───────────────────────────────────────────────────────────
 const DM1_PROMPT = fs.readFileSync(
@@ -59,7 +62,7 @@ async function moderateUserMessage(socket, errorEvent, message) {
   if (moderation.ok) return true;
 
   console.warn('User input blocked by moderation:', moderation.flaggedCategories.join(', '));
-  socket.emit(errorEvent, { message: moderation.publicMessage });
+  socket.emit(errorEvent, { message: moderation.publicMessage, code: 'moderation_blocked' });
   return false;
 }
 
@@ -71,17 +74,35 @@ async function moderateAssistantReply(reply, fallbackReply) {
   return fallbackReply;
 }
 
+function signSessionToken(sessionId) {
+  const secret = process.env.SESSION_TOKEN_SECRET || process.env.OPENAI_API_KEY || 'local-dev-session-secret';
+  const signature = crypto
+    .createHmac('sha256', secret)
+    .update(sessionId)
+    .digest('hex');
+  return `${sessionId}.${signature}`;
+}
+
+function isValidSessionToken(sessionId, token) {
+  if (!sessionId || !token) return false;
+  const expected = signSessionToken(sessionId);
+  const expectedBuffer = Buffer.from(expected);
+  const tokenBuffer = Buffer.from(token);
+  if (expectedBuffer.length !== tokenBuffer.length) return false;
+  return crypto.timingSafeEqual(expectedBuffer, tokenBuffer);
+}
+
 // ── Socket.io events ───────────────────────────────────────────────────────
 io.on('connection', (socket) => {
   console.log(`Client connected: ${socket.id}`);
 
   // ── join_session ──────────────────────────────────────────────────────
-  socket.on('join_session', async ({ sessionId }) => {
+  socket.on('join_session', async ({ sessionId, sessionToken }) => {
     try {
       let id       = sessionId;
       let isResume = false;
 
-      if (id) {
+      if (id && isValidSessionToken(id, sessionToken)) {
         const existing = await db.getSession(id);
         if (existing) {
           isResume = true;
@@ -90,6 +111,7 @@ io.on('connection', (socket) => {
           id = uuidv4();
         }
       } else {
+        if (id) console.warn(`Rejected unsigned session resume attempt for ${id}`);
         id = uuidv4();
       }
 
@@ -105,9 +127,9 @@ io.on('connection', (socket) => {
 
       if (isResume) {
         const history = await db.getSessionHistory(id);
-        socket.emit('session_resumed', { sessionId: id, history });
+        socket.emit('session_resumed', { sessionId: id, sessionToken: signSessionToken(id), history });
       } else {
-        socket.emit('session_joined', { sessionId: id });
+        socket.emit('session_joined', { sessionId: id, sessionToken: signSessionToken(id) });
       }
 
     } catch (err) {
@@ -118,10 +140,12 @@ io.on('connection', (socket) => {
         await db.initWorldState(fallbackId);
       } catch (dbErr) {
         console.error('join_session fallback DB error:', dbErr);
+        socket.emit('error', { message: 'The campaign database is unavailable. Please try again in a minute.' });
+        return;
       }
       socket.join(fallbackId);
       socket.sessionId = fallbackId;
-      socket.emit('session_joined', { sessionId: fallbackId });
+      socket.emit('session_joined', { sessionId: fallbackId, sessionToken: signSessionToken(fallbackId) });
     }
   });
 
@@ -132,6 +156,9 @@ io.on('connection', (socket) => {
   socket.on('session_start', async () => {
     const sessionId = socket.sessionId;
     if (!sessionId) return;
+
+    if (activeDm1Sessions.has(sessionId)) return;
+    activeDm1Sessions.add(sessionId);
 
     try {
       // Safety guard — if there is already history, ignore this event
@@ -196,6 +223,8 @@ io.on('connection', (socket) => {
       console.error('session_start error:', err);
       socket.emit('dm1_typing', false);
       socket.emit('error', { message: 'The Dungeon Master encountered an error. Please refresh.' });
+    } finally {
+      activeDm1Sessions.delete(sessionId);
     }
   });
 
@@ -206,6 +235,12 @@ io.on('connection', (socket) => {
       socket.emit('error', { message: 'No active session. Please refresh.' });
       return;
     }
+
+    if (activeDm1Sessions.has(sessionId)) {
+      socket.emit('error', { message: 'The Dungeon Master is still resolving your last action. Give the dice a second to stop clattering.' });
+      return;
+    }
+    activeDm1Sessions.add(sessionId);
 
     try {
       await db.updateLastActive(sessionId);
@@ -301,6 +336,8 @@ io.on('connection', (socket) => {
       console.error('story_input error:', err);
       socket.emit('dm1_typing', false);
       socket.emit('error', { message: 'The Dungeon Master encountered an error. Please try again.' });
+    } finally {
+      activeDm1Sessions.delete(sessionId);
     }
   });
 
