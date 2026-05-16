@@ -61,7 +61,6 @@ function App() {
   const [connected, setConnected] = useState(false);
   const [characterStatus, setCharacterStatus] = useState('loading'); // loading | required | ready
   const [characterContent, setCharacterContent] = useState(null);
-  const [character, setCharacter] = useState(null);
   const [characterError, setCharacterError] = useState(null);
   const [characterSaving, setCharacterSaving] = useState(false);
 
@@ -173,7 +172,6 @@ function App() {
 
     socket.on('character_data', ({ content, character }) => {
       setCharacterContent(content);
-      setCharacter(character || null);
       setCharacterError(null);
       if (character) {
         setCharacterStatus('ready');
@@ -186,8 +184,7 @@ function App() {
       }
     });
 
-    socket.on('character_ready', ({ character }) => {
-      setCharacter(character);
+    socket.on('character_ready', () => {
       setCharacterSaving(false);
       setCharacterError(null);
       setCharacterStatus('ready');
@@ -333,7 +330,7 @@ function App() {
   const handleSubmitFallbackRoll = useCallback(() => {
     if (!fallbackResult || !fallbackRoll) return;
     const { dieSides } = fallbackRoll;
-    const { rolled, modifier, total } = fallbackResult;
+    const { modifier, total } = fallbackResult;
     const modStr = modifier > 0 ? ` + ${modifier}` : modifier < 0 ? ` - ${Math.abs(modifier)}` : '';
     const rollMsg = `[ROLL RESULT: ${total}] I rolled a ${total} (1d${dieSides}${modStr} = ${total})`;
     const displayRollMsg = rollMsg.replace(/^\[ROLL RESULT: \d+\]\s*/, '');
@@ -402,8 +399,6 @@ function App() {
         ) : (
           <CharacterWizard
             content={characterContent}
-            sessionId={sessionId}
-            sessionToken={sessionToken}
             error={characterError}
             saving={characterSaving}
             onSave={handleSaveCharacter}

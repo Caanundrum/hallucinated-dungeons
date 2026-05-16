@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 
 const ABILITIES = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
 const ABILITY_LABELS = {
@@ -32,7 +32,7 @@ function emptyScores(value = 10) {
   return Object.fromEntries(ABILITIES.map((ability) => [ability, value]));
 }
 
-export default function CharacterWizard({ content, sessionId, sessionToken, error, saving, onSave }) {
+export default function CharacterWizard({ content, error, saving, onSave }) {
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState(() => ({
     name: '',
@@ -74,17 +74,16 @@ export default function CharacterWizard({ content, sessionId, sessionToken, erro
     .filter(Boolean);
   const armorItem = equipmentItems.find((item) => item.type === 'armor');
   const shieldItem = equipmentItems.find((item) => item.type === 'shield');
-  const weaponItem = equipmentItems.find((item) => item.type === 'weapon');
   const acPreview = calculateAcPreview(armorItem, shieldItem, abilityMods.dex);
   const hpPreview = Math.max(1, (selectedClass?.hit_die || 8) + abilityMods.con);
 
-  const detail = useMemo(() => ({
+  const detail = {
     species: selectedSpecies,
     class: selectedClass,
     background: selectedBackground,
     acPreview,
     hpPreview,
-  }), [selectedSpecies, selectedClass, selectedBackground, acPreview.total, hpPreview]);
+  };
 
   function update(field, value) {
     setDraft((current) => ({ ...current, [field]: value }));
