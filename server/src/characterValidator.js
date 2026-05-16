@@ -58,7 +58,7 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
   const level = 1;
   const pb = proficiencyBonus(level);
   const maxHp = Math.max(1, characterClass.hit_die + abilityModifiers.con);
-  const armorBreakdown = calculateArmorClass(equipped, content, abilityModifiers.dex, activeEffects);
+  const armorBreakdown = calculateArmorClass(equipped, content, abilityModifiers, activeEffects, characterClass);
   const derivedStats = {
     level,
     proficiency_bonus: pb,
@@ -285,23 +285,29 @@ function buildActiveEffects(equipped, content) {
   })));
 }
 
-function calculateArmorClass(equipped, content, dexMod, activeEffects) {
+function calculateArmorClass(equipped, content, abilityModifiers, activeEffects, characterClass) {
   const armorEffect = activeEffects.find((effect) => effect.target === 'armor_formula');
+  const dexMod = abilityModifiers.dex || 0;
+  const unarmoredDefense = !armorEffect ? characterClass.unarmored_defense : null;
+  const unarmoredAbility = unarmoredDefense?.ability;
+  const unarmoredBonus = unarmoredAbility ? (abilityModifiers[unarmoredAbility] || 0) : 0;
   const base = armorEffect ? armorEffect.base : 10;
   const dexCap = armorEffect ? armorEffect.dex_cap : null;
   const dexApplied = dexCap === null || dexCap === undefined ? dexMod : Math.min(dexMod, dexCap);
   const shieldBonus = activeEffects
     .filter((effect) => effect.target === 'shield_bonus')
     .reduce((sum, effect) => sum + Number(effect.value || 0), 0);
+  const shieldApplied = unarmoredDefense && !unarmoredDefense.allows_shield ? 0 : shieldBonus;
   const itemBonus = activeEffects
     .filter((effect) => effect.target === 'armor_class_bonus')
     .reduce((sum, effect) => sum + Number(effect.value || 0), 0);
   return {
-    total: base + dexApplied + shieldBonus + itemBonus,
+    total: base + dexApplied + unarmoredBonus + shieldApplied + itemBonus,
     parts: [
       { label: armorEffect ? armorEffect.source_item_name : 'Unarmored base', value: base },
       { label: dexCap === null || dexCap === undefined ? 'DEX modifier' : `DEX modifier (cap ${dexCap})`, value: dexApplied },
-      ...(shieldBonus ? [{ label: 'Shield', value: shieldBonus }] : []),
+      ...(unarmoredBonus ? [{ label: `${unarmoredDefense.label} ${unarmoredAbility.toUpperCase()}`, value: unarmoredBonus }] : []),
+      ...(shieldApplied ? [{ label: 'Shield', value: shieldApplied }] : []),
       ...(itemBonus ? [{ label: 'Item bonuses', value: itemBonus }] : []),
     ],
   };

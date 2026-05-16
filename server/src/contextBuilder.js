@@ -37,6 +37,13 @@ async function build({ sessionId, dm1Prompt, playerMessage }) {
   // Tier: world state block
   staticSystemPrompt += '## CURRENT WORLD STATE\n';
   staticSystemPrompt += JSON.stringify(worldState, null, 2) + '\n\n';
+  staticSystemPrompt += '## SPATIAL CONTRACT\n';
+  staticSystemPrompt += [
+    `Current location is authoritative: ${worldState.current_location || 'not yet established'}.`,
+    'Do not resolve interactions with NPCs, buildings, objects, or rooms unless they are present in the current location or the player explicitly travels to them first.',
+    'If the player asks for an absent target, ask whether they head there instead of moving them silently.',
+  ].join('\n');
+  staticSystemPrompt += '\n\n';
 
   // Tier 2: campaign log (latest entries only, capped so long campaigns keep breathing)
   const campaignLogForPrompt = trimCampaignLog(campaignLog);

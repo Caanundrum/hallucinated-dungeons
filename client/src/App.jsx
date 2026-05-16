@@ -443,6 +443,7 @@ function App() {
             saving={characterSaving}
             rollingStats={characterSaving}
             onRollStats={handleRollCharacterStats}
+            onClearError={() => setCharacterError(null)}
             onSave={handleSaveCharacter}
           />
         )}

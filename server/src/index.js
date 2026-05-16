@@ -18,6 +18,7 @@ const { DM1_MODEL, UTILITY_MODEL } = require('./models');
 const { retryWithBackoff } = require('./retryUtils');
 const { getContentBundle } = require('./contentData');
 const { validateCharacter } = require('./characterValidator');
+const { checkSpatialAction } = require('./spatialGuard');
 
 // ── Setup ──────────────────────────────────────────────────────────────────
 const app    = express();
@@ -117,6 +118,38 @@ function isValidSessionToken(sessionId, token) {
   const tokenBuffer = Buffer.from(token);
   if (expectedBuffer.length !== tokenBuffer.length) return false;
   return crypto.timingSafeEqual(expectedBuffer, tokenBuffer);
+}
+
+function characterSheetToWorldStats(characterSheet) {
+  const stats = characterSheet.derived_stats || {};
+  const identity = characterSheet.identity || {};
+  const modifiers = characterSheet.abilities?.modifiers || {};
+  const primaryAttack = stats.attack_breakdowns?.[0];
+  return {
+    name: identity.name || '',
+    class: identity.class_name || '',
+    level: stats.level || identity.level || 1,
+    hp: stats.hp ?? null,
+    max_hp: stats.max_hp ?? null,
+    temp_hp: stats.temp_hp || 0,
+    armor_class: stats.armor_class || 10,
+    speed: stats.speed || 30,
+    conditions: stats.conditions || [],
+    weapon_name: primaryAttack?.name || '',
+    ability_scores: modifiers,
+  };
+}
+
+async function syncCharacterToWorldState(sessionId, characterSheet) {
+  const row = await db.getWorldState(sessionId);
+  const current = row?.state || db.DEFAULT_WORLD_STATE;
+  await db.updateWorldState(sessionId, {
+    ...current,
+    player_stats: {
+      ...(current.player_stats || db.DEFAULT_WORLD_STATE.player_stats),
+      ...characterSheetToWorldStats(characterSheet),
+    },
+  });
 }
 
 function hasValidSocketSession(socket, sessionId, sessionToken) {
@@ -387,6 +420,7 @@ io.on('connection', (socket) => {
         verifyRolledStats: (rolledStats) => verifyRollSet(sessionId, rolledStats),
       });
       const saved = await db.saveCharacterForSession(sessionId, characterSheet);
+      await syncCharacterToWorldState(sessionId, characterSheet).catch(console.error);
       socket.emit('character_ready', {
         campaign,
         character: saved.character_sheet,
@@ -425,6 +459,25 @@ io.on('connection', (socket) => {
       // Get pre-increment session_turn — both messages for this exchange share it
       const worldStateRow = await db.getWorldState(sessionId);
       const currentTurn   = worldStateRow?.state?.session_turn ?? 0;
+
+      const spatialIssue = checkSpatialAction(message, worldStateRow?.state);
+      if (spatialIssue) {
+        await db.saveMessage(sessionId, 'player_dm1', message, currentTurn);
+        await db.saveMessage(sessionId, 'dm1', spatialIssue.message, currentTurn);
+        await db.incrementSessionTurn(sessionId);
+        socket.emit('dm1_response', { message: spatialIssue.message });
+        await db.logDmCall({
+          sessionId,
+          dm:           'spatial_guard',
+          model:        'deterministic',
+          playerInput:  message,
+          fullPrompt:   JSON.stringify(worldStateRow?.state || {}),
+          dmResponse:   spatialIssue.message,
+          inputTokens:  null,
+          outputTokens: null,
+        }).catch(console.error);
+        return;
+      }
 
       // Save player message with pre-increment turn_number
       await db.saveMessage(sessionId, 'player_dm1', message, currentTurn);

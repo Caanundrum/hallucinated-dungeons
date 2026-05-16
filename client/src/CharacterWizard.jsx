@@ -24,7 +24,7 @@ function emptyScores(value = 10) {
   return Object.fromEntries(ABILITIES.map((ability) => [ability, value]));
 }
 
-export default function CharacterWizard({ content, error, saving, rollingStats, onRollStats, onSave }) {
+export default function CharacterWizard({ content, error, saving, rollingStats, onRollStats, onClearError, onSave }) {
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState(() => ({
     name: '',
@@ -66,7 +66,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
     .filter(Boolean);
   const armorItem = equipmentItems.find((item) => item.type === 'armor');
   const shieldItem = equipmentItems.find((item) => item.type === 'shield');
-  const acPreview = calculateAcPreview(armorItem, shieldItem, abilityMods.dex);
+  const acPreview = calculateAcPreview(armorItem, shieldItem, abilityMods, selectedClass);
   const hpPreview = Math.max(1, (selectedClass?.hit_die || 8) + abilityMods.con);
 
   const detail = {
@@ -96,6 +96,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
   }
 
   function setAbilityMethod(method) {
+    onClearError?.();
     setDraft((current) => ({
       ...current,
       abilityMethod: method,
@@ -471,16 +472,21 @@ function requiredSpellCount(selectedClass, abilityMods) {
   return Math.max(1, (abilityMods[config.ability] || 0) + 1);
 }
 
-function calculateAcPreview(armor, shield, dexMod) {
+function calculateAcPreview(armor, shield, abilityMods, selectedClass) {
+  const dexMod = abilityMods.dex || 0;
   const base = armor?.ac_base || 10;
   const dexCap = armor ? armor.dex_cap : null;
   const dexApplied = dexCap === null || dexCap === undefined ? dexMod : Math.min(dexMod, dexCap);
-  const shieldBonus = shield ? 2 : 0;
+  const unarmoredDefense = !armor ? selectedClass?.unarmored_defense : null;
+  const unarmoredAbility = unarmoredDefense?.ability;
+  const unarmoredBonus = unarmoredAbility ? (abilityMods[unarmoredAbility] || 0) : 0;
+  const shieldBonus = shield && (!unarmoredDefense || unarmoredDefense.allows_shield) ? 2 : 0;
   return {
-    total: base + dexApplied + shieldBonus,
+    total: base + dexApplied + unarmoredBonus + shieldBonus,
     parts: [
       { label: armor?.name || 'Unarmored', value: base },
       { label: dexCap === null || dexCap === undefined ? 'DEX' : `DEX cap ${dexCap}`, value: dexApplied },
+      ...(unarmoredBonus ? [{ label: `${unarmoredDefense.label} ${unarmoredAbility.toUpperCase()}`, value: unarmoredBonus }] : []),
       ...(shieldBonus ? [{ label: 'Shield', value: shieldBonus }] : []),
     ],
   };
