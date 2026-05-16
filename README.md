@@ -37,6 +37,7 @@ npm run dev
 - `SUPABASE_SERVICE_ROLE_KEY` — your Supabase service role key
 - `PORT` — port to run on (Railway sets this automatically)
 - `CLIENT_URL` — the deployed Vercel frontend URL (for CORS)
+- `ALLOWED_ORIGINS` — optional comma-separated extra browser origins for CORS, such as local QA URLs
 
 ### Client
 - `VITE_SERVER_URL` — the deployed Railway backend URL

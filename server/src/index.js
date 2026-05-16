@@ -23,16 +23,37 @@ const { validateCharacter } = require('./characterValidator');
 const app    = express();
 const server = http.createServer(app);
 
-const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
+const configuredOrigins = [
+  process.env.CLIENT_URL,
+  process.env.ALLOWED_ORIGINS,
+  process.env.NODE_ENV === 'production' ? null : 'http://localhost:5173,http://127.0.0.1:5173',
+]
+  .filter(Boolean)
+  .flatMap((value) => value.split(','))
+  .map((value) => value.trim())
+  .filter(Boolean);
+const allowedOrigins = new Set(configuredOrigins.length ? configuredOrigins : ['http://localhost:5173']);
+const corsOrigin = (origin, callback) => {
+  if (!origin || allowedOrigins.has(origin)) {
+    callback(null, true);
+    return;
+  }
+  callback(new Error(`Origin ${origin} is not allowed by CORS`));
+};
 
 const io = new Server(server, {
-  cors: { origin: CLIENT_URL, methods: ['GET', 'POST'] },
+  cors: { origin: corsOrigin, methods: ['GET', 'POST'] },
 });
 
-app.use(cors({ origin: CLIENT_URL }));
+app.use(cors({ origin: corsOrigin }));
 app.use(express.json());
 
 const activeDm1Sessions = new Set();
+const characterRollAttempts = new Map();
+
+if ((process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT) && !process.env.SESSION_TOKEN_SECRET) {
+  throw new Error('SESSION_TOKEN_SECRET is required in production.');
+}
 
 // ── Load prompts ───────────────────────────────────────────────────────────
 const DM1_PROMPT = fs.readFileSync(
@@ -54,7 +75,7 @@ async function runPostResponsePipeline(sessionId, playerMessage, dm1Reply, newTu
     campaignLogExtractor.extract(sessionId, playerMessage, dm1Reply, newTurn),
   ]);
 
-  if (newTurn % 50 === 0) {
+  if (newTurn > 0 && newTurn % 50 === 0) {
     await chapterSummarizer.summarize(sessionId, newTurn).catch(console.error);
   }
 }
@@ -76,8 +97,12 @@ async function moderateAssistantReply(reply, fallbackReply) {
   return fallbackReply;
 }
 
+function getSessionSecret() {
+  return process.env.SESSION_TOKEN_SECRET || 'local-dev-session-secret';
+}
+
 function signSessionToken(sessionId) {
-  const secret = process.env.SESSION_TOKEN_SECRET || process.env.OPENAI_API_KEY || 'local-dev-session-secret';
+  const secret = getSessionSecret();
   const signature = crypto
     .createHmac('sha256', secret)
     .update(sessionId)
@@ -101,6 +126,40 @@ function hasValidSocketSession(socket, sessionId, sessionToken) {
     && socket.sessionId === sessionId
     && isValidSessionToken(sessionId, sessionToken)
   );
+}
+
+function rollD6() {
+  return crypto.randomInt(1, 7);
+}
+
+function rollAbilityStat() {
+  const dice = Array.from({ length: 4 }, rollD6).sort((a, b) => a - b);
+  return {
+    dice,
+    total: dice.slice(1).reduce((sum, value) => sum + value, 0),
+  };
+}
+
+function signRollSet(sessionId, attemptsUsed, acceptedSet) {
+  const payload = JSON.stringify({ sessionId, attemptsUsed, acceptedSet });
+  return crypto
+    .createHmac('sha256', getSessionSecret())
+    .update(payload)
+    .digest('hex');
+}
+
+function verifyRollSet(sessionId, rolledStats = {}) {
+  const acceptedSet = Array.isArray(rolledStats.acceptedSet) ? rolledStats.acceptedSet.map(Number) : [];
+  const attemptsUsed = Number(rolledStats.attemptsUsed);
+  const rollToken = String(rolledStats.rollToken || '');
+  if (!sessionId || acceptedSet.length !== 6 || !Number.isInteger(attemptsUsed) || attemptsUsed < 1 || attemptsUsed > 3 || !rollToken) {
+    return false;
+  }
+  const expected = signRollSet(sessionId, attemptsUsed, acceptedSet);
+  const expectedBuffer = Buffer.from(expected);
+  const tokenBuffer = Buffer.from(rollToken);
+  if (expectedBuffer.length !== tokenBuffer.length) return false;
+  return crypto.timingSafeEqual(expectedBuffer, tokenBuffer);
 }
 
 // ── Socket.io events ───────────────────────────────────────────────────────
@@ -238,6 +297,10 @@ io.on('connection', (socket) => {
         outputTokens,
       }).catch(console.error);
 
+      socket.emit('dm1_typing', true);
+      await runPostResponsePipeline(sessionId, openingPrompt, dm1Reply, 0).catch(console.error);
+      socket.emit('dm1_typing', false);
+
     } catch (err) {
       console.error('session_start error:', err);
       socket.emit('dm1_typing', false);
@@ -275,6 +338,37 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('roll_character_stats', ({ sessionId, sessionToken } = {}) => {
+    if (!hasValidSocketSession(socket, sessionId, sessionToken)) {
+      socket.emit('character_error', {
+        step: 'abilities',
+        field: 'rolledStats',
+        message: 'The dice tray lost your session. Refresh, then roll again.',
+      });
+      return;
+    }
+
+    const attemptsUsed = (characterRollAttempts.get(sessionId) || 0) + 1;
+    if (attemptsUsed > 3) {
+      socket.emit('character_error', {
+        step: 'abilities',
+        field: 'rolledStats',
+        message: 'You have used all 3 stat roll attempts. The dice are now unionized.',
+      });
+      return;
+    }
+
+    const currentSet = Array.from({ length: 6 }, rollAbilityStat);
+    const acceptedSet = currentSet.map((entry) => entry.total);
+    characterRollAttempts.set(sessionId, attemptsUsed);
+    socket.emit('character_roll', {
+      attemptsUsed,
+      currentSet,
+      acceptedSet,
+      rollToken: signRollSet(sessionId, attemptsUsed, acceptedSet),
+    });
+  });
+
   socket.on('save_character', async ({ sessionId, sessionToken, characterDraft } = {}) => {
     if (!hasValidSocketSession(socket, sessionId, sessionToken)) {
       socket.emit('character_error', {
@@ -290,6 +384,7 @@ io.on('connection', (socket) => {
       const characterSheet = validateCharacter(characterDraft, getContentBundle(), {
         sessionId,
         campaignId: campaign.id,
+        verifyRolledStats: (rolledStats) => verifyRollSet(sessionId, rolledStats),
       });
       const saved = await db.saveCharacterForSession(sessionId, characterSheet);
       socket.emit('character_ready', {
@@ -407,8 +502,10 @@ io.on('connection', (socket) => {
         outputTokens,
       }).catch(console.error);
 
-      // Fire async post-response pipeline — do NOT await (would add latency)
-      runPostResponsePipeline(sessionId, message, dm1Reply, newTurn).catch(console.error);
+      // Keep the turn lock until world state catches up, after the reply is visible.
+      socket.emit('dm1_typing', true);
+      await runPostResponsePipeline(sessionId, message, dm1Reply, newTurn).catch(console.error);
+      socket.emit('dm1_typing', false);
 
     } catch (err) {
       console.error('story_input error:', err);

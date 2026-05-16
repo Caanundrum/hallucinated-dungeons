@@ -105,6 +105,7 @@ function App() {
     socket.off('character_ready');
     socket.off('character_error');
     socket.off('character_required');
+    socket.off('character_roll');
 
     socket.connect();
 
@@ -277,6 +278,7 @@ function App() {
       socket.off('character_ready');
       socket.off('character_error');
       socket.off('character_required');
+      socket.off('character_roll');
       socket.disconnect();
     };
   }, []);
@@ -371,6 +373,44 @@ function App() {
     socket.emit('save_character', { sessionId, sessionToken, characterDraft });
   }, [sessionId, sessionToken]);
 
+  const handleRollCharacterStats = useCallback(() => new Promise((resolve) => {
+    if (!sessionId || !sessionToken) {
+      setCharacterError({ message: 'No active session. Please refresh.' });
+      resolve(null);
+      return;
+    }
+
+    setCharacterSaving(true);
+    setCharacterError(null);
+    const cleanup = () => {
+      window.clearTimeout(timeout);
+      socket.off('character_roll', onRoll);
+      socket.off('character_error', onError);
+      setCharacterSaving(false);
+    };
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      setCharacterError({ message: 'The dice vanished under the table. Try rolling again.' });
+      resolve(null);
+    }, 10000);
+
+    function onRoll(roll) {
+      cleanup();
+      setCharacterError(null);
+      resolve(roll);
+    }
+
+    function onError(err) {
+      cleanup();
+      setCharacterError(err);
+      resolve(null);
+    }
+
+    socket.once('character_roll', onRoll);
+    socket.once('character_error', onError);
+    socket.emit('roll_character_stats', { sessionId, sessionToken });
+  }), [sessionId, sessionToken]);
+
   // BUG-009: textarea stays active during DM loading; only the submit button locks
   const storyTextareaDisabled = !connected || !sessionId;
   // During a pending roll (primary or fallback), the story input is locked — the dice roller takes over
@@ -401,6 +441,8 @@ function App() {
             content={characterContent}
             error={characterError}
             saving={characterSaving}
+            rollingStats={characterSaving}
+            onRollStats={handleRollCharacterStats}
             onSave={handleSaveCharacter}
           />
         )}

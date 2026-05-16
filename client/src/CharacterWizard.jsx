@@ -20,19 +20,11 @@ function fmtMod(value) {
   return value >= 0 ? `+${value}` : String(value);
 }
 
-function rollStat() {
-  const dice = Array.from({ length: 4 }, () => Math.floor(Math.random() * 6) + 1).sort((a, b) => a - b);
-  return {
-    dice,
-    total: dice.slice(1).reduce((sum, value) => sum + value, 0),
-  };
-}
-
 function emptyScores(value = 10) {
   return Object.fromEntries(ABILITIES.map((ability) => [ability, value]));
 }
 
-export default function CharacterWizard({ content, error, saving, onSave }) {
+export default function CharacterWizard({ content, error, saving, rollingStats, onRollStats, onSave }) {
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState(() => ({
     name: '',
@@ -46,7 +38,7 @@ export default function CharacterWizard({ content, error, saving, onSave }) {
     equipmentChoice: 'pack',
     cantripsKnown: [],
     spellsKnown: [],
-    rolledStats: { attemptsUsed: 0, currentSet: [], acceptedSet: [] },
+    rolledStats: { attemptsUsed: 0, currentSet: [], acceptedSet: [], rollToken: null },
   }));
 
   const selectedSpecies = content.species.find((item) => item.id === draft.speciesId);
@@ -112,24 +104,18 @@ export default function CharacterWizard({ content, error, saving, onSave }) {
         : method === 'point_buy'
           ? emptyScores(8)
           : emptyScores(10),
-      rolledStats: { attemptsUsed: 0, currentSet: [], acceptedSet: [] },
+      rolledStats: { attemptsUsed: 0, currentSet: [], acceptedSet: [], rollToken: null },
     }));
   }
 
-  function handleRollStats() {
-    setDraft((current) => {
-      if (current.rolledStats.attemptsUsed >= 3) return current;
-      const currentSet = Array.from({ length: 6 }, rollStat);
-      return {
-        ...current,
-        rolledStats: {
-          attemptsUsed: current.rolledStats.attemptsUsed + 1,
-          currentSet,
-          acceptedSet: currentSet.map((entry) => entry.total),
-        },
-        abilityScores: Object.fromEntries(ABILITIES.map((ability, index) => [ability, currentSet[index].total])),
-      };
-    });
+  async function handleRollStats() {
+    const roll = await onRollStats();
+    if (!roll) return;
+    setDraft((current) => ({
+      ...current,
+      rolledStats: roll,
+      abilityScores: Object.fromEntries(ABILITIES.map((ability, index) => [ability, roll.currentSet[index].total])),
+    }));
   }
 
   function toggleSkill(skillId) {
@@ -181,6 +167,7 @@ export default function CharacterWizard({ content, error, saving, onSave }) {
       rolledStats: {
         attemptsUsed: draft.rolledStats.attemptsUsed,
         acceptedSet: draft.abilityMethod === 'rolled' ? draft.rolledStats.acceptedSet : [],
+        rollToken: draft.abilityMethod === 'rolled' ? draft.rolledStats.rollToken : null,
       },
     });
   }
@@ -259,8 +246,8 @@ export default function CharacterWizard({ content, error, saving, onSave }) {
                 <div className="impact-box">
                   <h3>Rolled Stats</h3>
                   <p>Each attempt rolls six scores using 4d6 drop the lowest. Rolling again replaces these scores. You cannot go back. The dice have spoken, and they have terrible filing habits.</p>
-                  <button type="button" className="secondary-btn" disabled={draft.rolledStats.attemptsUsed >= 3} onClick={handleRollStats}>
-                    {draft.rolledStats.attemptsUsed === 0 ? 'Roll Stats' : 'Roll Again'} ({draft.rolledStats.attemptsUsed}/3 used)
+                  <button type="button" className="secondary-btn" disabled={rollingStats || draft.rolledStats.attemptsUsed >= 3} onClick={handleRollStats}>
+                    {rollingStats ? 'Rolling...' : draft.rolledStats.attemptsUsed === 0 ? 'Roll Stats' : 'Roll Again'} ({draft.rolledStats.attemptsUsed}/3 used)
                   </button>
                   {draft.rolledStats.currentSet.length > 0 && (
                     <div className="roll-set">
@@ -473,7 +460,7 @@ function validAbilityScores(draft) {
   if (values.some((value) => !Number.isInteger(value))) return false;
   if (draft.abilityMethod === 'standard_array') return JSON.stringify([...values].sort((a, b) => b - a)) === JSON.stringify(STANDARD_ARRAY);
   if (draft.abilityMethod === 'point_buy') return pointBuySpent(draft.abilityScores) === 27 && values.every((value) => value >= 8 && value <= 15);
-  if (draft.abilityMethod === 'rolled') return draft.rolledStats.acceptedSet.length === 6 && JSON.stringify([...values].sort((a, b) => b - a)) === JSON.stringify([...draft.rolledStats.acceptedSet].sort((a, b) => b - a));
+  if (draft.abilityMethod === 'rolled') return Boolean(draft.rolledStats.rollToken) && draft.rolledStats.acceptedSet.length === 6 && JSON.stringify([...values].sort((a, b) => b - a)) === JSON.stringify([...draft.rolledStats.acceptedSet].sort((a, b) => b - a));
   return false;
 }
 

@@ -22,7 +22,7 @@ function fail(step, field, message) {
   throw error;
 }
 
-function validateCharacter(draft, content, { sessionId, campaignId } = {}) {
+function validateCharacter(draft, content, { sessionId, campaignId, verifyRolledStats } = {}) {
   if (!draft || typeof draft !== 'object') fail('review', 'character', 'Character data is missing.');
 
   const name = String(draft.name || '').trim();
@@ -38,7 +38,7 @@ function validateCharacter(draft, content, { sessionId, campaignId } = {}) {
   const background = byId(content.backgrounds, normalizeId(draft.backgroundId));
   if (!background) fail('background', 'backgroundId', 'Choose a valid background.');
 
-  const abilityData = validateAbilityScores(draft.abilityMethod, draft.abilityScores, draft.rolledStats, background);
+  const abilityData = validateAbilityScores(draft.abilityMethod, draft.abilityScores, draft.rolledStats, background, verifyRolledStats);
   const abilityScores = abilityData.finalScores;
   const abilityModifiers = Object.fromEntries(ABILITIES.map((ability) => [ability, abilityMod(abilityScores[ability])]));
 
@@ -137,7 +137,7 @@ function validateCharacter(draft, content, { sessionId, campaignId } = {}) {
   };
 }
 
-function validateAbilityScores(method, scores, rolledStats, background) {
+function validateAbilityScores(method, scores, rolledStats, background, verifyRolledStats) {
   const selectedMethod = normalizeId(method);
   if (!['standard_array', 'point_buy', 'rolled'].includes(selectedMethod)) {
     fail('abilities', 'abilityMethod', 'Choose an ability score method.');
@@ -175,6 +175,9 @@ function validateAbilityScores(method, scores, rolledStats, background) {
     }
     if (!Number.isInteger(attemptsUsed) || attemptsUsed < 1 || attemptsUsed > 3) {
       fail('abilities', 'rolledStats', 'Rolled Stats attempts must be between 1 and 3.');
+    }
+    if (typeof verifyRolledStats !== 'function' || !verifyRolledStats(rolledStats)) {
+      fail('abilities', 'rolledStats', 'Rolled Stats must come from the server dice roller.');
     }
     const assigned = Object.values(baseScores).sort((a, b) => b - a);
     const acceptedSorted = accepted.map(Number).sort((a, b) => b - a);
