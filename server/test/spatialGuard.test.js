@@ -44,7 +44,8 @@ test('allows present targets and movement intent', () => {
 
 test('blocks clear generic interactions with absent places and objects', () => {
   assert.match(guardMessage('I open the chest in the room.'), /chest is not here/);
-  assert.match(guardMessage('I pet the dragon in the cellar.'), /cellar is not here/);
+  assert.match(guardMessage('I pet the dragon in the cellar.'), /no specific cellar has been established here/);
+  assert.doesNotMatch(guardMessage('I pet the dragon in the cellar.'), /head there/);
 });
 
 test('does not treat previously encountered NPCs as present when scene presence exists', () => {

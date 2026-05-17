@@ -135,7 +135,7 @@ function findGenericSpatialIssue(input, worldState) {
     if (place && !isKnownPresentOrReachable(worldState, place)) {
       return {
         target: place,
-        message: `You are currently at ${currentLocation(worldState)}, and ${place} is not here. Do you head there?`,
+        message: `You are currently at ${currentLocation(worldState)}, and no specific ${place} has been established here. Do you look for a way to reach one, or clarify where you mean?`,
       };
     }
   }
@@ -146,7 +146,7 @@ function findGenericSpatialIssue(input, worldState) {
     if (target && !isKnownPresentOrReachable(worldState, target)) {
       return {
         target,
-        message: `You are currently at ${currentLocation(worldState)}, and ${target} is not here. Do you move closer or look for it first?`,
+        message: `You are currently at ${currentLocation(worldState)}, and ${target} is not here. Do you look around for it, or clarify where you mean?`,
       };
     }
   }
