@@ -566,9 +566,9 @@ function CharacterSummary({
       )}
       <div className="impact-box">
         <h3>Live Impact</h3>
-        <p>HP: {hpPreview ?? '--'}</p>
+        <p>HP: {showAbilities ? hpPreview ?? '--' : '--'}</p>
         <p>
-          AC: {acPreview ? `${acPreview.total} (${acPreview.parts.map((part) => `${part.label} ${fmtMod(part.value)}`).join(', ')})` : '--'}
+          AC: {showAbilities && acPreview ? `${acPreview.total} (${acPreview.parts.map((part) => `${part.label} ${fmtMod(part.value)}`).join(', ')})` : '--'}
         </p>
         <p>Initiative: {showAbilities ? fmtMod(abilityMods.dex) : '--'}</p>
       </div>
