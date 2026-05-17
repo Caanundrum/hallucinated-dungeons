@@ -40,6 +40,11 @@ async function build({ sessionId, dm1Prompt, playerMessage }) {
   staticSystemPrompt += '## SPATIAL CONTRACT\n';
   staticSystemPrompt += [
     `Current location is authoritative: ${worldState.current_location || 'not yet established'}.`,
+    `Exact scene location is authoritative: ${worldState.scene_presence?.exact_location || worldState.current_location || 'not yet established'}.`,
+    `Present NPCs: ${formatSceneList(worldState.scene_presence?.present_npcs)}.`,
+    `Present objects: ${formatSceneList(worldState.scene_presence?.present_objects)}.`,
+    `Available exits: ${formatSceneList(worldState.scene_presence?.available_exits)}.`,
+    `Nearby but not present locations: ${formatSceneList(worldState.scene_presence?.nearby_locations)}.`,
     'Do not resolve interactions with NPCs, buildings, objects, or rooms unless they are present in the current location or the player explicitly travels to them first.',
     'If the player asks for an absent target, ask whether they head there instead of moving them silently.',
   ].join('\n');
@@ -120,6 +125,10 @@ function trimCampaignLog(entries) {
   }
 
   return selected;
+}
+
+function formatSceneList(value) {
+  return Array.isArray(value) && value.length > 0 ? value.join(', ') : 'none established';
 }
 
 /**

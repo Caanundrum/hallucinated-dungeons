@@ -18,10 +18,24 @@ Available fields:
 
 BASIC FIELDS:
 - current_location: string (new location name if the player moved)
+- scene_presence: object (FULL current visible scene, updated after every DM response if the scene is established)
 - locations_visited: string[] (NEW location names to add — not the full list)
 - npcs_encountered: object[] (NEW or UPDATED NPCs only: { name, disposition, last_seen })
 - story_flags: object (new or updated flag keys only: { "flag_name": value })
 - active_quest: string (new quest description if the active quest changed)
+
+SCENE PRESENCE (scene_presence):
+Return this as the FULL current scene whenever the DM response establishes or changes what is physically present.
+This is the spatial source of truth for the next player action.
+{
+  "exact_location": "<specific location, e.g. Brackenford town gate, Ma Venn's taproom, old cellar>",
+  "location_type": "<gate|street|tavern|shop|temple|forest|cellar|room|road|other>",
+  "present_npcs": ["<NPCs visibly present or directly reachable right now>"],
+  "present_objects": ["<objects, doors, counters, chests, signs, terrain features visibly present or reachable right now>"],
+  "available_exits": ["<obvious exits or paths from here, e.g. town road, inn, forest path>"],
+  "nearby_locations": ["<known nearby places not currently occupied, e.g. inn, smithy, temple, market>"]
+}
+Do not list NPCs, objects, or rooms merely because the player mentioned them. Only include what the DM response actually establishes as present or reachable.
 
 PLAYER STATS (player_stats):
 Extract only the fields that changed. Use the HP narration standard "(before → after HP)" as your primary signal for hp changes.
@@ -65,6 +79,7 @@ combat_state schema:
 
 MERGE RULES:
 - current_location: replace
+- scene_presence: full replace when provided. If exact_location is omitted but current_location is known, use current_location as exact_location.
 - locations_visited: append new values only
 - npcs_encountered: upsert by name
 - story_flags: key-merge (never replace entire object)
@@ -96,7 +111,7 @@ async function extract(sessionId, playerMessage, dm1Reply) {
 
     const response = await retryWithBackoff(() => ai.generateText({
       model:     UTILITY_MODEL,
-      maxTokens: 512,
+      maxTokens: 768,
       system:    SYSTEM_PROMPT,
       messages:  [{ role: 'user', content: userContent }],
     }));
@@ -151,6 +166,28 @@ function mergeWorldState(current, patch) {
   // current_location — replace
   if (patch.current_location !== undefined && patch.current_location !== null) {
     merged.current_location = patch.current_location;
+  }
+
+  // scene_presence - full replace when provided.
+  if (patch.scene_presence && typeof patch.scene_presence === 'object' && !Array.isArray(patch.scene_presence)) {
+    const currentScene = merged.scene_presence || db.DEFAULT_WORLD_STATE.scene_presence;
+    merged.scene_presence = normalizeScenePresence({
+      ...currentScene,
+      ...patch.scene_presence,
+      exact_location: patch.scene_presence.exact_location || patch.current_location || currentScene.exact_location || merged.current_location || '',
+    });
+    if (!merged.current_location && merged.scene_presence.exact_location) {
+      merged.current_location = merged.scene_presence.exact_location;
+    }
+  } else if (
+    patch.current_location !== undefined
+    && patch.current_location !== null
+    && (!merged.scene_presence || !merged.scene_presence.exact_location)
+  ) {
+    merged.scene_presence = normalizeScenePresence({
+      ...(merged.scene_presence || db.DEFAULT_WORLD_STATE.scene_presence),
+      exact_location: patch.current_location,
+    });
   }
 
   // locations_visited — append + deduplicate
@@ -250,4 +287,22 @@ function mergeWorldState(current, patch) {
   return merged;
 }
 
-module.exports = { extract };
+function normalizeScenePresence(scene) {
+  return {
+    exact_location: String(scene.exact_location || ''),
+    location_type: String(scene.location_type || ''),
+    present_npcs: normalizeStringList(scene.present_npcs),
+    present_objects: normalizeStringList(scene.present_objects),
+    available_exits: normalizeStringList(scene.available_exits),
+    nearby_locations: normalizeStringList(scene.nearby_locations),
+  };
+}
+
+function normalizeStringList(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => String(item || '').trim())
+    .filter(Boolean);
+}
+
+module.exports = { extract, mergeWorldState };

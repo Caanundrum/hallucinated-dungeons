@@ -99,6 +99,14 @@ async function saveCharacterForSession(sessionId, characterSheet) {
 
 const DEFAULT_WORLD_STATE = {
   current_location:  '',
+  scene_presence: {
+    exact_location:    '',
+    location_type:     '',
+    present_npcs:      [],
+    present_objects:   [],
+    available_exits:   [],
+    nearby_locations:  [],
+  },
   locations_visited: [],
   npcs_encountered:  [],
   story_flags:       {},

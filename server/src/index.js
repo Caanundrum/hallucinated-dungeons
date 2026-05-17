@@ -609,6 +609,13 @@ io.on('connection', (socket) => {
           if (ws.current_location) {
             contextParts.push(`Current location: ${ws.current_location}`);
           }
+          if (ws.scene_presence?.exact_location) {
+            const scene = ws.scene_presence;
+            contextParts.push(`Exact scene: ${scene.exact_location}`);
+            if (scene.present_npcs?.length) contextParts.push(`NPCs physically present: ${scene.present_npcs.join(', ')}`);
+            if (scene.present_objects?.length) contextParts.push(`Objects present: ${scene.present_objects.join(', ')}`);
+            if (scene.available_exits?.length) contextParts.push(`Available exits: ${scene.available_exits.join(', ')}`);
+          }
           const activeNpcs = (ws.npcs_encountered || []).filter((n) => n?.name);
           if (activeNpcs.length > 0) {
             contextParts.push(`NPCs present: ${activeNpcs.map((n) => `${n.name} (${n.disposition || 'unknown'})`).join(', ')}`);
