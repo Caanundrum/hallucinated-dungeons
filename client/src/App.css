@@ -538,6 +538,7 @@ textarea:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .field-label input,
 .score-card input,
+.score-card select,
 .asi-row select {
   background: var(--bg);
   border: 1px solid var(--border);
@@ -682,11 +683,19 @@ textarea:disabled { opacity: 0.4; cursor: not-allowed; }
 }
 
 .roll-set span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
   padding: 0.5rem;
   border-radius: var(--radius);
   background: #242436;
   font-family: var(--font-ui);
   text-align: center;
+}
+
+.roll-set strong {
+  color: #d8c08a;
+  font-size: 1.1rem;
 }
 
 .check-card {

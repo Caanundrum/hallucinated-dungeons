@@ -17,6 +17,7 @@ function mod(score) {
 }
 
 function fmtMod(value) {
+  if (value === null || value === undefined || Number.isNaN(value)) return '--';
   return value >= 0 ? `+${value}` : String(value);
 }
 
@@ -24,16 +25,21 @@ function emptyScores(value = 10) {
   return Object.fromEntries(ABILITIES.map((ability) => [ability, value]));
 }
 
+function emptyRolledAssignments() {
+  return Object.fromEntries(ABILITIES.map((ability) => [ability, '']));
+}
+
 export default function CharacterWizard({ content, error, saving, rollingStats, onRollStats, onClearError, onSave }) {
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState(() => ({
     name: '',
-    speciesId: content.species[0]?.id || '',
-    classId: content.classes[0]?.id || '',
-    backgroundId: content.backgrounds[0]?.id || '',
+    speciesId: '',
+    classId: '',
+    backgroundId: '',
     abilityMethod: 'standard_array',
     abilityScores: Object.fromEntries(ABILITIES.map((ability, index) => [ability, STANDARD_ARRAY[index]])),
     backgroundBonus: {},
+    rolledAssignment: emptyRolledAssignments(),
     selectedSkills: [],
     equipmentChoice: 'pack',
     cantripsKnown: [],
@@ -50,9 +56,11 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
   const backgroundBonus = normalizeBackgroundBonus(draft.backgroundBonus, selectedBackground);
   const finalScores = Object.fromEntries(ABILITIES.map((ability) => [
     ability,
-    Number(draft.abilityScores[ability] || 0) + Number(backgroundBonus[ability] || 0),
+    draft.abilityScores[ability] === '' || draft.abilityScores[ability] === null || draft.abilityScores[ability] === undefined
+      ? null
+      : Number(draft.abilityScores[ability] || 0) + Number(backgroundBonus[ability] || 0),
   ]));
-  const abilityMods = Object.fromEntries(ABILITIES.map((ability) => [ability, mod(finalScores[ability])]));
+  const abilityMods = Object.fromEntries(ABILITIES.map((ability) => [ability, finalScores[ability] === null ? null : mod(finalScores[ability])]));
   const backgroundSkills = new Set(selectedBackground?.skills || []);
   const skillMap = Object.fromEntries(content.skills.map((skill) => [skill.id, skill]));
   const selectedClassSkills = new Set(draft.selectedSkills);
@@ -66,16 +74,9 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
     .filter(Boolean);
   const armorItem = equipmentItems.find((item) => item.type === 'armor');
   const shieldItem = equipmentItems.find((item) => item.type === 'shield');
-  const acPreview = calculateAcPreview(armorItem, shieldItem, abilityMods, selectedClass);
-  const hpPreview = Math.max(1, (selectedClass?.hit_die || 8) + abilityMods.con);
-
-  const detail = {
-    species: selectedSpecies,
-    class: selectedClass,
-    background: selectedBackground,
-    acPreview,
-    hpPreview,
-  };
+  const hasCompleteScores = ABILITIES.every((ability) => isFilledInteger(draft.abilityScores[ability]));
+  const acPreview = selectedClass && hasCompleteScores ? calculateAcPreview(armorItem, shieldItem, abilityMods, selectedClass) : null;
+  const hpPreview = selectedClass && hasCompleteScores ? Math.max(1, (selectedClass.hit_die || 8) + (abilityMods.con || 0)) : null;
 
   function update(field, value) {
     setDraft((current) => ({ ...current, [field]: value }));
@@ -86,6 +87,21 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
       ...current,
       abilityScores: { ...current.abilityScores, [ability]: Number(value) },
     }));
+  }
+
+  function updateRolledAssignment(ability, rollIndex) {
+    setDraft((current) => {
+      const nextAssignment = { ...current.rolledAssignment, [ability]: rollIndex };
+      const rollEntry = current.rolledStats.currentSet[Number(rollIndex)];
+      return {
+        ...current,
+        rolledAssignment: nextAssignment,
+        abilityScores: {
+          ...current.abilityScores,
+          [ability]: rollEntry ? rollEntry.total : '',
+        },
+      };
+    });
   }
 
   function updateBackgroundBonus(ability, value) {
@@ -104,7 +120,8 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
         ? Object.fromEntries(ABILITIES.map((ability, index) => [ability, STANDARD_ARRAY[index]]))
         : method === 'point_buy'
           ? emptyScores(8)
-          : emptyScores(10),
+          : Object.fromEntries(ABILITIES.map((ability) => [ability, ''])),
+      rolledAssignment: emptyRolledAssignments(),
       rolledStats: { attemptsUsed: 0, currentSet: [], acceptedSet: [], rollToken: null },
     }));
   }
@@ -115,7 +132,8 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
     setDraft((current) => ({
       ...current,
       rolledStats: roll,
-      abilityScores: Object.fromEntries(ABILITIES.map((ability, index) => [ability, roll.currentSet[index].total])),
+      rolledAssignment: emptyRolledAssignments(),
+      abilityScores: Object.fromEntries(ABILITIES.map((ability) => [ability, ''])),
     }));
   }
 
@@ -204,7 +222,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
             <ChoiceStep title="Class">
               <CardGrid items={content.classes} selectedId={draft.classId} onSelect={(id) => {
                 update('classId', id);
-                setDraft((current) => ({ ...current, selectedSkills: [], cantripsKnown: [], spellsKnown: [] }));
+                setDraft((current) => ({ ...current, classId: id, selectedSkills: [], cantripsKnown: [], spellsKnown: [] }));
               }} />
             </ChoiceStep>
           )}
@@ -213,7 +231,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
             <ChoiceStep title="Background">
               <CardGrid items={content.backgrounds} selectedId={draft.backgroundId} onSelect={(id) => {
                 update('backgroundId', id);
-                setDraft((current) => ({ ...current, backgroundBonus: {}, selectedSkills: [] }));
+                setDraft((current) => ({ ...current, backgroundId: id, backgroundBonus: {}, selectedSkills: [] }));
               }} />
               <div className="impact-box">
                 <h3>Background ability bonus</h3>
@@ -251,9 +269,12 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
                     {rollingStats ? 'Rolling...' : draft.rolledStats.attemptsUsed === 0 ? 'Roll Stats' : 'Roll Again'} ({draft.rolledStats.attemptsUsed}/3 used)
                   </button>
                   {draft.rolledStats.currentSet.length > 0 && (
-                    <div className="roll-set">
+                    <div className="roll-set" aria-label="Rolled stat results">
                       {draft.rolledStats.currentSet.map((entry, index) => (
-                        <span key={index}>{entry.total} <small>({entry.dice.join(', ')})</small></span>
+                        <span key={index}>
+                          <strong>{entry.total}</strong>
+                          <small>Roll {index + 1}: {entry.dice.join(', ')}</small>
+                        </span>
                       ))}
                     </div>
                   )}
@@ -262,7 +283,16 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
               {draft.abilityMethod === 'point_buy' && (
                 <p className="helper-text">Point Buy spent: {pointBuySpent(draft.abilityScores)} / 27</p>
               )}
-              <ScoreGrid scores={draft.abilityScores} finalScores={finalScores} backgroundBonus={backgroundBonus} onChange={updateScore} method={draft.abilityMethod} />
+              <ScoreGrid
+                scores={draft.abilityScores}
+                finalScores={finalScores}
+                backgroundBonus={backgroundBonus}
+                onChange={updateScore}
+                method={draft.abilityMethod}
+                rolledStats={draft.rolledStats}
+                rolledAssignment={draft.rolledAssignment}
+                onAssignRoll={updateRolledAssignment}
+              />
             </ChoiceStep>
           )}
 
@@ -328,24 +358,21 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
 
       <aside className="creation-detail">
         <h3>Selection Details</h3>
-        <DetailBlock title={detail.species?.name} body={detail.species?.description} items={detail.species?.traits?.map((trait) => `${trait.name}: ${trait.description}`)} />
-        <DetailBlock title={detail.class?.name} body={detail.class?.description} items={[
-          `Hit Die: d${detail.class?.hit_die}`,
-          `Primary: ${detail.class?.primary_ability?.toUpperCase()}`,
-          `Saves: ${(detail.class?.saving_throws || []).map((save) => save.toUpperCase()).join(', ')}`,
-          detail.class?.spellcasting ? `Spellcasting: ${detail.class.spellcasting.ability.toUpperCase()}` : 'No level 1 spellcasting',
-        ]} />
-        <DetailBlock title={detail.background?.name} body={detail.background?.description} items={[
-          `Skills: ${(detail.background?.skills || []).map((id) => skillMap[id]?.name).join(', ')}`,
-          `ASI options: ${(detail.background?.asi_options || []).map((id) => id.toUpperCase()).join(', ')}`,
-          `Tool: ${detail.background?.tool}`,
-        ]} />
-        <div className="impact-box">
-          <h3>Live Impact</h3>
-          <p>HP: {hpPreview}</p>
-          <p>AC: {acPreview.total} ({acPreview.parts.map((part) => `${part.label} ${fmtMod(part.value)}`).join(', ')})</p>
-          <p>Initiative: {fmtMod(abilityMods.dex)}</p>
-        </div>
+        <CharacterSummary
+          step={step}
+          draft={draft}
+          selectedSpecies={selectedSpecies}
+          selectedClass={selectedClass}
+          selectedBackground={selectedBackground}
+          skillMap={skillMap}
+          backgroundBonus={backgroundBonus}
+          finalScores={finalScores}
+          abilityMods={abilityMods}
+          allSkillIds={allSkillIds}
+          equipmentItems={equipmentItems}
+          acPreview={acPreview}
+          hpPreview={hpPreview}
+        />
       </aside>
     </main>
   );
@@ -368,14 +395,38 @@ function CardGrid({ items, selectedId, onSelect }) {
   );
 }
 
-function ScoreGrid({ scores, finalScores, backgroundBonus, onChange, method }) {
+function ScoreGrid({ scores, finalScores, backgroundBonus, onChange, method, rolledStats, rolledAssignment, onAssignRoll }) {
+  const assignedRolls = new Set(Object.values(rolledAssignment || {}).filter((value) => value !== ''));
   return (
     <div className="score-grid">
       {ABILITIES.map((ability) => (
         <label key={ability} className="score-card">
           <span>{ABILITY_LABELS[ability]}</span>
-          <input type="number" min={method === 'rolled' ? 3 : method === 'point_buy' ? 8 : 8} max={method === 'rolled' ? 18 : 15} value={scores[ability]} onChange={(e) => onChange(ability, e.target.value)} />
-          <small>Base {scores[ability]} + {backgroundBonus[ability] || 0} = {finalScores[ability]} ({fmtMod(mod(finalScores[ability]))})</small>
+          {method === 'rolled' ? (
+            <select
+              value={rolledAssignment?.[ability] ?? ''}
+              onChange={(e) => onAssignRoll(ability, e.target.value)}
+              disabled={!rolledStats?.currentSet?.length}
+            >
+              <option value="">Assign roll</option>
+              {(rolledStats?.currentSet || []).map((entry, index) => {
+                const value = String(index);
+                const usedElsewhere = assignedRolls.has(value) && rolledAssignment?.[ability] !== value;
+                return (
+                  <option key={value} value={value} disabled={usedElsewhere}>
+                    {entry.total} - Roll {index + 1}
+                  </option>
+                );
+              })}
+            </select>
+          ) : (
+            <input type="number" min={method === 'point_buy' ? 8 : 8} max={15} value={scores[ability]} onChange={(e) => onChange(ability, e.target.value)} />
+          )}
+          <small>
+            {scores[ability] === '' || finalScores[ability] === null
+              ? 'Choose a base score'
+              : `Base ${scores[ability]} + ${backgroundBonus[ability] || 0} = ${finalScores[ability]} (${fmtMod(mod(finalScores[ability]))})`}
+          </small>
         </label>
       ))}
     </div>
@@ -438,6 +489,93 @@ function ReviewPanel({ draft, content, finalScores, abilityMods, backgroundBonus
   );
 }
 
+function CharacterSummary({
+  step,
+  draft,
+  selectedSpecies,
+  selectedClass,
+  selectedBackground,
+  skillMap,
+  backgroundBonus,
+  finalScores,
+  abilityMods,
+  allSkillIds,
+  equipmentItems,
+  acPreview,
+  hpPreview,
+}) {
+  const showSpecies = Boolean(selectedSpecies);
+  const showClass = step >= 1 && Boolean(selectedClass);
+  const showBackground = step >= 2 && Boolean(selectedBackground);
+  const showAbilities = step >= 3 && validAbilityScores(draft);
+  const showSkills = step >= 4 && allSkillIds.size > 0;
+  const showEquipment = step >= 5 && Boolean(draft.equipmentChoice);
+
+  return (
+    <>
+      {!showSpecies && !showClass && !showBackground && (
+        <p className="helper-text">Selections will appear here as you make them.</p>
+      )}
+      {showSpecies && (
+        <DetailBlock
+          title={selectedSpecies.name}
+          body={selectedSpecies.description}
+          items={selectedSpecies.traits?.map((trait) => `${trait.name}: ${trait.description}`)}
+        />
+      )}
+      {showClass && (
+        <DetailBlock
+          title={selectedClass.name}
+          body={selectedClass.description}
+          items={[
+            `Hit Die: d${selectedClass.hit_die}`,
+            `Primary: ${selectedClass.primary_ability?.toUpperCase()}`,
+            `Saves: ${(selectedClass.saving_throws || []).map((save) => save.toUpperCase()).join(', ')}`,
+            selectedClass.spellcasting ? `Spellcasting: ${selectedClass.spellcasting.ability.toUpperCase()}` : 'No level 1 spellcasting',
+          ]}
+        />
+      )}
+      {showBackground && (
+        <DetailBlock
+          title={selectedBackground.name}
+          body={selectedBackground.description}
+          items={[
+            `Skills: ${(selectedBackground.skills || []).map((id) => skillMap[id]?.name).join(', ')}`,
+            `Ability bonus: ${(selectedBackground.asi_options || []).map((id) => `${id.toUpperCase()} +${backgroundBonus[id] || 0}`).join(', ')}`,
+            `Tool: ${selectedBackground.tool}`,
+          ]}
+        />
+      )}
+      {showAbilities && (
+        <DetailBlock
+          title="Ability Scores"
+          body={ABILITIES.map((ability) => `${ability.toUpperCase()} ${finalScores[ability]} (${fmtMod(abilityMods[ability])})`).join('; ')}
+        />
+      )}
+      {showSkills && (
+        <DetailBlock
+          title="Skills"
+          body={[...allSkillIds].map((id) => skillMap[id]?.name).filter(Boolean).join(', ')}
+        />
+      )}
+      {showEquipment && (
+        <DetailBlock
+          title="Equipment"
+          body={draft.equipmentChoice === 'pack' ? equipmentItems.map((item) => item.name).join(', ') : 'Starting gold'}
+        />
+      )}
+      <div className="impact-box">
+        <h3>Live Impact</h3>
+        <p>HP: {hpPreview ?? '--'}</p>
+        <p>
+          AC: {acPreview ? `${acPreview.total} (${acPreview.parts.map((part) => `${part.label} ${fmtMod(part.value)}`).join(', ')})` : '--'}
+        </p>
+        <p>Initiative: {showAbilities ? fmtMod(abilityMods.dex) : '--'}</p>
+      </div>
+    </>
+  );
+}
+
 function normalizeBackgroundBonus(input, background) {
   const allowed = background?.asi_options || [];
   const bonus = Object.fromEntries(ABILITIES.map((ability) => [ability, 0]));
@@ -457,12 +595,23 @@ function pointBuySpent(scores) {
 }
 
 function validAbilityScores(draft) {
-  const values = Object.values(draft.abilityScores).map(Number);
-  if (values.some((value) => !Number.isInteger(value))) return false;
+  if (ABILITIES.some((ability) => !isFilledInteger(draft.abilityScores[ability]))) return false;
+  const values = ABILITIES.map((ability) => Number(draft.abilityScores[ability]));
   if (draft.abilityMethod === 'standard_array') return JSON.stringify([...values].sort((a, b) => b - a)) === JSON.stringify(STANDARD_ARRAY);
   if (draft.abilityMethod === 'point_buy') return pointBuySpent(draft.abilityScores) === 27 && values.every((value) => value >= 8 && value <= 15);
-  if (draft.abilityMethod === 'rolled') return Boolean(draft.rolledStats.rollToken) && draft.rolledStats.acceptedSet.length === 6 && JSON.stringify([...values].sort((a, b) => b - a)) === JSON.stringify([...draft.rolledStats.acceptedSet].sort((a, b) => b - a));
+  if (draft.abilityMethod === 'rolled') {
+    const assignments = Object.values(draft.rolledAssignment || {});
+    const uniqueAssignments = new Set(assignments.filter((value) => value !== ''));
+    return Boolean(draft.rolledStats.rollToken)
+      && draft.rolledStats.acceptedSet.length === 6
+      && uniqueAssignments.size === 6
+      && JSON.stringify([...values].sort((a, b) => b - a)) === JSON.stringify([...draft.rolledStats.acceptedSet].sort((a, b) => b - a));
+  }
   return false;
+}
+
+function isFilledInteger(value) {
+  return value !== '' && value !== null && value !== undefined && Number.isInteger(Number(value));
 }
 
 function requiredSpellCount(selectedClass, abilityMods) {
