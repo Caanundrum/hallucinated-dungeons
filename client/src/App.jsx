@@ -32,6 +32,11 @@ function rollDice(diceCount, dieSides) {
   return total;
 }
 
+function fmtMod(value) {
+  const number = Number(value || 0);
+  return number >= 0 ? `+${number}` : String(number);
+}
+
 // ── BUG-021: Fallback roll detector ──────────────────────────────────────
 // When DM1 requests a roll in natural language but the [ROLL:] sentinel tag
 // is absent or unparseable, detect the roll request and show a generic roller.
@@ -61,6 +66,8 @@ function App() {
   const [connected, setConnected] = useState(false);
   const [characterStatus, setCharacterStatus] = useState('loading'); // loading | required | ready
   const [characterContent, setCharacterContent] = useState(null);
+  const [currentCharacter, setCurrentCharacter] = useState(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [characterError, setCharacterError] = useState(null);
   const [characterSaving, setCharacterSaving] = useState(false);
 
@@ -76,11 +83,10 @@ function App() {
 
   // Dice roller state
   const [pendingRoll, setPendingRoll] = useState(null);     // { diceCount, dieSides, modifier } | null
-  const [rollResult, setRollResult] = useState(null);       // { rolled, modifier, total } | null
+  const [rollResult, setRollResult] = useState(null);       // retained for legacy roll result cleanup
   // BUG-021: fallback roller state for natural-language roll detection without sentinel tag
   const [fallbackRoll, setFallbackRoll] = useState(null);   // { dieSides, modifier } | null — modifier is user-entered
   const [fallbackModInput, setFallbackModInput] = useState('0'); // controlled input for modifier
-  const [fallbackResult, setFallbackResult] = useState(null); // { rolled, modifier, total } | null
 
   const narrativeEndRef = useRef(null);
   const rulesEndRef = useRef(null);
@@ -126,6 +132,7 @@ function App() {
       // Phase 4A: character creation gates DM1 session_start.
       setNarrative([]);
       setRulesLog([]);
+      setCurrentCharacter(null);
       setCharacterStatus('loading');
       pendingSessionStartRef.current = true;
       socket.emit('get_character_data', { sessionId: id, sessionToken });
@@ -175,19 +182,22 @@ function App() {
       setCharacterContent(content);
       setCharacterError(null);
       if (character) {
+        setCurrentCharacter(character);
         setCharacterStatus('ready');
         if (pendingSessionStartRef.current) {
           pendingSessionStartRef.current = false;
           socket.emit('session_start');
         }
       } else {
+        setCurrentCharacter(null);
         setCharacterStatus('required');
       }
     });
 
-    socket.on('character_ready', () => {
+    socket.on('character_ready', ({ character } = {}) => {
       setCharacterSaving(false);
       setCharacterError(null);
+      if (character) setCurrentCharacter(character);
       setCharacterStatus('ready');
       pendingSessionStartRef.current = false;
       socket.emit('session_start');
@@ -221,17 +231,14 @@ function App() {
           dieSides:  rollTag.dieSides,
           modifier:  rollTag.modifier,
         });
-        setRollResult(null);
         // Clear any stale fallback state
         setFallbackRoll(null);
-        setFallbackResult(null);
         setFallbackModInput('0');
       } else {
         // BUG-021 fallback: no parseable sentinel — scan natural language for roll request
         const fallback = detectFallbackRoll(message);
         if (fallback) {
           setFallbackRoll(fallback);
-          setFallbackResult(null);
           setFallbackModInput('0');
         }
       }
@@ -317,7 +324,12 @@ function App() {
     const { diceCount, dieSides, modifier } = pendingRoll;
     const rolled = rollDice(diceCount, dieSides);
     const total  = rolled + modifier;
-    setRollResult({ rolled, modifier, total });
+    const modStr = modifier > 0 ? ` + ${modifier}` : modifier < 0 ? ` - ${Math.abs(modifier)}` : '';
+    const rollMsg = `[ROLL RESULT: ${total}] I rolled a ${total} (${diceCount}d${dieSides}${modStr} = ${total})`;
+    const displayRollMsg = rollMsg.replace(/^\[ROLL RESULT: \d+\]\s*/, '');
+    setNarrative((prev) => [...prev, { type: 'player', text: displayRollMsg, id: Date.now() }]);
+    socket.emit('story_input', { message: rollMsg });
+    setPendingRoll(null);
   }, [pendingRoll]);
 
   // ── BUG-021: Fallback roller handlers ────────────────────────────────────
@@ -326,22 +338,15 @@ function App() {
     const modifier = parseInt(fallbackModInput, 10) || 0;
     const rolled = rollDice(1, fallbackRoll.dieSides);
     const total  = rolled + modifier;
-    setFallbackResult({ rolled, modifier, total });
-  }, [fallbackRoll, fallbackModInput]);
-
-  const handleSubmitFallbackRoll = useCallback(() => {
-    if (!fallbackResult || !fallbackRoll) return;
     const { dieSides } = fallbackRoll;
-    const { modifier, total } = fallbackResult;
     const modStr = modifier > 0 ? ` + ${modifier}` : modifier < 0 ? ` - ${Math.abs(modifier)}` : '';
     const rollMsg = `[ROLL RESULT: ${total}] I rolled a ${total} (1d${dieSides}${modStr} = ${total})`;
     const displayRollMsg = rollMsg.replace(/^\[ROLL RESULT: \d+\]\s*/, '');
     setNarrative((prev) => [...prev, { type: 'player', text: displayRollMsg, id: Date.now() }]);
     socket.emit('story_input', { message: rollMsg });
     setFallbackRoll(null);
-    setFallbackResult(null);
     setFallbackModInput('0');
-  }, [fallbackResult, fallbackRoll]);
+  }, [fallbackRoll, fallbackModInput]);
 
   const handleSubmitRoll = useCallback(() => {
     if (!rollResult || !pendingRoll) return;
@@ -415,6 +420,7 @@ function App() {
   const storyTextareaDisabled = !connected || !sessionId;
   // During a pending roll (primary or fallback), the story input is locked — the dice roller takes over
   const storyDisabled = dm1Typing || !connected || !sessionId || !!pendingRoll || !!fallbackRoll;
+  void handleSubmitRoll;
   // BUG-017: rules textarea stays active during DM2 typing; only the ASK button locks
   const rulesTextareaDisabled = !connected || !sessionId;
   const rulesDisabled = dm2Typing || !connected || !sessionId;
@@ -470,6 +476,9 @@ function App() {
         <section className="panel narrative-panel">
           <div className="panel-header">
             <span className="panel-label dm1-label">The Dungeon Master</span>
+            <button type="button" className="sheet-toggle" onClick={() => setSheetOpen(true)} disabled={!currentCharacter}>
+              Character Sheet
+            </button>
           </div>
 
           <div className="message-feed" id="narrative-feed">
@@ -504,31 +513,14 @@ function App() {
                   </span>
                 </div>
 
-                {!rollResult ? (
-                  <button className="roll-btn" onClick={handleRoll}>
-                    Roll {pendingRoll.diceCount}d{pendingRoll.dieSides}
-                    {pendingRoll.modifier !== 0 && (
-                      <span className="roll-btn-mod">
-                        {pendingRoll.modifier > 0 ? ` +${pendingRoll.modifier}` : ` ${pendingRoll.modifier}`}
-                      </span>
-                    )}
-                  </button>
-                ) : (
-                  <div className="roll-result-area">
-                    <div className="roll-result">
-                      <span className="roll-result-total">{rollResult.total}</span>
-                      <span className="roll-result-breakdown">
-                        (rolled {rollResult.rolled}
-                        {rollResult.modifier > 0 && ` + ${rollResult.modifier}`}
-                        {rollResult.modifier < 0 && ` − ${Math.abs(rollResult.modifier)}`}
-                        )
-                      </span>
-                    </div>
-                    <button className="submit-roll-btn" onClick={handleSubmitRoll}>
-                      Submit Roll
-                    </button>
-                  </div>
-                )}
+                <button className="roll-btn" onClick={handleRoll}>
+                  Roll {pendingRoll.diceCount}d{pendingRoll.dieSides}
+                  {pendingRoll.modifier !== 0 && (
+                    <span className="roll-btn-mod">
+                      {pendingRoll.modifier > 0 ? ` +${pendingRoll.modifier}` : ` ${pendingRoll.modifier}`}
+                    </span>
+                  )}
+                </button>
               </div>
             )}
 
@@ -545,38 +537,21 @@ function App() {
                     className="fallback-mod-input"
                     type="number"
                     value={fallbackModInput}
-                    onChange={(e) => { setFallbackModInput(e.target.value); setFallbackResult(null); }}
+                    onChange={(e) => setFallbackModInput(e.target.value)}
                     min="-10"
                     max="20"
                   />
                 </div>
-                {!fallbackResult ? (
-                  <button className="roll-btn" onClick={handleFallbackRoll}>
-                    Roll 1d{fallbackRoll.dieSides}
-                    {parseInt(fallbackModInput, 10) !== 0 && (
-                      <span className="roll-btn-mod">
-                        {parseInt(fallbackModInput, 10) > 0
-                          ? ` +${fallbackModInput}`
-                          : ` ${fallbackModInput}`}
-                      </span>
-                    )}
-                  </button>
-                ) : (
-                  <div className="roll-result-area">
-                    <div className="roll-result">
-                      <span className="roll-result-total">{fallbackResult.total}</span>
-                      <span className="roll-result-breakdown">
-                        (rolled {fallbackResult.rolled}
-                        {fallbackResult.modifier > 0 && ` + ${fallbackResult.modifier}`}
-                        {fallbackResult.modifier < 0 && ` − ${Math.abs(fallbackResult.modifier)}`}
-                        )
-                      </span>
-                    </div>
-                    <button className="submit-roll-btn" onClick={handleSubmitFallbackRoll}>
-                      Submit Roll
-                    </button>
-                  </div>
-                )}
+                <button className="roll-btn" onClick={handleFallbackRoll}>
+                  Roll 1d{fallbackRoll.dieSides}
+                  {parseInt(fallbackModInput, 10) !== 0 && (
+                    <span className="roll-btn-mod">
+                      {parseInt(fallbackModInput, 10) > 0
+                        ? ` +${fallbackModInput}`
+                        : ` ${fallbackModInput}`}
+                    </span>
+                  )}
+                </button>
               </div>
             )}
 
@@ -663,6 +638,111 @@ function App() {
         </section>
 
       </main>
+      {sheetOpen && currentCharacter && (
+        <CharacterSheetModal character={currentCharacter} onClose={() => setSheetOpen(false)} />
+      )}
+    </div>
+  );
+}
+
+function CharacterSheetModal({ character, onClose }) {
+  const identity = character.identity || {};
+  const abilities = character.abilities || {};
+  const derived = character.derived_stats || {};
+  const attacks = derived.attack_breakdowns || [];
+  const skills = derived.skill_modifiers || {};
+  const saves = derived.saving_throw_modifiers || {};
+  const features = character.features || [];
+  const inventory = character.inventory || [];
+
+  return (
+    <div className="sheet-backdrop" role="dialog" aria-modal="true" aria-label="Character sheet">
+      <div className="character-sheet-modal">
+        <div className="sheet-header">
+          <div>
+            <p className="eyebrow">Character Sheet</p>
+            <h2>{identity.name}</h2>
+            <p>{identity.species_name} {identity.class_name} - Level {identity.level || derived.level || 1}</p>
+          </div>
+          <button type="button" className="secondary-btn" onClick={onClose}>Close</button>
+        </div>
+
+        <div className="sheet-stat-strip">
+          <SheetStat label="HP" value={`${derived.hp ?? '--'}/${derived.max_hp ?? '--'}`} />
+          <SheetStat label="AC" value={derived.armor_class ?? '--'} />
+          <SheetStat label="Speed" value={`${derived.speed ?? '--'} ft`} />
+          <SheetStat label="Init" value={fmtMod(derived.initiative)} />
+          <SheetStat label="PB" value={fmtMod(derived.proficiency_bonus)} />
+        </div>
+
+        <div className="sheet-grid">
+          <section className="sheet-section">
+            <h3>Abilities</h3>
+            <div className="mini-grid">
+              {Object.entries(abilities.final_scores || {}).map(([ability, score]) => (
+                <SheetStat key={ability} label={ability.toUpperCase()} value={`${score} (${fmtMod(abilities.modifiers?.[ability])})`} />
+              ))}
+            </div>
+          </section>
+
+          <section className="sheet-section">
+            <h3>Attacks</h3>
+            {attacks.length ? attacks.map((attack) => (
+              <div key={attack.weapon_id || attack.name} className="sheet-line">
+                <strong>{attack.name}</strong>
+                <span>Hit {fmtMod(attack.attack_total)} - {attack.damage_formula}</span>
+              </div>
+            )) : <p className="muted-text">No equipped weapon.</p>}
+          </section>
+
+          <section className="sheet-section">
+            <h3>Saving Throws</h3>
+            <div className="mini-grid">
+              {Object.entries(saves).map(([ability, save]) => (
+                <SheetStat key={ability} label={ability.toUpperCase()} value={`${fmtMod(save.total)}${save.proficient ? ' prof' : ''}`} />
+              ))}
+            </div>
+          </section>
+
+          <section className="sheet-section">
+            <h3>Skills</h3>
+            <div className="skill-list">
+              {Object.entries(skills).map(([skill, data]) => (
+                <span key={skill}>{skill.replaceAll('_', ' ')} {fmtMod(data.total)}{data.proficient ? ' *' : ''}</span>
+              ))}
+            </div>
+          </section>
+
+          <section className="sheet-section">
+            <h3>Features</h3>
+            {features.map((feature) => (
+              <div key={`${feature.source}-${feature.name}`} className="sheet-line">
+                <strong>{feature.name}</strong>
+                <span>{feature.description}</span>
+              </div>
+            ))}
+          </section>
+
+          <section className="sheet-section">
+            <h3>Equipment</h3>
+            {inventory.map((item) => (
+              <div key={item.id} className="sheet-line">
+                <strong>{item.name}</strong>
+                <span>{item.description}</span>
+              </div>
+            ))}
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SheetStat({ label, value }) {
+  return (
+    <div className="sheet-stat">
+      <span>{label}</span>
+      <strong>{value}</strong>
     </div>
   );
 }

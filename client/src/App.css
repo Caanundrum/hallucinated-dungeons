@@ -96,6 +96,10 @@ html, body, #root {
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
 }
 
 .panel-label {
@@ -107,6 +111,23 @@ html, body, #root {
 }
 .dm1-label { color: var(--dm1-accent); }
 .dm2-label { color: var(--dm2-accent); }
+
+.sheet-toggle {
+  background: #242436;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.35rem 0.65rem;
+}
+
+.sheet-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
 
 /* ── Message feed ────────────────────────────────────────────────────────── */
 .message-feed {
@@ -430,6 +451,128 @@ textarea:disabled { opacity: 0.4; cursor: not-allowed; }
 .fallback-mod-input::-webkit-inner-spin-button,
 .fallback-mod-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .fallback-mod-input:focus { border-color: #a070e0; box-shadow: 0 0 0 2px #6a3fa055; }
+
+/* Character sheet modal */
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: #00000099;
+}
+
+.character-sheet-modal {
+  width: min(62rem, 100%);
+  max-height: min(44rem, 92vh);
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #15151e;
+  box-shadow: 0 1rem 3rem #00000066;
+  padding: 1rem;
+}
+
+.sheet-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.85rem;
+}
+
+.sheet-header h2 {
+  color: var(--dm1-accent);
+}
+
+.sheet-header p,
+.muted-text {
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+}
+
+.sheet-stat-strip,
+.mini-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(6rem, 1fr));
+  gap: 0.6rem;
+}
+
+.sheet-stat-strip {
+  margin: 1rem 0;
+}
+
+.sheet-stat,
+.sheet-section {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #181822;
+}
+
+.sheet-stat {
+  padding: 0.65rem;
+  text-align: center;
+}
+
+.sheet-stat span {
+  display: block;
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+}
+
+.sheet-stat strong {
+  color: #d8c08a;
+  font-family: var(--font-ui);
+  font-size: 1rem;
+}
+
+.sheet-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 0.75rem;
+}
+
+.sheet-section {
+  padding: 0.85rem;
+}
+
+.sheet-section h3 {
+  color: #d8c08a;
+  margin-bottom: 0.6rem;
+}
+
+.sheet-line {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.45rem 0;
+  border-top: 1px solid #2e2e4255;
+}
+
+.sheet-line:first-of-type {
+  border-top: none;
+}
+
+.sheet-line span,
+.skill-list span {
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.skill-list {
+  columns: 2;
+}
+
+.skill-list span {
+  display: block;
+  margin-bottom: 0.25rem;
+  text-transform: capitalize;
+}
 
 /* ── Phase 4A character creation ───────────────────────────────────────── */
 .creation-shell {

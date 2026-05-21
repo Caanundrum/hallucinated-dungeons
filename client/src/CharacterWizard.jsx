@@ -29,6 +29,14 @@ function emptyRolledAssignments() {
   return Object.fromEntries(ABILITIES.map((ability) => [ability, '']));
 }
 
+function scoresFromRolledAssignments(rolledStats, rolledAssignment) {
+  return Object.fromEntries(ABILITIES.map((ability) => {
+    const rollIndex = rolledAssignment?.[ability];
+    const rollEntry = rollIndex === '' || rollIndex === undefined ? null : rolledStats?.currentSet?.[Number(rollIndex)];
+    return [ability, rollEntry ? rollEntry.total : ''];
+  }));
+}
+
 export default function CharacterWizard({ content, error, saving, rollingStats, onRollStats, onClearError, onSave }) {
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState(() => ({
@@ -120,9 +128,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
         ? Object.fromEntries(ABILITIES.map((ability, index) => [ability, STANDARD_ARRAY[index]]))
         : method === 'point_buy'
           ? emptyScores(8)
-          : Object.fromEntries(ABILITIES.map((ability) => [ability, ''])),
-      rolledAssignment: emptyRolledAssignments(),
-      rolledStats: { attemptsUsed: 0, currentSet: [], acceptedSet: [], rollToken: null },
+          : scoresFromRolledAssignments(current.rolledStats, current.rolledAssignment),
     }));
   }
 
@@ -264,10 +270,13 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
               {draft.abilityMethod === 'rolled' && (
                 <div className="impact-box">
                   <h3>Rolled Stats</h3>
-                  <p>Each attempt rolls six scores using 4d6 drop the lowest. Rolling again replaces these scores. You cannot go back. The dice have spoken, and they have terrible filing habits.</p>
+                  <p>Each attempt rolls six scores using 4d6 drop the lowest. Switching methods will not reset your roll attempts. Rolling again replaces the current set, because the dice do not offer refunds.</p>
                   <button type="button" className="secondary-btn" disabled={rollingStats || draft.rolledStats.attemptsUsed >= 3} onClick={handleRollStats}>
-                    {rollingStats ? 'Rolling...' : draft.rolledStats.attemptsUsed === 0 ? 'Roll Stats' : 'Roll Again'} ({draft.rolledStats.attemptsUsed}/3 used)
+                    {rollingStats ? 'Rolling...' : draft.rolledStats.attemptsUsed >= 3 ? 'No Rolls Left' : draft.rolledStats.attemptsUsed === 0 ? 'Roll Stats' : 'Roll Again'} ({draft.rolledStats.attemptsUsed}/3 used)
                   </button>
+                  {draft.rolledStats.attemptsUsed >= 3 && (
+                    <p className="helper-text">All three attempts are used. Assign the current set to continue.</p>
+                  )}
                   {draft.rolledStats.currentSet.length > 0 && (
                     <div className="roll-set" aria-label="Rolled stat results">
                       {draft.rolledStats.currentSet.map((entry, index) => (
