@@ -902,3 +902,83 @@ textarea:disabled { opacity: 0.4; cursor: not-allowed; }
     max-height: 40vh;
   }
 }
+
+@media (max-width: 700px) {
+  .app {
+    height: 100dvh;
+  }
+
+  .app-header {
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+  }
+
+  .app-header h1 {
+    font-size: 1.25rem;
+  }
+
+  .connection-status {
+    margin-top: 0.1rem;
+    white-space: nowrap;
+  }
+
+  .app-main {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .panel {
+    min-height: 78dvh;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .panel:last-child {
+    border-bottom: none;
+  }
+
+  .rules-panel {
+    min-height: 70dvh;
+  }
+
+  .panel-header,
+  .input-form {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .message-feed {
+    padding: 1rem;
+  }
+
+  .input-row {
+    align-items: stretch;
+  }
+
+  textarea {
+    min-width: 0;
+  }
+
+  .sheet-backdrop {
+    padding: 0.5rem;
+  }
+
+  .character-sheet-modal {
+    max-height: 94dvh;
+    padding: 0.85rem;
+  }
+
+  .sheet-header {
+    flex-direction: column;
+  }
+
+  .sheet-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .skill-list {
+    columns: 1;
+  }
+}
