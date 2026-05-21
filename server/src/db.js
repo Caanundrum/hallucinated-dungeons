@@ -65,19 +65,89 @@ async function getCharacterForSession(sessionId) {
   return data || null;
 }
 
-async function saveCharacterForSession(sessionId, characterSheet) {
-  await getOrCreateDefaultCampaign();
+async function getAccessibleCharacters(sessionId) {
   const { data, error } = await supabase
     .from('characters')
-    .upsert({
+    .select('*')
+    .eq('campaign_id', DEFAULT_CAMPAIGN_ID)
+    .eq('status', 'active')
+    .or(`owner_session_id.eq.${sessionId},session_id.eq.${sessionId}`)
+    .order('updated_at', { ascending: false });
+  if (error) throw error;
+
+  const seen = new Set();
+  return (data || []).filter((character) => {
+    if (seen.has(character.id)) return false;
+    seen.add(character.id);
+    return true;
+  });
+}
+
+async function getAccessibleCharacter(sessionId, characterId) {
+  const characters = await getAccessibleCharacters(sessionId);
+  return characters.find((character) => character.id === characterId) || null;
+}
+
+async function setActiveCharacterForSession(sessionId, characterId) {
+  const character = await getAccessibleCharacter(sessionId, characterId);
+  if (!character) return null;
+
+  const timestamp = new Date().toISOString();
+  const { error: clearError } = await supabase
+    .from('characters')
+    .update({ session_id: null, updated_at: timestamp })
+    .eq('campaign_id', DEFAULT_CAMPAIGN_ID)
+    .eq('session_id', sessionId);
+  if (clearError) throw clearError;
+
+  const { data, error } = await supabase
+    .from('characters')
+    .update({
+      session_id: sessionId,
+      owner_session_id: character.owner_session_id || sessionId,
+      updated_at: timestamp,
+    })
+    .eq('id', characterId)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function clearActiveCharacterForSession(sessionId, characterId = null) {
+  let query = supabase
+    .from('characters')
+    .update({ session_id: null, updated_at: new Date().toISOString() })
+    .eq('campaign_id', DEFAULT_CAMPAIGN_ID)
+    .eq('session_id', sessionId);
+
+  if (characterId) query = query.eq('id', characterId);
+  const { error } = await query;
+  if (error) throw error;
+}
+
+async function saveCharacterForSession(sessionId, characterSheet) {
+  await getOrCreateDefaultCampaign();
+
+  const timestamp = new Date().toISOString();
+  const { error: clearError } = await supabase
+    .from('characters')
+    .update({ session_id: null, updated_at: timestamp })
+    .eq('campaign_id', DEFAULT_CAMPAIGN_ID)
+    .eq('session_id', sessionId);
+  if (clearError) throw clearError;
+
+  const { data, error } = await supabase
+    .from('characters')
+    .insert({
       session_id: sessionId,
       campaign_id: DEFAULT_CAMPAIGN_ID,
       owner_session_id: sessionId,
       name: characterSheet.identity.name,
       character_sheet: characterSheet,
       status: 'active',
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'session_id' })
+      updated_at: timestamp,
+    })
     .select('*')
     .single();
   if (error) throw error;
@@ -93,6 +163,49 @@ async function saveCharacterForSession(sessionId, characterSheet) {
   if (linkError) throw linkError;
 
   return data;
+}
+
+async function upsertCharacterPresence({
+  sessionId,
+  characterId,
+  presence = 'present',
+  inCombat = false,
+}) {
+  const { data, error } = await supabase
+    .from('character_presence')
+    .upsert({
+      campaign_id: DEFAULT_CAMPAIGN_ID,
+      character_id: characterId,
+      session_id: sessionId || null,
+      presence,
+      in_combat: Boolean(inCombat),
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'campaign_id,character_id' })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function getCharacterPresenceForCampaign() {
+  const { data, error } = await supabase
+    .from('character_presence')
+    .select('*, characters(name, character_sheet)')
+    .eq('campaign_id', DEFAULT_CAMPAIGN_ID)
+    .order('updated_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+async function getCharacterPresence(characterId) {
+  const { data, error } = await supabase
+    .from('character_presence')
+    .select('*')
+    .eq('campaign_id', DEFAULT_CAMPAIGN_ID)
+    .eq('character_id', characterId)
+    .maybeSingle();
+  if (error && error.code !== 'PGRST116') throw error;
+  return data || null;
 }
 
 // ── world_state ────────────────────────────────────────────────────────────
@@ -377,7 +490,14 @@ module.exports = {
   DEFAULT_CAMPAIGN_ID,
   getOrCreateDefaultCampaign,
   getCharacterForSession,
+  getAccessibleCharacters,
+  getAccessibleCharacter,
+  setActiveCharacterForSession,
+  clearActiveCharacterForSession,
   saveCharacterForSession,
+  upsertCharacterPresence,
+  getCharacterPresenceForCampaign,
+  getCharacterPresence,
   // world_state
   initWorldState,
   getWorldState,

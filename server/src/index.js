@@ -140,6 +140,55 @@ function characterSheetToWorldStats(characterSheet) {
   };
 }
 
+function summarizeCharacterForClient(row) {
+  const sheet = row.character_sheet || {};
+  const identity = sheet.identity || {};
+  const derived = sheet.derived_stats || {};
+  return {
+    id: row.id,
+    name: row.name || identity.name || 'Unnamed Character',
+    status: row.status,
+    isActiveForSession: Boolean(row.session_id),
+    identity,
+    summary: {
+      species: identity.species_name || identity.species || '',
+      className: identity.class_name || identity.class || '',
+      level: identity.level || derived.level || 1,
+      hp: derived.hp ?? null,
+      maxHp: derived.max_hp ?? null,
+      armorClass: derived.armor_class ?? null,
+    },
+    character: sheet,
+    updatedAt: row.updated_at,
+  };
+}
+
+function describePartyChange(type, characterSheet, worldState, presenceRows = []) {
+  const identity = characterSheet.identity || {};
+  const derived = characterSheet.derived_stats || {};
+  const scene = worldState.scene_presence || {};
+  const activeParty = presenceRows
+    .filter((row) => row.presence === 'present')
+    .map((row) => row.characters?.name || row.characters?.character_sheet?.identity?.name || row.character_id);
+
+  return [
+    '[PARTY CHANGE]',
+    `Event: ${type}`,
+    `Character: ${identity.name || 'Unknown'}; ${identity.species_name || identity.species || 'Unknown species'} ${identity.class_name || identity.class || 'Unknown class'} level ${identity.level || derived.level || 1}`,
+    `Current location: ${scene.exact_location || worldState.current_location || 'not yet established'}`,
+    `Scene NPCs present: ${formatList(scene.present_npcs)}`,
+    `Available exits: ${formatList(scene.available_exits)}`,
+    `Active party now: ${activeParty.length ? activeParty.join(', ') : 'none established'}`,
+    type === 'leave_combat'
+      ? 'Combat rule: this character remains present, vulnerable, and cannot be written safely out until combat ends.'
+      : 'Narrate the party change naturally without teleporting anyone or contradicting the current location.',
+  ].join('\n');
+}
+
+function formatList(value) {
+  return Array.isArray(value) && value.length > 0 ? value.join(', ') : 'none established';
+}
+
 async function syncCharacterToWorldState(sessionId, characterSheet) {
   const row = await db.getWorldState(sessionId);
   const current = row?.state || db.DEFAULT_WORLD_STATE;
@@ -159,6 +208,62 @@ function hasValidSocketSession(socket, sessionId, sessionToken) {
     && socket.sessionId === sessionId
     && isValidSessionToken(sessionId, sessionToken)
   );
+}
+
+async function getCombatActive(sessionId) {
+  const row = await db.getWorldState(sessionId);
+  return Boolean(row?.state?.combat_state?.active);
+}
+
+async function narratePartyChange(socket, sessionId, type, characterSheet) {
+  const history = await db.getSessionHistory(sessionId);
+  const narrativeHistory = history.filter((m) => m.role === 'player_dm1' || m.role === 'dm1');
+  if (narrativeHistory.length === 0) return;
+  if (activeDm1Sessions.has(sessionId)) return;
+  activeDm1Sessions.add(sessionId);
+
+  socket.emit('dm1_typing', true);
+  try {
+    const worldStateRow = await db.getWorldState(sessionId);
+    const worldState = worldStateRow?.state || db.DEFAULT_WORLD_STATE;
+    const presenceRows = await db.getCharacterPresenceForCampaign().catch(() => []);
+    const partyPrompt = describePartyChange(type, characterSheet, worldState, presenceRows);
+    const { systemPrompt, messages } = await contextBuilder.build({
+      sessionId,
+      dm1Prompt: DM1_PROMPT,
+      playerMessage: partyPrompt,
+    });
+
+    const response = await retryWithBackoff(() => ai.generateText({
+      model: DM1_MODEL,
+      maxTokens: 700,
+      system: systemPrompt,
+      messages,
+    }));
+
+    const safeReply = await moderateAssistantReply(
+      response.text,
+      'The party shifts position, but the moment refuses to settle cleanly. The Dungeon Master keeps everyone anchored where the scene already placed them.'
+    );
+    const currentTurn = worldState.session_turn ?? 0;
+    await db.saveMessage(sessionId, 'dm1', safeReply, currentTurn);
+    socket.emit('dm1_response', { message: safeReply });
+    await db.logDmCall({
+      sessionId,
+      dm: 'dm1',
+      model: DM1_MODEL,
+      playerInput: partyPrompt,
+      fullPrompt: systemPrompt + '\n\n[MESSAGES]: ' + JSON.stringify(messages),
+      dmResponse: safeReply,
+      inputTokens: response.inputTokens,
+      outputTokens: response.outputTokens,
+    }).catch(console.error);
+  } catch (err) {
+    console.error('party change narration error:', err);
+  } finally {
+    socket.emit('dm1_typing', false);
+    activeDm1Sessions.delete(sessionId);
+  }
 }
 
 function rollD6() {
@@ -227,6 +332,7 @@ io.on('connection', (socket) => {
       await db.updateLastActive(id);
       socket.join(id);
       socket.sessionId = id;
+      socket.currentCharacterId = null;
       console.log(`Socket ${socket.id} ${isResume ? 'resumed' : 'joined'} session ${id}`);
 
       if (isResume) {
@@ -249,6 +355,7 @@ io.on('connection', (socket) => {
       }
       socket.join(fallbackId);
       socket.sessionId = fallbackId;
+      socket.currentCharacterId = null;
       socket.emit('session_joined', { sessionId: fallbackId, sessionToken: signSessionToken(fallbackId) });
     }
   });
@@ -356,10 +463,14 @@ io.on('connection', (socket) => {
     try {
       const campaign = await db.getOrCreateDefaultCampaign();
       const character = await db.getCharacterForSession(sessionId);
+      const characters = await db.getAccessibleCharacters(sessionId);
+      if (character) socket.currentCharacterId = character.id;
       socket.emit('character_data', {
         campaign,
         content: getContentBundle(),
+        characters: characters.map(summarizeCharacterForClient),
         character: character?.character_sheet || null,
+        activeCharacterId: character?.id || null,
       });
     } catch (err) {
       console.error('get_character_data error:', err);
@@ -420,9 +531,18 @@ io.on('connection', (socket) => {
         verifyRolledStats: (rolledStats) => verifyRollSet(sessionId, rolledStats),
       });
       const saved = await db.saveCharacterForSession(sessionId, characterSheet);
+      socket.currentCharacterId = saved.id;
+      const inCombat = await getCombatActive(sessionId);
+      await db.upsertCharacterPresence({
+        sessionId,
+        characterId: saved.id,
+        presence: 'present',
+        inCombat,
+      });
       await syncCharacterToWorldState(sessionId, characterSheet).catch(console.error);
       socket.emit('character_ready', {
         campaign,
+        characterId: saved.id,
         character: saved.character_sheet,
       });
     } catch (err) {
@@ -436,6 +556,95 @@ io.on('connection', (socket) => {
   });
 
   // ── story_input ───────────────────────────────────────────────────────
+  // Phase 4B: character selection and party presence.
+  socket.on('join_character', async ({ sessionId, sessionToken, characterId } = {}) => {
+    if (!hasValidSocketSession(socket, sessionId, sessionToken)) {
+      socket.emit('character_error', {
+        step: 'select',
+        field: 'sessionToken',
+        message: 'Your character could not join this session. Please refresh.',
+      });
+      return;
+    }
+
+    try {
+      const campaign = await db.getOrCreateDefaultCampaign();
+      const character = await db.setActiveCharacterForSession(sessionId, characterId);
+      if (!character) {
+        socket.emit('character_error', {
+          step: 'select',
+          field: 'characterId',
+          message: 'That character is not available to this session.',
+        });
+        return;
+      }
+
+      const inCombat = await getCombatActive(sessionId);
+      const previousPresence = await db.getCharacterPresence(character.id).catch(() => null);
+      await db.upsertCharacterPresence({
+        sessionId,
+        characterId: character.id,
+        presence: 'present',
+        inCombat,
+      });
+      socket.currentCharacterId = character.id;
+      await syncCharacterToWorldState(sessionId, character.character_sheet).catch(console.error);
+      socket.emit('character_ready', {
+        campaign,
+        characterId: character.id,
+        character: character.character_sheet,
+      });
+
+      const briefReconnect = previousPresence
+        && previousPresence.session_id === sessionId
+        && previousPresence.presence === 'away'
+        && Date.now() - new Date(previousPresence.updated_at).getTime() < 5 * 60 * 1000;
+      if (!briefReconnect) {
+        await narratePartyChange(socket, sessionId, inCombat ? 'join_combat' : 'join', character.character_sheet);
+      }
+    } catch (err) {
+      console.error('join_character error:', err);
+      socket.emit('character_error', {
+        step: 'select',
+        field: 'characterId',
+        message: 'The character could not enter the scene. Try again.',
+      });
+    }
+  });
+
+  socket.on('leave_character', async ({ sessionId, sessionToken } = {}) => {
+    if (!hasValidSocketSession(socket, sessionId, sessionToken)) {
+      socket.emit('character_error', {
+        step: 'select',
+        field: 'sessionToken',
+        message: 'Your character could not leave this session cleanly. Please refresh.',
+      });
+      return;
+    }
+
+    const characterId = socket.currentCharacterId;
+    if (!characterId) return;
+
+    try {
+      const character = await db.getAccessibleCharacter(sessionId, characterId);
+      if (!character) return;
+      const inCombat = await getCombatActive(sessionId);
+      await db.upsertCharacterPresence({
+        sessionId: inCombat ? sessionId : null,
+        characterId,
+        presence: inCombat ? 'present' : 'away',
+        inCombat,
+      });
+      if (!inCombat) await db.clearActiveCharacterForSession(sessionId, characterId);
+      socket.currentCharacterId = null;
+      socket.emit('character_left', { characterId, inCombat });
+      await narratePartyChange(socket, sessionId, inCombat ? 'leave_combat' : 'leave', character.character_sheet);
+    } catch (err) {
+      console.error('leave_character error:', err);
+    }
+  });
+
+  // Player narrative input.
   socket.on('story_input', async ({ message }) => {
     const sessionId = socket.sessionId;
     if (!sessionId) {
@@ -720,8 +929,21 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('disconnect', () => {
+  socket.on('disconnect', async () => {
     console.log(`Client disconnected: ${socket.id}`);
+    if (!socket.sessionId || !socket.currentCharacterId) return;
+
+    try {
+      const inCombat = await getCombatActive(socket.sessionId);
+      await db.upsertCharacterPresence({
+        sessionId: socket.sessionId,
+        characterId: socket.currentCharacterId,
+        presence: inCombat ? 'present' : 'away',
+        inCombat,
+      });
+    } catch (err) {
+      console.error('disconnect presence error:', err);
+    }
   });
 });
 

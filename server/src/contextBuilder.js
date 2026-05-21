@@ -20,12 +20,13 @@ const CAMPAIGN_LOG_TOKEN_BUDGET = 2000;
  */
 async function build({ sessionId, dm1Prompt, playerMessage }) {
   // ── Fetch all context components in parallel ──────────────────────────
-  const [worldStateRow, campaignLog, chapterSummaries, rollingWindowRows] =
+  const [worldStateRow, campaignLog, chapterSummaries, rollingWindowRows, partyPresence] =
     await Promise.all([
       db.getWorldState(sessionId),
       db.getCampaignLog(sessionId),
       db.getChapterSummaries(sessionId),
       db.getRollingWindow(sessionId, 40), // 20 pairs = 40 rows
+      db.getCharacterPresenceForCampaign().catch(() => []),
     ]);
 
   const worldState = worldStateRow?.state || db.DEFAULT_WORLD_STATE;
@@ -49,6 +50,12 @@ async function build({ sessionId, dm1Prompt, playerMessage }) {
     'If the player asks for an absent target, ask whether they head there instead of moving them silently.',
   ].join('\n');
   staticSystemPrompt += '\n\n';
+
+  const partyPresenceText = buildPartyPresenceText(partyPresence);
+  if (partyPresenceText) {
+    staticSystemPrompt += '## ACTIVE PARTY PRESENCE\n';
+    staticSystemPrompt += partyPresenceText + '\n\n';
+  }
 
   // Tier 2: campaign log (latest entries only, capped so long campaigns keep breathing)
   const campaignLogForPrompt = trimCampaignLog(campaignLog);
@@ -129,6 +136,24 @@ function trimCampaignLog(entries) {
 
 function formatSceneList(value) {
   return Array.isArray(value) && value.length > 0 ? value.join(', ') : 'none established';
+}
+
+function buildPartyPresenceText(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return '';
+  return rows
+    .map((row) => {
+      const sheet = row.characters?.character_sheet || {};
+      const identity = sheet.identity || {};
+      const derived = sheet.derived_stats || {};
+      const name = row.characters?.name || identity.name || row.character_id;
+      const className = identity.class_name || identity.class || 'unknown class';
+      const level = identity.level || derived.level || 1;
+      const combatNote = row.in_combat
+        ? ' In combat: character remains present and vulnerable until combat ends.'
+        : '';
+      return `- ${name}: ${row.presence}; ${className} level ${level}.${combatNote}`;
+    })
+    .join('\n');
 }
 
 /**

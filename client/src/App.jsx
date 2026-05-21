@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { socket } from './socket';
 import CharacterWizard from './CharacterWizard';
+import CharacterSelect from './CharacterSelect';
 import './App.css';
 
 // ── ROLL sentinel parser ──────────────────────────────────────────────────
@@ -37,6 +38,26 @@ function fmtMod(value) {
   return number >= 0 ? `+${number}` : String(number);
 }
 
+function summarizeCharacterOption(characterId, character) {
+  const identity = character?.identity || {};
+  const derived = character?.derived_stats || {};
+  return {
+    id: characterId,
+    name: identity.name || 'Unnamed Character',
+    isActiveForSession: true,
+    identity,
+    summary: {
+      species: identity.species_name || identity.species || '',
+      className: identity.class_name || identity.class || '',
+      level: identity.level || derived.level || 1,
+      hp: derived.hp ?? null,
+      maxHp: derived.max_hp ?? null,
+      armorClass: derived.armor_class ?? null,
+    },
+    character,
+  };
+}
+
 // ── BUG-021: Fallback roll detector ──────────────────────────────────────
 // When DM1 requests a roll in natural language but the [ROLL:] sentinel tag
 // is absent or unparseable, detect the roll request and show a generic roller.
@@ -64,12 +85,15 @@ function App() {
   const [sessionId, setSessionId] = useState(null);
   const [sessionToken, setSessionToken] = useState(null);
   const [connected, setConnected] = useState(false);
-  const [characterStatus, setCharacterStatus] = useState('loading'); // loading | required | ready
+  const [characterStatus, setCharacterStatus] = useState('loading'); // loading | select | required | ready
   const [characterContent, setCharacterContent] = useState(null);
   const [currentCharacter, setCurrentCharacter] = useState(null);
+  const [availableCharacters, setAvailableCharacters] = useState([]);
+  const [activeCharacterId, setActiveCharacterId] = useState(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [characterError, setCharacterError] = useState(null);
   const [characterSaving, setCharacterSaving] = useState(false);
+  const [characterJoining, setCharacterJoining] = useState(false);
 
   // Narrative feed (DM1)
   const [narrative, setNarrative] = useState([]);
@@ -112,6 +136,7 @@ function App() {
     socket.off('character_error');
     socket.off('character_required');
     socket.off('character_roll');
+    socket.off('character_left');
 
     socket.connect();
 
@@ -178,26 +203,29 @@ function App() {
       socket.emit('get_character_data', { sessionId: id, sessionToken });
     });
 
-    socket.on('character_data', ({ content, character }) => {
+    socket.on('character_data', ({ content, character, characters = [], activeCharacterId }) => {
       setCharacterContent(content);
+      setAvailableCharacters(characters);
+      setActiveCharacterId(activeCharacterId || null);
       setCharacterError(null);
-      if (character) {
-        setCurrentCharacter(character);
-        setCharacterStatus('ready');
-        if (pendingSessionStartRef.current) {
-          pendingSessionStartRef.current = false;
-          socket.emit('session_start');
-        }
+      setCurrentCharacter(character || null);
+      if (characters.length > 0) {
+        setCharacterStatus('select');
       } else {
-        setCurrentCharacter(null);
         setCharacterStatus('required');
       }
     });
 
-    socket.on('character_ready', ({ character } = {}) => {
+    socket.on('character_ready', ({ character, characterId } = {}) => {
       setCharacterSaving(false);
+      setCharacterJoining(false);
       setCharacterError(null);
       if (character) setCurrentCharacter(character);
+      if (characterId) setActiveCharacterId(characterId);
+      if (character && characterId) {
+        const option = summarizeCharacterOption(characterId, character);
+        setAvailableCharacters((prev) => [option, ...prev.filter((item) => item.id !== characterId)]);
+      }
       setCharacterStatus('ready');
       pendingSessionStartRef.current = false;
       socket.emit('session_start');
@@ -205,6 +233,7 @@ function App() {
 
     socket.on('character_error', (err) => {
       setCharacterSaving(false);
+      setCharacterJoining(false);
       setCharacterError(err);
       setCharacterStatus((current) => current === 'loading' ? 'required' : current);
     });
@@ -212,6 +241,11 @@ function App() {
     socket.on('character_required', ({ message }) => {
       setCharacterStatus('required');
       setCharacterError({ message });
+    });
+
+    socket.on('character_left', () => {
+      setCurrentCharacter(null);
+      setCharacterStatus('select');
     });
 
     socket.on('dm1_typing', (val) => setDm1Typing(val));
@@ -286,6 +320,7 @@ function App() {
       socket.off('character_error');
       socket.off('character_required');
       socket.off('character_roll');
+      socket.off('character_left');
       socket.disconnect();
     };
   }, []);
@@ -378,6 +413,31 @@ function App() {
     socket.emit('save_character', { sessionId, sessionToken, characterDraft });
   }, [sessionId, sessionToken]);
 
+  const handleJoinCharacter = useCallback((characterId) => {
+    if (!sessionId || !sessionToken) {
+      setCharacterError({ message: 'No active session. Please refresh.' });
+      return;
+    }
+    setCharacterJoining(true);
+    setCharacterError(null);
+    socket.emit('join_character', { sessionId, sessionToken, characterId });
+  }, [sessionId, sessionToken]);
+
+  const handleCreateNewCharacter = useCallback(() => {
+    setCurrentCharacter(null);
+    setActiveCharacterId(null);
+    setCharacterError(null);
+    setCharacterStatus('required');
+  }, []);
+
+  const handleSwitchCharacter = useCallback(() => {
+    if (sessionId && sessionToken && currentCharacter) {
+      socket.emit('leave_character', { sessionId, sessionToken });
+    }
+    setCharacterError(null);
+    setCharacterStatus('select');
+  }, [sessionId, sessionToken, currentCharacter]);
+
   const handleRollCharacterStats = useCallback(() => new Promise((resolve) => {
     if (!sessionId || !sessionToken) {
       setCharacterError({ message: 'No active session. Please refresh.' });
@@ -442,6 +502,15 @@ function App() {
             <h2>Preparing character creation...</h2>
             <p>The quills are sharpening themselves. Probably fine.</p>
           </main>
+        ) : characterStatus === 'select' ? (
+          <CharacterSelect
+            characters={availableCharacters}
+            activeCharacterId={activeCharacterId}
+            error={characterError}
+            joining={characterJoining}
+            onJoin={handleJoinCharacter}
+            onCreateNew={handleCreateNewCharacter}
+          />
         ) : (
           <CharacterWizard
             content={characterContent}
@@ -476,9 +545,14 @@ function App() {
         <section className="panel narrative-panel">
           <div className="panel-header">
             <span className="panel-label dm1-label">The Dungeon Master</span>
-            <button type="button" className="sheet-toggle" onClick={() => setSheetOpen(true)} disabled={!currentCharacter}>
-              Character Sheet
-            </button>
+            <div className="panel-actions">
+              <button type="button" className="sheet-toggle" onClick={() => setSheetOpen(true)} disabled={!currentCharacter}>
+                Character Sheet
+              </button>
+              <button type="button" className="sheet-toggle" onClick={handleSwitchCharacter} disabled={!availableCharacters.length}>
+                Switch
+              </button>
+            </div>
           </div>
 
           <div className="message-feed" id="narrative-feed">
