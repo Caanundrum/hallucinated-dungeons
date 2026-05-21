@@ -85,6 +85,18 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
   const hasCompleteScores = ABILITIES.every((ability) => isFilledInteger(draft.abilityScores[ability]));
   const acPreview = selectedClass && hasCompleteScores ? calculateAcPreview(armorItem, shieldItem, abilityMods, selectedClass) : null;
   const hpPreview = selectedClass && hasCompleteScores ? Math.max(1, (selectedClass.hit_die || 8) + (abilityMods.con || 0)) : null;
+  const acGuidance = selectedClass && hasCompleteScores ? getAcGuidance(acPreview, selectedClass, abilityMods, armorItem) : null;
+  const guidanceNotes = getGuidanceNotes({
+    selectedClass,
+    selectedBackground,
+    abilityMods,
+    hasCompleteScores,
+    hpPreview,
+    acGuidance,
+    equipmentItems,
+    allSkillIds,
+    skillMap,
+  });
 
   function update(field, value) {
     setDraft((current) => ({ ...current, [field]: value }));
@@ -350,7 +362,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
 
           {step === totalSteps - 1 && (
             <ChoiceStep title="Review and Confirm">
-              <ReviewPanel draft={draft} content={content} finalScores={finalScores} abilityMods={abilityMods} backgroundBonus={backgroundBonus} acPreview={acPreview} hpPreview={hpPreview} selectedClass={selectedClass} selectedSpecies={selectedSpecies} selectedBackground={selectedBackground} equipmentItems={equipmentItems} allSkillIds={allSkillIds} />
+              <ReviewPanel draft={draft} content={content} finalScores={finalScores} abilityMods={abilityMods} backgroundBonus={backgroundBonus} acPreview={acPreview} hpPreview={hpPreview} guidanceNotes={guidanceNotes} selectedClass={selectedClass} selectedSpecies={selectedSpecies} selectedBackground={selectedBackground} equipmentItems={equipmentItems} allSkillIds={allSkillIds} />
             </ChoiceStep>
           )}
         </div>
@@ -381,6 +393,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
           equipmentItems={equipmentItems}
           acPreview={acPreview}
           hpPreview={hpPreview}
+          guidanceNotes={guidanceNotes}
         />
       </aside>
     </main>
@@ -483,13 +496,16 @@ function InfoRow({ title, body, meta }) {
   );
 }
 
-function ReviewPanel({ draft, content, finalScores, abilityMods, backgroundBonus, acPreview, hpPreview, selectedClass, selectedSpecies, selectedBackground, equipmentItems, allSkillIds }) {
+function ReviewPanel({ draft, content, finalScores, abilityMods, backgroundBonus, acPreview, hpPreview, guidanceNotes, selectedClass, selectedSpecies, selectedBackground, equipmentItems, allSkillIds }) {
   const skillMap = Object.fromEntries(content.skills.map((skill) => [skill.id, skill]));
   return (
     <div className="review-grid">
       <InfoRow title={draft.name} meta={`${selectedSpecies?.name} ${selectedClass?.name}`} body={selectedBackground?.name} />
       <InfoRow title="Hit Points" meta={hpPreview} body={`d${selectedClass?.hit_die} + CON ${fmtMod(abilityMods.con)}`} />
       <InfoRow title="Armor Class" meta={acPreview.total} body={acPreview.parts.map((part) => `${part.label} ${fmtMod(part.value)}`).join(', ')} />
+      {guidanceNotes.filter((note) => note.review).map((note) => (
+        <InfoRow key={note.id} title={note.title} meta={note.tone === 'warning' ? 'Check' : 'Tip'} body={note.message} />
+      ))}
       <InfoRow title="Ability Scores" meta="Final" body={ABILITIES.map((ability) => `${ability.toUpperCase()} ${finalScores[ability]} (${fmtMod(abilityMods[ability])}; base ${draft.abilityScores[ability]} + ${backgroundBonus[ability] || 0})`).join('; ')} />
       <InfoRow title="Skills" meta={`${allSkillIds.size} proficient`} body={[...allSkillIds].map((id) => skillMap[id]?.name).filter(Boolean).join(', ')} />
       <InfoRow title="Equipment" meta={draft.equipmentChoice} body={equipmentItems.map((item) => item.name).join(', ') || 'Starting gold'} />
@@ -512,11 +528,12 @@ function CharacterSummary({
   equipmentItems,
   acPreview,
   hpPreview,
+  guidanceNotes,
 }) {
   const showSpecies = Boolean(selectedSpecies);
   const showClass = step >= 1 && Boolean(selectedClass);
   const showBackground = step >= 2 && Boolean(selectedBackground);
-  const showAbilities = step >= 3 && validAbilityScores(draft);
+  const showAbilities = step >= 3 && ABILITIES.every((ability) => isFilledInteger(draft.abilityScores[ability]));
   const showSkills = step >= 4 && allSkillIds.size > 0;
   const showEquipment = step >= 5 && Boolean(draft.equipmentChoice);
 
@@ -581,6 +598,17 @@ function CharacterSummary({
         </p>
         <p>Initiative: {showAbilities ? fmtMod(abilityMods.dex) : '--'}</p>
       </div>
+      {guidanceNotes.length > 0 && (
+        <div className="guidance-box">
+          <h3>Build Guidance</h3>
+          {guidanceNotes.map((note) => (
+            <div key={note.id} className={`guidance-note ${note.tone === 'warning' ? 'warning' : ''}`}>
+              <strong>{note.title}</strong>
+              <p>{note.message}</p>
+            </div>
+          ))}
+        </div>
+      )}
     </>
   );
 }
@@ -644,10 +672,145 @@ function calculateAcPreview(armor, shield, abilityMods, selectedClass) {
     parts: [
       { label: armor?.name || 'Unarmored', value: base },
       { label: dexCap === null || dexCap === undefined ? 'DEX' : `DEX cap ${dexCap}`, value: dexApplied },
-      ...(unarmoredBonus ? [{ label: `${unarmoredDefense.label} ${unarmoredAbility.toUpperCase()}`, value: unarmoredBonus }] : []),
+      ...(unarmoredAbility ? [{ label: `${unarmoredDefense.label} ${unarmoredAbility.toUpperCase()}`, value: unarmoredBonus }] : []),
       ...(shieldBonus ? [{ label: 'Shield', value: shieldBonus }] : []),
     ],
   };
+}
+
+function getAcGuidance(acPreview, selectedClass, abilityMods, armor) {
+  const defense = selectedClass?.unarmored_defense;
+  if (!acPreview || !defense || armor) return null;
+  const ability = defense.ability;
+  const abilityLabel = ABILITY_LABELS[ability] || ability.toUpperCase();
+  const abilityMod = abilityMods[ability] || 0;
+  const dexMod = abilityMods.dex || 0;
+  const shieldText = defense.allows_shield ? ' A shield can help later if one is equipped.' : '';
+  const formula = `Unarmored Defense uses 10 + DEX ${fmtMod(dexMod)} + ${abilityLabel} ${fmtMod(abilityMod)}.`;
+  if (abilityMod <= 0 || acPreview.total <= 12) {
+    return {
+      id: 'ac',
+      title: 'Armor Class',
+      tone: 'warning',
+      message: `${formula} That makes AC ${acPreview.total}, so this build is betting on courage, hit points, and the enemy politely missing.${shieldText}`,
+      review: true,
+    };
+  }
+  return {
+    id: 'ac',
+    title: 'Armor Class',
+    tone: 'info',
+    message: `${formula}${shieldText}`,
+    review: true,
+  };
+}
+
+function getGuidanceNotes({
+  selectedClass,
+  selectedBackground,
+  abilityMods,
+  hasCompleteScores,
+  hpPreview,
+  acGuidance,
+  equipmentItems,
+  allSkillIds,
+  skillMap,
+}) {
+  const notes = [];
+  if (!selectedClass) return notes;
+
+  const primary = selectedClass.primary_ability;
+  const primaryMod = abilityMods[primary];
+  if (hasCompleteScores && primary && primaryMod !== null && primaryMod !== undefined) {
+    notes.push({
+      id: 'primary',
+      title: 'Primary Ability',
+      tone: primaryMod < 2 ? 'warning' : 'info',
+      message: `${selectedClass.name} leans on ${ABILITY_LABELS[primary]} for its main plan. Current modifier: ${fmtMod(primaryMod)}${primaryMod < 2 ? '. It will work, but the class may feel like it is arguing with its own character sheet.' : '.'}`,
+      review: primaryMod < 2,
+    });
+  }
+
+  if (hasCompleteScores && hpPreview !== null && hpPreview !== undefined) {
+    const conMod = abilityMods.con || 0;
+    notes.push({
+      id: 'hp',
+      title: 'Hit Points',
+      tone: conMod < 0 ? 'warning' : 'info',
+      message: `Level 1 HP is hit die d${selectedClass.hit_die} + Constitution ${fmtMod(conMod)} = ${hpPreview}. Constitution is the quiet accountant of survival.`,
+      review: conMod < 0,
+    });
+  }
+
+  if (acGuidance) notes.push(acGuidance);
+
+  const spellcasting = selectedClass.spellcasting;
+  if (spellcasting) {
+    const spellAbility = spellcasting.ability;
+    const spellMod = abilityMods[spellAbility];
+    const spellAbilityName = ABILITY_LABELS[spellAbility] || spellAbility.toUpperCase();
+    const countText = spellcasting.prepared_formula
+      ? `Prepared spells scale from ${spellAbilityName} ${hasCompleteScores ? fmtMod(spellMod || 0) : ''}.`
+      : spellcasting.spells_known
+        ? `You choose ${spellcasting.spells_known} known level 1 spells.`
+        : 'Your spell choices are tied to class rules.';
+    notes.push({
+      id: 'spellcasting',
+      title: 'Spellcasting',
+      tone: hasCompleteScores && spellMod < 2 ? 'warning' : 'info',
+      message: `${selectedClass.name} casts with ${spellAbilityName}. ${countText}${hasCompleteScores && spellMod < 2 ? ' Low casting ability means spell attacks, save DCs, and magical confidence all take the scenic route.' : ''}`,
+      review: hasCompleteScores && spellMod < 2,
+    });
+  }
+
+  if (selectedBackground) {
+    const backgroundSkillNames = (selectedBackground.skills || [])
+      .map((id) => skillMap[id]?.name)
+      .filter(Boolean)
+      .join(', ');
+    notes.push({
+      id: 'background',
+      title: 'Background',
+      tone: 'info',
+      message: `${selectedBackground.name} locks in ${backgroundSkillNames || 'background'} skills and controls which abilities can receive +2/+1 bonuses.`,
+      review: false,
+    });
+  }
+
+  if (allSkillIds?.size > 0) {
+    const skillSummary = [...allSkillIds]
+      .map((id) => skillMap[id])
+      .filter(Boolean)
+      .map((skill) => `${skill.name} (${skill.ability.toUpperCase()})`)
+      .join(', ');
+    notes.push({
+      id: 'skills',
+      title: 'Skill Coverage',
+      tone: 'info',
+      message: `Proficient skills add your proficiency bonus to checks: ${skillSummary}. This is where non-combat competence sneaks in wearing sensible shoes.`,
+      review: false,
+    });
+  }
+
+  if (equipmentItems?.length > 0) {
+    const armor = equipmentItems.find((item) => item.type === 'armor');
+    const shield = equipmentItems.find((item) => item.type === 'shield');
+    const weapon = equipmentItems.find((item) => item.type === 'weapon');
+    const equipmentBits = [
+      armor ? `${armor.name} sets base AC ${armor.ac_base}${armor.dex_cap !== null && armor.dex_cap !== undefined ? ` with DEX cap ${armor.dex_cap}` : ''}` : null,
+      shield ? `${shield.name} adds +2 AC while equipped` : null,
+      weapon ? `${weapon.name} attacks with ${weapon.ability?.toUpperCase() || 'its listed ability'} for ${weapon.damage || 'listed'} damage` : null,
+    ].filter(Boolean);
+    notes.push({
+      id: 'equipment',
+      title: 'Equipment Math',
+      tone: 'info',
+      message: equipmentBits.length ? equipmentBits.join('. ') + '.' : 'Starting equipment is tracked now; only equipped or active items change your math.',
+      review: false,
+    });
+  }
+
+  return notes;
 }
 
 function stepsForClass(isCaster) {

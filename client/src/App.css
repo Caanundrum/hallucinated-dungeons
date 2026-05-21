@@ -777,6 +777,7 @@ textarea:disabled { opacity: 0.4; cursor: not-allowed; }
 .info-row,
 .detail-block,
 .impact-box,
+.guidance-box,
 .score-card {
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -810,15 +811,45 @@ textarea:disabled { opacity: 0.4; cursor: not-allowed; }
 }
 
 .impact-box,
+.guidance-box,
 .detail-block,
 .info-row {
   padding: 0.85rem;
 }
 
 .impact-box h3,
+.guidance-box h3,
 .detail-block h4 {
   margin-bottom: 0.45rem;
   color: #d8c08a;
+}
+
+.guidance-box {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 0.75rem;
+}
+
+.guidance-note {
+  padding: 0.55rem 0.65rem;
+  border-radius: var(--radius);
+  background: #242436;
+  color: #d8c08a;
+}
+
+.guidance-note p {
+  margin-top: 0.25rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.guidance-note.warning {
+  border: 1px solid #c8973a55;
+  color: var(--text);
+}
+
+.guidance-note.warning p {
+  color: var(--text);
 }
 
 .method-tabs,
