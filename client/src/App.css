@@ -410,6 +410,13 @@ textarea:disabled { opacity: 0.4; cursor: not-allowed; }
   opacity: 0.85;
 }
 
+.dice-roller-breakdown {
+  color: #c8b0f0;
+  font-family: var(--font-ui);
+  font-size: 0.78rem;
+  margin: -0.25rem 0 0.75rem;
+}
+
 .roll-result-area {
   display: flex;
   align-items: center;

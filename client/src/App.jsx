@@ -19,9 +19,23 @@ function parseRollTag(text) {
   };
 }
 
+function parseStructuredRollTag(text) {
+  const match = String(text || '').match(/\[(CHECK|SAVE):\s*([^\]]+)\]/i);
+  if (!match) return null;
+  const attrs = {};
+  const attrText = match[2];
+  for (const attr of attrText.matchAll(/([a-z_]+)=("[^"]*"|'[^']*'|[^\s]+)/gi)) {
+    attrs[attr[1].toLowerCase()] = attr[2].replace(/^["']|["']$/g, '');
+  }
+  return { kind: match[1].toLowerCase(), attrs, raw: match[0] };
+}
+
 // Strip [ROLL: ...] tags from text shown to the player
 function stripRollTag(text) {
-  return text.replace(/\s*\[ROLL:\s*\d+d\d+[+-]?\d*\]/gi, '').trim();
+  return text
+    .replace(/\s*\[ROLL:\s*\d+d\d+[+-]?\d*\]/gi, '')
+    .replace(/\s*\[(?:CHECK|SAVE):\s*[^\]]+\]/gi, '')
+    .trim();
 }
 
 // Roll dice client-side using Math.random()
@@ -36,6 +50,58 @@ function rollDice(diceCount, dieSides) {
 function fmtMod(value) {
   const number = Number(value || 0);
   return number >= 0 ? `+${number}` : String(number);
+}
+
+function titleCase(value) {
+  return String(value || '')
+    .replaceAll('_', ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function getStructuredRoll(character, tag) {
+  if (!character || !tag) return null;
+  const attrs = tag.attrs || {};
+  const derived = character.derived_stats || {};
+  const modifiers = character.abilities?.modifiers || {};
+  const ability = String(attrs.ability || '').toLowerCase();
+
+  if (tag.kind === 'save') {
+    const save = derived.saving_throw_modifiers?.[ability];
+    if (!save) return null;
+    return {
+      diceCount: 1,
+      dieSides: 20,
+      modifier: Number(save.total || 0),
+      label: `${ability.toUpperCase()} Save`,
+      breakdown: `${ability.toUpperCase()} ${save.proficient ? '+ proficiency' : 'only'} = ${fmtMod(save.total)}`,
+    };
+  }
+
+  const skill = String(attrs.skill || '').toLowerCase();
+  if (skill) {
+    const skillData = derived.skill_modifiers?.[skill];
+    if (skillData) {
+      return {
+        diceCount: 1,
+        dieSides: 20,
+        modifier: Number(skillData.total || 0),
+        label: `${titleCase(skill)} Check`,
+        breakdown: `${skillData.ability?.toUpperCase() || ability.toUpperCase()} ${skillData.proficient ? '+ proficiency' : 'only'} = ${fmtMod(skillData.total)}`,
+      };
+    }
+  }
+
+  if (ability && Number.isFinite(Number(modifiers[ability]))) {
+    return {
+      diceCount: 1,
+      dieSides: 20,
+      modifier: Number(modifiers[ability] || 0),
+      label: `${ability.toUpperCase()} Check`,
+      breakdown: `${ability.toUpperCase()} modifier ${fmtMod(modifiers[ability])}`,
+    };
+  }
+
+  return null;
 }
 
 function summarizeCharacterOption(characterId, character) {
@@ -115,6 +181,11 @@ function App() {
   const narrativeEndRef = useRef(null);
   const rulesEndRef = useRef(null);
   const pendingSessionStartRef = useRef(false);
+  const currentCharacterRef = useRef(null);
+
+  useEffect(() => {
+    currentCharacterRef.current = currentCharacter;
+  }, [currentCharacter]);
 
   // ── Socket lifecycle ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -257,16 +328,23 @@ function App() {
     socket.on('dm1_response', ({ message }) => {
       // Parse any [ROLL: ...] sentinel tag before displaying
       const rollTag = parseRollTag(message);
+      const structuredRollTag = parseStructuredRollTag(message);
       const displayText = stripRollTag(message);
 
       setNarrative((prev) => [...prev, { type: 'dm1', text: displayText, id: Date.now() }]);
 
-      if (rollTag) {
+      const structuredRoll = getStructuredRoll(currentCharacterRef.current, structuredRollTag);
+      if (structuredRoll) {
+        setPendingRoll(structuredRoll);
+        setFallbackRoll(null);
+        setFallbackModInput('0');
+      } else if (rollTag) {
         // Primary path: sentinel tag parsed successfully — activate the dice roller
         setPendingRoll({
           diceCount: rollTag.diceCount,
           dieSides:  rollTag.dieSides,
           modifier:  rollTag.modifier,
+          label: 'Requested Roll',
         });
         // Clear any stale fallback state
         setFallbackRoll(null);
@@ -359,11 +437,13 @@ function App() {
   // ── Dice roller handlers ─────────────────────────────────────────────────
   const handleRoll = useCallback(() => {
     if (!pendingRoll) return;
-    const { diceCount, dieSides, modifier } = pendingRoll;
+    const { diceCount, dieSides, modifier, label, breakdown } = pendingRoll;
     const rolled = rollDice(diceCount, dieSides);
     const total  = rolled + modifier;
     const modStr = modifier > 0 ? ` + ${modifier}` : modifier < 0 ? ` - ${Math.abs(modifier)}` : '';
-    const rollMsg = `[ROLL RESULT: ${total}] I rolled a ${total} (${diceCount}d${dieSides}${modStr} = ${total})`;
+    const rollLabel = label ? `${label}: ` : '';
+    const rollBreakdown = breakdown ? `; ${breakdown}` : '';
+    const rollMsg = `[ROLL RESULT: ${total}] I rolled a ${total} (${rollLabel}${diceCount}d${dieSides}${modStr} = ${total}${rollBreakdown})`;
     const displayRollMsg = rollMsg.replace(/^\[ROLL RESULT: \d+\]\s*/, '');
     setNarrative((prev) => [...prev, { type: 'player', text: displayRollMsg, id: Date.now() }]);
     socket.emit('story_input', { message: rollMsg });
@@ -589,6 +669,10 @@ function App() {
                     {pendingRoll.modifier < 0 && ` − ${Math.abs(pendingRoll.modifier)}`}
                   </span>
                 </div>
+
+                {pendingRoll.breakdown && (
+                  <p className="dice-roller-breakdown">{pendingRoll.breakdown}</p>
+                )}
 
                 <button className="roll-btn" onClick={handleRoll}>
                   Roll {pendingRoll.diceCount}d{pendingRoll.dieSides}
