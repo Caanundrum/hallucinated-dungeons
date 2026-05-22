@@ -83,14 +83,15 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
   const armorItem = equipmentItems.find((item) => item.type === 'armor');
   const shieldItem = equipmentItems.find((item) => item.type === 'shield');
   const hasCompleteScores = ABILITIES.every((ability) => isFilledInteger(draft.abilityScores[ability]));
-  const acPreview = selectedClass && hasCompleteScores ? calculateAcPreview(armorItem, shieldItem, abilityMods, selectedClass) : null;
-  const hpPreview = selectedClass && hasCompleteScores ? Math.max(1, (selectedClass.hit_die || 8) + (abilityMods.con || 0)) : null;
-  const acGuidance = selectedClass && hasCompleteScores ? getAcGuidance(acPreview, selectedClass, abilityMods, armorItem) : null;
+  const showAbilityMath = step >= 3 && hasCompleteScores;
+  const acPreview = selectedClass && showAbilityMath ? calculateAcPreview(armorItem, shieldItem, abilityMods, selectedClass) : null;
+  const hpPreview = selectedClass && showAbilityMath ? Math.max(1, (selectedClass.hit_die || 8) + (abilityMods.con || 0)) : null;
+  const acGuidance = selectedClass && showAbilityMath ? getAcGuidance(acPreview, selectedClass, abilityMods, armorItem) : null;
   const guidanceNotes = getGuidanceNotes({
     selectedClass,
     selectedBackground,
     abilityMods,
-    hasCompleteScores,
+    showAbilityMath,
     hpPreview,
     acGuidance,
     equipmentItems,
@@ -709,7 +710,7 @@ function getGuidanceNotes({
   selectedClass,
   selectedBackground,
   abilityMods,
-  hasCompleteScores,
+  showAbilityMath,
   hpPreview,
   acGuidance,
   equipmentItems,
@@ -721,7 +722,7 @@ function getGuidanceNotes({
 
   const primary = selectedClass.primary_ability;
   const primaryMod = abilityMods[primary];
-  if (hasCompleteScores && primary && primaryMod !== null && primaryMod !== undefined) {
+  if (showAbilityMath && primary && primaryMod !== null && primaryMod !== undefined) {
     notes.push({
       id: 'primary',
       title: 'Primary Ability',
@@ -731,7 +732,7 @@ function getGuidanceNotes({
     });
   }
 
-  if (hasCompleteScores && hpPreview !== null && hpPreview !== undefined) {
+  if (showAbilityMath && hpPreview !== null && hpPreview !== undefined) {
     const conMod = abilityMods.con || 0;
     notes.push({
       id: 'hp',
@@ -750,16 +751,16 @@ function getGuidanceNotes({
     const spellMod = abilityMods[spellAbility];
     const spellAbilityName = ABILITY_LABELS[spellAbility] || spellAbility.toUpperCase();
     const countText = spellcasting.prepared_formula
-      ? `Prepared spells scale from ${spellAbilityName} ${hasCompleteScores ? fmtMod(spellMod || 0) : ''}.`
+      ? `Prepared spells scale from ${spellAbilityName}${showAbilityMath ? ` ${fmtMod(spellMod || 0)}` : ''}.`
       : spellcasting.spells_known
         ? `You choose ${spellcasting.spells_known} known level 1 spells.`
         : 'Your spell choices are tied to class rules.';
     notes.push({
       id: 'spellcasting',
       title: 'Spellcasting',
-      tone: hasCompleteScores && spellMod < 2 ? 'warning' : 'info',
-      message: `${selectedClass.name} casts with ${spellAbilityName}. ${countText}${hasCompleteScores && spellMod < 2 ? ' Low casting ability means spell attacks, save DCs, and magical confidence all take the scenic route.' : ''}`,
-      review: hasCompleteScores && spellMod < 2,
+      tone: showAbilityMath && spellMod < 2 ? 'warning' : 'info',
+      message: `${selectedClass.name} casts with ${spellAbilityName}. ${countText}${showAbilityMath && spellMod < 2 ? ' Low casting ability means spell attacks, save DCs, and magical confidence all take the scenic route.' : ''}`,
+      review: showAbilityMath && spellMod < 2,
     });
   }
 
