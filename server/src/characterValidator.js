@@ -43,7 +43,8 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
   const abilityModifiers = Object.fromEntries(ABILITIES.map((ability) => [ability, abilityMod(abilityScores[ability])]));
 
   const selectedSkills = Array.isArray(draft.selectedSkills) ? draft.selectedSkills.map(normalizeId) : [];
-  const skillSet = validateSkills(selectedSkills, characterClass, background, content);
+  const origin = validateOriginChoices(draft, species, background, content);
+  const skillSet = validateSkills(selectedSkills, characterClass, background, content, origin.skillProficiencies);
 
   const equipmentChoice = normalizeId(draft.equipmentChoice || 'pack');
   if (!['pack', 'gold'].includes(equipmentChoice)) {
@@ -52,13 +53,22 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
 
   const inventory = buildInventory(characterClass, content, equipmentChoice);
   const equipped = buildEquipped(inventory, content);
-  const activeEffects = buildActiveEffects(equipped, content);
+  const featEffects = origin.feats.flatMap((entry) => (entry.feat.effects || []).map((effect) => ({
+    ...effect,
+    source_feat_id: entry.feat.id,
+    source_feat_name: entry.feat.name,
+  })));
+  const activeEffects = [...buildActiveEffects(equipped, content), ...featEffects];
 
   const spellcasting = buildSpellcasting(draft, characterClass, content, abilityModifiers);
   const level = 1;
   const pb = proficiencyBonus(level);
-  const maxHp = Math.max(1, characterClass.hit_die + abilityModifiers.con);
+  const maxHpBonus = activeEffects
+    .filter((effect) => effect.target === 'max_hp_per_level_bonus')
+    .reduce((sum, effect) => sum + Number(effect.value || 0) * level, 0);
+  const maxHp = Math.max(1, characterClass.hit_die + abilityModifiers.con + maxHpBonus);
   const armorBreakdown = calculateArmorClass(equipped, content, abilityModifiers, activeEffects, characterClass);
+  const initiativeBreakdown = calculateInitiative(abilityModifiers, pb, activeEffects);
   const derivedStats = {
     level,
     proficiency_bonus: pb,
@@ -68,7 +78,8 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
     armor_class: armorBreakdown.total,
     armor_class_breakdown: armorBreakdown.parts,
     speed: species.speed,
-    initiative: abilityModifiers.dex,
+    initiative: initiativeBreakdown.total,
+    initiative_breakdown: initiativeBreakdown.parts,
     death_saves: { successes: 0, failures: 0 },
     skill_modifiers: buildSkillModifiers(content.skills, skillSet, abilityModifiers, pb),
     saving_throw_modifiers: buildSaveModifiers(characterClass.saving_throws, abilityModifiers, pb),
@@ -110,6 +121,7 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
       skills: [...skillSet],
       background_skills: background.skills,
       class_skills: selectedSkills,
+      origin_skills: origin.skillProficiencies,
       tools: [background.tool].filter(Boolean),
       armor: characterClass.armor,
       weapons: characterClass.weapons,
@@ -128,7 +140,19 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
         name: background.name,
         description: background.description,
       },
+      ...origin.feats.map((entry) => ({
+        source: entry.source,
+        name: entry.feat.name,
+        description: entry.feat.description,
+      })),
     ],
+    origin: {
+      background_feat: origin.backgroundFeat?.id || null,
+      human_origin_feat: origin.humanFeat?.id || null,
+      human_skill: origin.humanSkill || null,
+      skill_choices: origin.skillChoices,
+      magic_initiate: origin.magicInitiate,
+    },
     spellcasting,
     derived_stats: derivedStats,
     notes: {
@@ -221,9 +245,10 @@ function validateBackgroundBonus(background, submittedBonus) {
   const entries = Object.entries(bonus).filter(([, value]) => value !== 0);
   const total = entries.reduce((sum, [, value]) => sum + value, 0);
   const values = entries.map(([, value]) => value).sort((a, b) => b - a);
-  const validShape = JSON.stringify(values) === JSON.stringify([2, 1]);
+  const validShape = JSON.stringify(values) === JSON.stringify([2, 1])
+    || JSON.stringify(values) === JSON.stringify([1, 1, 1]);
   if (total !== 3 || !validShape) {
-    fail('background', 'backgroundBonus', 'Background bonus must assign +2 to one eligible ability and +1 to the other.');
+    fail('background', 'backgroundBonus', 'Background bonus must assign +2/+1 or +1/+1/+1 to eligible abilities.');
   }
   for (const [ability] of entries) {
     if (!allowed.has(ability)) {
@@ -233,19 +258,108 @@ function validateBackgroundBonus(background, submittedBonus) {
   return bonus;
 }
 
-function validateSkills(selectedSkills, characterClass, background, content) {
+function validateOriginChoices(draft, species, background, content) {
+  const backgroundFeat = byId(content.feats, normalizeId(background.origin_feat));
+  if (!backgroundFeat || backgroundFeat.category !== 'origin') {
+    fail('background', 'origin_feat', 'Background must grant a valid Origin feat.');
+  }
+
+  const isHuman = species.id === 'human';
+  const allSkillIds = new Set(content.skills.map((skill) => skill.id));
+  const originFeats = content.feats.filter((feat) => feat.category === 'origin');
+  const humanFeatId = normalizeId(draft.humanOriginFeatId);
+  const humanFeat = isHuman ? byId(originFeats, humanFeatId) : null;
+  if (isHuman && !humanFeat) {
+    fail('origin', 'humanOriginFeatId', 'Human characters must choose an extra Origin feat.');
+  }
+  if (humanFeat && humanFeat.id === backgroundFeat.id && !humanFeat.repeatable) {
+    fail('origin', 'humanOriginFeatId', 'Choose a different Origin feat unless the feat is repeatable.');
+  }
+
+  const humanSkill = normalizeId(draft.humanSkillId);
+  if (isHuman && !allSkillIds.has(humanSkill)) {
+    fail('origin', 'humanSkillId', 'Human characters must choose one extra skill proficiency.');
+  }
+  if (isHuman && (background.skills || []).includes(humanSkill)) {
+    fail('origin', 'humanSkillId', 'Human Skillful must choose a skill not already granted by the background.');
+  }
+
+  const entries = [
+    { source: 'background_feat', feat: backgroundFeat },
+    ...(humanFeat ? [{ source: 'human_feat', feat: humanFeat }] : []),
+  ];
+  const skillProficiencies = [];
+  if (humanSkill) skillProficiencies.push(humanSkill);
+  const reservedSkills = new Set([...(background.skills || []), ...(humanSkill ? [humanSkill] : [])]);
+  const skillChoices = {};
+  const magicInitiate = {};
+
+  for (const entry of entries) {
+    if (entry.feat.choice?.type === 'skills') {
+      const selected = Array.isArray(draft.featSkillChoices?.[entry.source])
+        ? draft.featSkillChoices[entry.source].map(normalizeId)
+        : [];
+      const unique = new Set(selected);
+      if (unique.size !== entry.feat.choice.count) {
+        fail('origin', entry.source, `${entry.feat.name} must choose ${entry.feat.choice.count} skills.`);
+      }
+      for (const skillId of unique) {
+        if (!allSkillIds.has(skillId)) fail('origin', entry.source, 'Choose valid skills for Skilled.');
+        if (reservedSkills.has(skillId)) fail('origin', entry.source, 'Skilled must choose skills not already granted by background or species.');
+      }
+      skillChoices[entry.source] = [...unique];
+      skillProficiencies.push(...unique);
+      for (const skillId of unique) reservedSkills.add(skillId);
+    }
+
+    if (entry.feat.magic_list) {
+      const choice = draft.magicInitiateChoices?.[entry.source] || {};
+      const list = entry.feat.magic_list;
+      const cantrips = Array.isArray(choice.cantrips) ? choice.cantrips.map(normalizeId) : [];
+      const spell = normalizeId(choice.spell);
+      const cantripOptions = content.spells.filter((item) => item.level === 0 && item.classes.includes(list));
+      const spellOptions = content.spells.filter((item) => item.level === 1 && item.classes.includes(list));
+      if (new Set(cantrips).size !== 2) {
+        fail('origin', entry.source, `${entry.feat.name} must choose two cantrips.`);
+      }
+      for (const cantripId of cantrips) {
+        if (!cantripOptions.some((item) => item.id === cantripId)) {
+          fail('origin', entry.source, `Choose valid ${list} cantrips.`);
+        }
+      }
+      if (!spellOptions.some((item) => item.id === spell)) {
+        fail('origin', entry.source, `Choose a valid level 1 ${list} spell.`);
+      }
+      magicInitiate[entry.source] = { list, cantrips, spell };
+    }
+  }
+
+  return {
+    backgroundFeat,
+    humanFeat,
+    humanSkill: humanSkill || null,
+    feats: entries,
+    skillProficiencies: [...new Set(skillProficiencies)],
+    skillChoices,
+    magicInitiate,
+  };
+}
+
+function validateSkills(selectedSkills, characterClass, background, content, originSkills = []) {
   const allowed = new Set(characterClass.skill_options);
   const allSkills = new Set(content.skills.map((skill) => skill.id));
+  const alreadyGranted = new Set([...(background.skills || []), ...originSkills]);
   const picked = new Set();
   for (const skillId of selectedSkills) {
     if (!allSkills.has(skillId)) fail('skills', 'selectedSkills', 'Choose valid skills.');
     if (!allowed.has(skillId)) fail('skills', 'selectedSkills', 'Class skills must come from the class list.');
+    if (alreadyGranted.has(skillId)) fail('skills', 'selectedSkills', 'Class skills must not duplicate background or origin skills.');
     picked.add(skillId);
   }
   if (picked.size !== characterClass.skill_count) {
     fail('skills', 'selectedSkills', `Choose exactly ${characterClass.skill_count} class skills.`);
   }
-  return new Set([...(background.skills || []), ...picked]);
+  return new Set([...(background.skills || []), ...picked, ...originSkills]);
 }
 
 function buildInventory(characterClass, content, equipmentChoice) {
@@ -306,9 +420,25 @@ function calculateArmorClass(equipped, content, abilityModifiers, activeEffects,
     parts: [
       { label: armorEffect ? armorEffect.source_item_name : 'Unarmored base', value: base },
       { label: dexCap === null || dexCap === undefined ? 'DEX modifier' : `DEX modifier (cap ${dexCap})`, value: dexApplied },
-      ...(unarmoredBonus ? [{ label: `${unarmoredDefense.label} ${unarmoredAbility.toUpperCase()}`, value: unarmoredBonus }] : []),
+      ...(unarmoredAbility ? [{ label: `${unarmoredDefense.label} ${unarmoredAbility.toUpperCase()}`, value: unarmoredBonus }] : []),
       ...(shieldApplied ? [{ label: 'Shield', value: shieldApplied }] : []),
       ...(itemBonus ? [{ label: 'Item bonuses', value: itemBonus }] : []),
+    ],
+  };
+}
+
+function calculateInitiative(abilityModifiers, pb, activeEffects) {
+  const dex = abilityModifiers.dex || 0;
+  const alertBonus = activeEffects.some((effect) => effect.target === 'initiative_proficiency') ? pb : 0;
+  const flatBonus = activeEffects
+    .filter((effect) => effect.target === 'initiative_bonus')
+    .reduce((sum, effect) => sum + Number(effect.value || 0), 0);
+  return {
+    total: dex + alertBonus + flatBonus,
+    parts: [
+      { label: 'DEX modifier', value: dex },
+      ...(alertBonus ? [{ label: 'Alert proficiency', value: alertBonus }] : []),
+      ...(flatBonus ? [{ label: 'Initiative bonuses', value: flatBonus }] : []),
     ],
   };
 }

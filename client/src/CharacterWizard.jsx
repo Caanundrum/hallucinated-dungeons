@@ -47,6 +47,10 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
     abilityMethod: 'standard_array',
     abilityScores: Object.fromEntries(ABILITIES.map((ability, index) => [ability, STANDARD_ARRAY[index]])),
     backgroundBonus: {},
+    humanSkillId: '',
+    humanOriginFeatId: '',
+    featSkillChoices: {},
+    magicInitiateChoices: {},
     rolledAssignment: emptyRolledAssignments(),
     selectedSkills: [],
     equipmentChoice: 'pack',
@@ -59,8 +63,16 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
   const selectedClass = content.classes.find((item) => item.id === draft.classId);
   const selectedBackground = content.backgrounds.find((item) => item.id === draft.backgroundId);
   const isCaster = Boolean(selectedClass?.spellcasting);
-  const totalSteps = isCaster ? 8 : 7;
+  const totalSteps = isCaster ? 9 : 8;
   const visibleStepName = stepsForClass(isCaster)[step];
+  const originFeatMap = Object.fromEntries((content.feats || []).map((feat) => [feat.id, feat]));
+  const backgroundOriginFeat = originFeatMap[selectedBackground?.origin_feat];
+  const humanOriginFeat = originFeatMap[draft.humanOriginFeatId];
+  const isHuman = selectedSpecies?.id === 'human';
+  const originFeatEntries = [
+    backgroundOriginFeat ? { source: 'background_feat', label: 'Background Origin Feat', feat: backgroundOriginFeat } : null,
+    isHuman && humanOriginFeat ? { source: 'human_feat', label: 'Human Versatile Feat', feat: humanOriginFeat } : null,
+  ].filter(Boolean);
   const backgroundBonus = normalizeBackgroundBonus(draft.backgroundBonus, selectedBackground);
   const finalScores = Object.fromEntries(ABILITIES.map((ability) => [
     ability,
@@ -69,10 +81,14 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
       : Number(draft.abilityScores[ability] || 0) + Number(backgroundBonus[ability] || 0),
   ]));
   const abilityMods = Object.fromEntries(ABILITIES.map((ability) => [ability, finalScores[ability] === null ? null : mod(finalScores[ability])]));
+  const originSkillIds = new Set([
+    ...(draft.humanSkillId ? [draft.humanSkillId] : []),
+    ...Object.values(draft.featSkillChoices || {}).flat(),
+  ]);
   const backgroundSkills = new Set(selectedBackground?.skills || []);
   const skillMap = Object.fromEntries(content.skills.map((skill) => [skill.id, skill]));
   const selectedClassSkills = new Set(draft.selectedSkills);
-  const allSkillIds = new Set([...backgroundSkills, ...selectedClassSkills]);
+  const allSkillIds = new Set([...backgroundSkills, ...selectedClassSkills, ...originSkillIds]);
   const cantripOptions = content.spells.filter((spell) => spell.level === 0 && spell.classes.includes(draft.classId));
   const spellOptions = content.spells.filter((spell) => spell.level === 1 && spell.classes.includes(draft.classId));
   const requiredCantrips = selectedClass?.spellcasting?.cantrips || 0;
@@ -83,7 +99,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
   const armorItem = equipmentItems.find((item) => item.type === 'armor');
   const shieldItem = equipmentItems.find((item) => item.type === 'shield');
   const hasCompleteScores = ABILITIES.every((ability) => isFilledInteger(draft.abilityScores[ability]));
-  const showAbilityMath = step >= 3 && hasCompleteScores;
+  const showAbilityMath = step >= 4 && hasCompleteScores;
   const acPreview = selectedClass && showAbilityMath ? calculateAcPreview(armorItem, shieldItem, abilityMods, selectedClass) : null;
   const hpPreview = selectedClass && showAbilityMath ? Math.max(1, (selectedClass.hit_die || 8) + (abilityMods.con || 0)) : null;
   const acGuidance = selectedClass && showAbilityMath ? getAcGuidance(acPreview, selectedClass, abilityMods, armorItem) : null;
@@ -97,6 +113,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
     equipmentItems,
     allSkillIds,
     skillMap,
+    originFeatEntries,
   });
 
   function update(field, value) {
@@ -132,6 +149,43 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
     }));
   }
 
+  function updateFeatSkillChoice(source, skillId) {
+    setDraft((current) => {
+      const selected = new Set(current.featSkillChoices[source] || []);
+      if (selected.has(skillId)) selected.delete(skillId);
+      else if (selected.size < 3) selected.add(skillId);
+      return {
+        ...current,
+        featSkillChoices: { ...current.featSkillChoices, [source]: [...selected] },
+      };
+    });
+  }
+
+  function updateMagicInitiate(source, field, value) {
+    setDraft((current) => {
+      const currentChoice = current.magicInitiateChoices[source] || { cantrips: [], spell: '' };
+      if (field === 'cantrips') {
+        const selected = new Set(currentChoice.cantrips || []);
+        if (selected.has(value)) selected.delete(value);
+        else if (selected.size < 2) selected.add(value);
+        return {
+          ...current,
+          magicInitiateChoices: {
+            ...current.magicInitiateChoices,
+            [source]: { ...currentChoice, cantrips: [...selected] },
+          },
+        };
+      }
+      return {
+        ...current,
+        magicInitiateChoices: {
+          ...current.magicInitiateChoices,
+          [source]: { ...currentChoice, [field]: value },
+        },
+      };
+    });
+  }
+
   function setAbilityMethod(method) {
     onClearError?.();
     setDraft((current) => ({
@@ -157,6 +211,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
   }
 
   function toggleSkill(skillId) {
+    if (backgroundSkills.has(skillId) || originSkillIds.has(skillId)) return;
     setDraft((current) => {
       const next = new Set(current.selectedSkills);
       if (next.has(skillId)) next.delete(skillId);
@@ -178,10 +233,11 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
     if (step === 0) return draft.name.trim().length > 0 && draft.name.trim().length <= 30 && draft.speciesId;
     if (step === 1) return Boolean(draft.classId);
     if (step === 2) return Boolean(draft.backgroundId) && validBackgroundBonus(backgroundBonus, selectedBackground);
-    if (step === 3) return validAbilityScores(draft);
-    if (step === 4) return draft.selectedSkills.length === (selectedClass?.skill_count || 0);
-    if (step === 5) return Boolean(draft.equipmentChoice);
-    if (isCaster && step === 6) return draft.cantripsKnown.length === requiredCantrips && draft.spellsKnown.length === requiredSpells;
+    if (step === 3) return validOriginChoices(draft, selectedSpecies, selectedBackground, originFeatEntries, content);
+    if (step === 4) return validAbilityScores(draft);
+    if (step === 5) return draft.selectedSkills.length === (selectedClass?.skill_count || 0);
+    if (step === 6) return Boolean(draft.equipmentChoice);
+    if (isCaster && step === 7) return draft.cantripsKnown.length === requiredCantrips && draft.spellsKnown.length === requiredSpells;
     return true;
   }
 
@@ -250,11 +306,18 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
             <ChoiceStep title="Background">
               <CardGrid items={content.backgrounds} selectedId={draft.backgroundId} onSelect={(id) => {
                 update('backgroundId', id);
-                setDraft((current) => ({ ...current, backgroundId: id, backgroundBonus: {}, selectedSkills: [] }));
+                setDraft((current) => ({
+                  ...current,
+                  backgroundId: id,
+                  backgroundBonus: {},
+                  selectedSkills: [],
+                  featSkillChoices: { ...current.featSkillChoices, background_feat: [] },
+                  magicInitiateChoices: { ...current.magicInitiateChoices, background_feat: { cantrips: [], spell: '' } },
+                }));
               }} />
               <div className="impact-box">
                 <h3>Background ability bonus</h3>
-                <p>Assign +2 to one eligible ability and +1 to the other. The modifier preview updates immediately.</p>
+                <p>Assign +2/+1 to two eligible abilities, or +1/+1/+1 to all three. The modifier preview updates immediately.</p>
                 <div className="asi-row">
                   {(selectedBackground?.asi_options || []).map((ability) => (
                     <label key={ability}>
@@ -272,6 +335,31 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
           )}
 
           {step === 3 && (
+            <ChoiceStep title="Origin Feats">
+              <OriginStep
+                content={content}
+                selectedSpecies={selectedSpecies}
+                backgroundOriginFeat={backgroundOriginFeat}
+                backgroundSkillIds={backgroundSkills}
+                humanOriginFeatId={draft.humanOriginFeatId}
+                onHumanFeatChange={(id) => setDraft((current) => ({
+                  ...current,
+                  humanOriginFeatId: id,
+                  featSkillChoices: { ...current.featSkillChoices, human_feat: [] },
+                  magicInitiateChoices: { ...current.magicInitiateChoices, human_feat: { cantrips: [], spell: '' } },
+                }))}
+                humanSkillId={draft.humanSkillId}
+                onHumanSkillChange={(id) => update('humanSkillId', id)}
+                originFeatEntries={originFeatEntries}
+                featSkillChoices={draft.featSkillChoices}
+                onFeatSkillChoice={updateFeatSkillChoice}
+                magicInitiateChoices={draft.magicInitiateChoices}
+                onMagicInitiateChange={updateMagicInitiate}
+              />
+            </ChoiceStep>
+          )}
+
+          {step === 4 && (
             <ChoiceStep title="Ability Scores">
               <div className="method-tabs">
                 {content.abilityScoreMethods.map((method) => (
@@ -318,15 +406,20 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
             </ChoiceStep>
           )}
 
-          {step === 4 && (
+          {step === 5 && (
             <ChoiceStep title="Skill Proficiencies">
-              <p className="helper-text">Background skills are already granted: {(selectedBackground?.skills || []).map((id) => skillMap[id]?.name).join(', ') || 'None'}.</p>
+              <p className="helper-text">
+                Already granted: {[...new Set([...(selectedBackground?.skills || []), ...originSkillIds])]
+                  .map((id) => skillMap[id]?.name)
+                  .filter(Boolean)
+                  .join(', ') || 'None'}.
+              </p>
               <p className="helper-text">Choose {selectedClass?.skill_count || 0} class skills. Selected: {draft.selectedSkills.length}.</p>
               <div className="option-list">
                 {(selectedClass?.skill_options || []).map((skillId) => {
                   const skill = skillMap[skillId];
                   const checked = draft.selectedSkills.includes(skillId);
-                  const locked = backgroundSkills.has(skillId);
+                  const locked = backgroundSkills.has(skillId) || originSkillIds.has(skillId);
                   return (
                     <label key={skillId} className={`check-card ${checked ? 'selected' : ''} ${locked ? 'locked' : ''}`}>
                       <input type="checkbox" checked={checked || locked} disabled={locked} onChange={() => toggleSkill(skillId)} />
@@ -339,7 +432,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
             </ChoiceStep>
           )}
 
-          {step === 5 && (
+          {step === 6 && (
             <ChoiceStep title="Starting Equipment">
               <div className="method-tabs">
                 <button type="button" className={draft.equipmentChoice === 'pack' ? 'active' : ''} onClick={() => update('equipmentChoice', 'pack')}>Equipment Pack</button>
@@ -353,7 +446,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
             </ChoiceStep>
           )}
 
-          {isCaster && step === 6 && (
+          {isCaster && step === 7 && (
             <ChoiceStep title="Spells and Cantrips">
               <p className="helper-text">Choose {requiredCantrips} cantrips and {requiredSpells} level 1 spells.</p>
               <SpellPicker title="Cantrips" spells={cantripOptions} selected={draft.cantripsKnown} limit={requiredCantrips} onToggle={(id) => toggleSpell('cantripsKnown', id, requiredCantrips)} />
@@ -363,7 +456,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
 
           {step === totalSteps - 1 && (
             <ChoiceStep title="Review and Confirm">
-              <ReviewPanel draft={draft} content={content} finalScores={finalScores} abilityMods={abilityMods} backgroundBonus={backgroundBonus} acPreview={acPreview} hpPreview={hpPreview} guidanceNotes={guidanceNotes} selectedClass={selectedClass} selectedSpecies={selectedSpecies} selectedBackground={selectedBackground} equipmentItems={equipmentItems} allSkillIds={allSkillIds} />
+              <ReviewPanel draft={draft} content={content} finalScores={finalScores} abilityMods={abilityMods} backgroundBonus={backgroundBonus} acPreview={acPreview} hpPreview={hpPreview} guidanceNotes={guidanceNotes} selectedClass={selectedClass} selectedSpecies={selectedSpecies} selectedBackground={selectedBackground} originFeatEntries={originFeatEntries} equipmentItems={equipmentItems} allSkillIds={allSkillIds} />
             </ChoiceStep>
           )}
         </div>
@@ -386,6 +479,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
           selectedSpecies={selectedSpecies}
           selectedClass={selectedClass}
           selectedBackground={selectedBackground}
+          originFeatEntries={originFeatEntries}
           skillMap={skillMap}
           backgroundBonus={backgroundBonus}
           finalScores={finalScores}
@@ -474,6 +568,131 @@ function SpellPicker({ title, spells, selected, limit, onToggle }) {
   );
 }
 
+function OriginStep({
+  content,
+  selectedSpecies,
+  backgroundOriginFeat,
+  backgroundSkillIds,
+  humanOriginFeatId,
+  onHumanFeatChange,
+  humanSkillId,
+  onHumanSkillChange,
+  originFeatEntries,
+  featSkillChoices,
+  onFeatSkillChoice,
+  magicInitiateChoices,
+  onMagicInitiateChange,
+}) {
+  const originFeats = (content.feats || []).filter((feat) => feat.category === 'origin');
+  const isHuman = selectedSpecies?.id === 'human';
+  const backgroundGrantedSkills = backgroundSkillIds || new Set();
+  return (
+    <div className="option-list">
+      {backgroundOriginFeat && (
+        <InfoRow title="Background Origin Feat" meta={backgroundOriginFeat.name} body={backgroundOriginFeat.description} />
+      )}
+      {isHuman && (
+        <>
+          <label className="field-label">
+            Human Skillful
+            <select value={humanSkillId} onChange={(event) => onHumanSkillChange(event.target.value)}>
+              <option value="">Choose one skill</option>
+              {content.skills.map((skill) => (
+                <option key={skill.id} value={skill.id} disabled={backgroundGrantedSkills.has(skill.id)}>
+                  {skill.name} ({skill.ability.toUpperCase()}){backgroundGrantedSkills.has(skill.id) ? ' (already granted)' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field-label">
+            Human Versatile
+            <select value={humanOriginFeatId} onChange={(event) => onHumanFeatChange(event.target.value)}>
+              <option value="">Choose one Origin feat</option>
+              {originFeats.map((feat) => (
+                <option key={feat.id} value={feat.id} disabled={backgroundOriginFeat?.id === feat.id && !feat.repeatable}>
+                  {feat.name}{backgroundOriginFeat?.id === feat.id && !feat.repeatable ? ' (already granted)' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+        </>
+      )}
+      {originFeatEntries.map((entry) => (
+        <FeatChoicePanel
+          key={entry.source}
+          entry={entry}
+          content={content}
+          selectedSkills={featSkillChoices[entry.source] || []}
+          unavailableSkillIds={new Set([
+            ...backgroundGrantedSkills,
+            ...(humanSkillId ? [humanSkillId] : []),
+            ...Object.entries(featSkillChoices || {})
+              .filter(([source]) => source !== entry.source)
+              .flatMap(([, skills]) => skills || []),
+          ])}
+          onSkillChoice={(skillId) => onFeatSkillChoice(entry.source, skillId)}
+          magicChoice={magicInitiateChoices[entry.source] || { cantrips: [], spell: '' }}
+          onMagicChange={(field, value) => onMagicInitiateChange(entry.source, field, value)}
+        />
+      ))}
+    </div>
+  );
+}
+
+function FeatChoicePanel({ entry, content, selectedSkills, unavailableSkillIds, onSkillChoice, magicChoice, onMagicChange }) {
+  const feat = entry.feat;
+  const magicList = feat.magic_list;
+  const cantrips = magicList ? content.spells.filter((spell) => spell.level === 0 && spell.classes.includes(magicList)) : [];
+  const spells = magicList ? content.spells.filter((spell) => spell.level === 1 && spell.classes.includes(magicList)) : [];
+  return (
+    <div className="impact-box">
+      <h3>{feat.name}</h3>
+      <p>{feat.description}</p>
+      {feat.choice?.type === 'skills' && (
+        <>
+          <p className="helper-text">Choose {feat.choice.count} skills. Selected: {selectedSkills.length}.</p>
+          <div className="option-list">
+            {content.skills.map((skill) => {
+              const selected = selectedSkills.includes(skill.id);
+              const unavailable = unavailableSkillIds.has(skill.id) && !selected;
+              return (
+              <label key={skill.id} className={`check-card ${selected ? 'selected' : ''} ${unavailable ? 'locked' : ''}`}>
+                <input
+                  type="checkbox"
+                  checked={selected}
+                  disabled={unavailable || (!selected && selectedSkills.length >= feat.choice.count)}
+                  onChange={() => onSkillChoice(skill.id)}
+                />
+                <span><strong>{skill.name}</strong> ({skill.ability.toUpperCase()})</span>
+                <small>{unavailable ? 'Already granted by another origin choice.' : skill.description}</small>
+              </label>
+              );
+            })}
+          </div>
+        </>
+      )}
+      {magicList && (
+        <>
+          <p className="helper-text">Choose 2 {magicList} cantrips and 1 level 1 {magicList} spell.</p>
+          <SpellPicker title="Magic Initiate Cantrips" spells={cantrips} selected={magicChoice.cantrips || []} limit={2} onToggle={(id) => onMagicChange('cantrips', id)} />
+          <label className="field-label">
+            Level 1 spell
+            <select value={magicChoice.spell || ''} onChange={(event) => onMagicChange('spell', event.target.value)}>
+              <option value="">Choose spell</option>
+              {spells.map((spell) => (
+                <option key={spell.id} value={spell.id}>{spell.name}</option>
+              ))}
+            </select>
+          </label>
+        </>
+      )}
+      {!feat.choice && !magicList && (
+        <p className="helper-text">No additional setup is needed for this feat right now. The sheet records it and applies any static math.</p>
+      )}
+    </div>
+  );
+}
+
 function DetailBlock({ title, body, items = [] }) {
   if (!title) return null;
   return (
@@ -497,13 +716,15 @@ function InfoRow({ title, body, meta }) {
   );
 }
 
-function ReviewPanel({ draft, content, finalScores, abilityMods, backgroundBonus, acPreview, hpPreview, guidanceNotes, selectedClass, selectedSpecies, selectedBackground, equipmentItems, allSkillIds }) {
+function ReviewPanel({ draft, content, finalScores, abilityMods, backgroundBonus, acPreview, hpPreview, guidanceNotes, selectedClass, selectedSpecies, selectedBackground, originFeatEntries, equipmentItems, allSkillIds }) {
   const skillMap = Object.fromEntries(content.skills.map((skill) => [skill.id, skill]));
+  const originFeatBody = originFeatEntries.map((entry) => entry.feat.name).join(', ');
   return (
     <div className="review-grid">
       <InfoRow title={draft.name} meta={`${selectedSpecies?.name} ${selectedClass?.name}`} body={selectedBackground?.name} />
       <InfoRow title="Hit Points" meta={hpPreview} body={`d${selectedClass?.hit_die} + CON ${fmtMod(abilityMods.con)}`} />
       <InfoRow title="Armor Class" meta={acPreview.total} body={acPreview.parts.map((part) => `${part.label} ${fmtMod(part.value)}`).join(', ')} />
+      {originFeatEntries.length > 0 && <InfoRow title="Origin Feats" meta={`${originFeatEntries.length} granted`} body={originFeatBody} />}
       {guidanceNotes.filter((note) => note.review).map((note) => (
         <InfoRow key={note.id} title={note.title} meta={note.tone === 'warning' ? 'Check' : 'Tip'} body={note.message} />
       ))}
@@ -521,6 +742,7 @@ function CharacterSummary({
   selectedSpecies,
   selectedClass,
   selectedBackground,
+  originFeatEntries,
   skillMap,
   backgroundBonus,
   finalScores,
@@ -534,9 +756,10 @@ function CharacterSummary({
   const showSpecies = Boolean(selectedSpecies);
   const showClass = step >= 1 && Boolean(selectedClass);
   const showBackground = step >= 2 && Boolean(selectedBackground);
-  const showAbilities = step >= 3 && ABILITIES.every((ability) => isFilledInteger(draft.abilityScores[ability]));
-  const showSkills = step >= 4 && allSkillIds.size > 0;
-  const showEquipment = step >= 5 && Boolean(draft.equipmentChoice);
+  const showOrigin = step >= 3 && originFeatEntries.length > 0;
+  const showAbilities = step >= 4 && ABILITIES.every((ability) => isFilledInteger(draft.abilityScores[ability]));
+  const showSkills = step >= 5 && allSkillIds.size > 0;
+  const showEquipment = step >= 6 && Boolean(draft.equipmentChoice);
 
   return (
     <>
@@ -569,7 +792,17 @@ function CharacterSummary({
           items={[
             `Skills: ${(selectedBackground.skills || []).map((id) => skillMap[id]?.name).join(', ')}`,
             `Ability bonus: ${(selectedBackground.asi_options || []).map((id) => `${id.toUpperCase()} +${backgroundBonus[id] || 0}`).join(', ')}`,
+            `Origin feat: ${originFeatEntries.find((entry) => entry.source === 'background_feat')?.feat.name || 'None'}`,
             `Tool: ${selectedBackground.tool}`,
+          ]}
+        />
+      )}
+      {showOrigin && (
+        <DetailBlock
+          title="Origin Feats"
+          body={originFeatEntries.map((entry) => `${entry.feat.name}: ${entry.feat.description}`).join(' ')}
+          items={[
+            draft.humanSkillId ? `Human Skillful: ${skillMap[draft.humanSkillId]?.name || draft.humanSkillId}` : null,
           ]}
         />
       )}
@@ -625,7 +858,44 @@ function normalizeBackgroundBonus(input, background) {
 
 function validBackgroundBonus(bonus, background) {
   const values = (background?.asi_options || []).map((ability) => Number(bonus[ability] || 0)).sort((a, b) => b - a);
-  return JSON.stringify(values) === JSON.stringify([2, 1]);
+  return JSON.stringify(values) === JSON.stringify([2, 1, 0]) || JSON.stringify(values) === JSON.stringify([1, 1, 1]);
+}
+
+function validOriginChoices(draft, selectedSpecies, selectedBackground, originFeatEntries, content) {
+  const isHuman = selectedSpecies?.id === 'human';
+  const allSkillIds = new Set(content.skills.map((skill) => skill.id));
+  const originFeats = (content.feats || []).filter((feat) => feat.category === 'origin');
+  const grantedSkillIds = new Set(selectedBackground?.skills || []);
+  if (isHuman) {
+    if (!allSkillIds.has(draft.humanSkillId)) return false;
+    if (grantedSkillIds.has(draft.humanSkillId)) return false;
+    if (!originFeats.some((feat) => feat.id === draft.humanOriginFeatId)) return false;
+    grantedSkillIds.add(draft.humanSkillId);
+  }
+  const backgroundFeat = originFeatEntries.find((entry) => entry.source === 'background_feat')?.feat;
+  const humanFeat = originFeatEntries.find((entry) => entry.source === 'human_feat')?.feat;
+  if (backgroundFeat && humanFeat && backgroundFeat.id === humanFeat.id && !humanFeat.repeatable) return false;
+
+  for (const entry of originFeatEntries) {
+    const feat = entry.feat;
+    if (feat.choice?.type === 'skills') {
+      const selected = draft.featSkillChoices?.[entry.source] || [];
+      if (new Set(selected).size !== feat.choice.count) return false;
+      if (selected.some((skillId) => !allSkillIds.has(skillId))) return false;
+      if (selected.some((skillId) => grantedSkillIds.has(skillId))) return false;
+      selected.forEach((skillId) => grantedSkillIds.add(skillId));
+    }
+    if (feat.magic_list) {
+      const choice = draft.magicInitiateChoices?.[entry.source] || {};
+      const cantrips = choice.cantrips || [];
+      const cantripOptions = content.spells.filter((spell) => spell.level === 0 && spell.classes.includes(feat.magic_list));
+      const spellOptions = content.spells.filter((spell) => spell.level === 1 && spell.classes.includes(feat.magic_list));
+      if (new Set(cantrips).size !== 2) return false;
+      if (cantrips.some((id) => !cantripOptions.some((spell) => spell.id === id))) return false;
+      if (!spellOptions.some((spell) => spell.id === choice.spell)) return false;
+    }
+  }
+  return true;
 }
 
 function pointBuySpent(scores) {
@@ -716,6 +986,7 @@ function getGuidanceNotes({
   equipmentItems,
   allSkillIds,
   skillMap,
+  originFeatEntries,
 }) {
   const notes = [];
   if (!selectedClass) return notes;
@@ -778,6 +1049,17 @@ function getGuidanceNotes({
     });
   }
 
+  if (originFeatEntries?.length > 0) {
+    const featNames = originFeatEntries.map((entry) => entry.feat.name).join(', ');
+    notes.push({
+      id: 'origin-feats',
+      title: 'Origin Feats',
+      tone: 'info',
+      message: `Origin feats are active from level 1: ${featNames}. Static math is applied now; choices that need table judgment are recorded on the sheet for play.`,
+      review: false,
+    });
+  }
+
   if (allSkillIds?.size > 0) {
     const skillSummary = [...allSkillIds]
       .map((id) => skillMap[id])
@@ -815,7 +1097,7 @@ function getGuidanceNotes({
 }
 
 function stepsForClass(isCaster) {
-  const steps = ['Name and Species', 'Class', 'Background', 'Ability Scores', 'Skills', 'Equipment'];
+  const steps = ['Name and Species', 'Class', 'Background', 'Origin Feats', 'Ability Scores', 'Skills', 'Equipment'];
   if (isCaster) steps.push('Spells');
   steps.push('Review');
   return steps;
