@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { socket } from './socket';
 import CharacterWizard from './CharacterWizard';
@@ -33,9 +33,132 @@ function rollDice(diceCount, dieSides) {
   return total;
 }
 
+function parseDiceFormula(formula) {
+  const match = String(formula || '').match(/(\d+)d(\d+)(?:\s*([+-])\s*(\d+))?/i);
+  if (!match) return null;
+  const modifier = match[3] ? Number(`${match[3]}${match[4]}`) : 0;
+  return {
+    diceCount: Number(match[1]),
+    dieSides: Number(match[2]),
+    modifier,
+  };
+}
+
 function fmtMod(value) {
   const number = Number(value || 0);
   return number >= 0 ? `+${number}` : String(number);
+}
+
+function titleCase(value) {
+  return String(value || '')
+    .replaceAll('_', ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function formulaText({ diceCount, dieSides, modifier }) {
+  return `${diceCount}d${dieSides}${modifier ? ` ${modifier > 0 ? '+' : '-'} ${Math.abs(modifier)}` : ''}`;
+}
+
+function buildCharacterRollOptions(character) {
+  if (!character) return [];
+  const abilities = character.abilities || {};
+  const derived = character.derived_stats || {};
+  const options = [];
+
+  for (const [ability, modifier] of Object.entries(abilities.modifiers || {})) {
+    options.push({
+      id: `ability:${ability}`,
+      group: 'Ability Checks',
+      label: `${ability.toUpperCase()} Check`,
+      diceCount: 1,
+      dieSides: 20,
+      modifier: Number(modifier || 0),
+      breakdown: `${ability.toUpperCase()} modifier ${fmtMod(modifier)}`,
+    });
+  }
+
+  if (Number.isFinite(Number(derived.initiative))) {
+    const parts = (derived.initiative_breakdown || []).map((part) => `${part.label} ${fmtMod(part.value)}`).join(', ');
+    options.push({
+      id: 'initiative',
+      group: 'Common',
+      label: 'Initiative',
+      diceCount: 1,
+      dieSides: 20,
+      modifier: Number(derived.initiative || 0),
+      breakdown: parts || `Initiative ${fmtMod(derived.initiative)}`,
+    });
+  }
+
+  for (const [skill, data] of Object.entries(derived.skill_modifiers || {})) {
+    options.push({
+      id: `skill:${skill}`,
+      group: 'Skill Checks',
+      label: `${titleCase(skill)} Check`,
+      diceCount: 1,
+      dieSides: 20,
+      modifier: Number(data.total || 0),
+      breakdown: `${data.ability?.toUpperCase() || 'Ability'} ${data.proficient ? '+ proficiency' : 'only'} = ${fmtMod(data.total)}`,
+    });
+  }
+
+  for (const [ability, data] of Object.entries(derived.saving_throw_modifiers || {})) {
+    options.push({
+      id: `save:${ability}`,
+      group: 'Saving Throws',
+      label: `${ability.toUpperCase()} Save`,
+      diceCount: 1,
+      dieSides: 20,
+      modifier: Number(data.total || 0),
+      breakdown: `${ability.toUpperCase()} ${data.proficient ? '+ proficiency' : 'only'} = ${fmtMod(data.total)}`,
+    });
+  }
+
+  for (const attack of derived.attack_breakdowns || []) {
+    options.push({
+      id: `attack:${attack.weapon_id || attack.name}`,
+      group: 'Attacks',
+      label: `${attack.name} Attack`,
+      diceCount: 1,
+      dieSides: 20,
+      modifier: Number(attack.attack_total || 0),
+      breakdown: (attack.attack_parts || []).map((part) => `${part.label} ${fmtMod(part.value)}`).join(', '),
+    });
+    const damage = parseDiceFormula(attack.damage_formula);
+    if (damage) {
+      options.push({
+        id: `damage:${attack.weapon_id || attack.name}`,
+        group: 'Damage',
+        label: `${attack.name} Damage`,
+        ...damage,
+        breakdown: (attack.damage_parts || []).map((part) => part.value === null ? part.label : `${part.label} ${fmtMod(part.value)}`).join(', '),
+      });
+    }
+  }
+
+  if (Number.isFinite(Number(derived.spell_attack_bonus))) {
+    options.push({
+      id: 'spell_attack',
+      group: 'Spells',
+      label: 'Spell Attack',
+      diceCount: 1,
+      dieSides: 20,
+      modifier: Number(derived.spell_attack_bonus || 0),
+      breakdown: `Spell attack bonus ${fmtMod(derived.spell_attack_bonus)}`,
+    });
+  }
+
+  if (Number.isFinite(Number(derived.spell_save_dc))) {
+    options.push({
+      id: 'spell_dc',
+      group: 'Spells',
+      label: `Spell Save DC ${derived.spell_save_dc}`,
+      staticValue: Number(derived.spell_save_dc),
+      breakdown: `8 + proficiency ${fmtMod(derived.proficiency_bonus)} + casting ability`,
+    });
+  }
+
+  return options;
 }
 
 function summarizeCharacterOption(characterId, character) {
@@ -111,10 +234,13 @@ function App() {
   // BUG-021: fallback roller state for natural-language roll detection without sentinel tag
   const [fallbackRoll, setFallbackRoll] = useState(null);   // { dieSides, modifier } | null — modifier is user-entered
   const [fallbackModInput, setFallbackModInput] = useState('0'); // controlled input for modifier
+  const [selectedRollId, setSelectedRollId] = useState('');
 
   const narrativeEndRef = useRef(null);
   const rulesEndRef = useRef(null);
   const pendingSessionStartRef = useRef(false);
+  const characterRollOptions = useMemo(() => buildCharacterRollOptions(currentCharacter), [currentCharacter]);
+  const selectedCharacterRoll = characterRollOptions.find((option) => option.id === selectedRollId) || null;
 
   // ── Socket lifecycle ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -386,6 +512,18 @@ function App() {
     setFallbackModInput('0');
   }, [fallbackRoll, fallbackModInput]);
 
+  const handleCharacterRoll = useCallback(() => {
+    if (!selectedCharacterRoll || selectedCharacterRoll.staticValue) return;
+    const { diceCount, dieSides, modifier, label, breakdown } = selectedCharacterRoll;
+    const rolled = rollDice(diceCount, dieSides);
+    const total = rolled + modifier;
+    const rollMsg = `[ROLL RESULT: ${total}] I rolled a ${total} (${label}: ${formulaText(selectedCharacterRoll)} = ${total}; ${breakdown})`;
+    const displayRollMsg = rollMsg.replace(/^\[ROLL RESULT: \d+\]\s*/, '');
+    setNarrative((prev) => [...prev, { type: 'player', text: displayRollMsg, id: Date.now() }]);
+    socket.emit('story_input', { message: rollMsg });
+    setSelectedRollId('');
+  }, [selectedCharacterRoll]);
+
   const handleSubmitRoll = useCallback(() => {
     if (!rollResult || !pendingRoll) return;
     const { diceCount, dieSides, modifier } = pendingRoll;
@@ -637,6 +775,38 @@ function App() {
 
           <form className="input-form" onSubmit={handleStorySubmit}>
             <label className="input-label">What do you do?</label>
+            {characterRollOptions.length > 0 && (
+              <div className="character-roll-panel">
+                <select
+                  className="character-roll-select"
+                  value={selectedCharacterRoll ? selectedRollId : ''}
+                  onChange={(e) => setSelectedRollId(e.target.value)}
+                  disabled={dm1Typing || !!pendingRoll || !!fallbackRoll}
+                  aria-label="Choose a character-aware roll"
+                >
+                  <option value="">Character roll...</option>
+                  {characterRollOptions.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.group}: {option.label}{option.staticValue ? ` (${option.staticValue})` : ` (${formulaText(option)})`}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="character-roll-btn"
+                  onClick={handleCharacterRoll}
+                  disabled={!selectedCharacterRoll || selectedCharacterRoll.staticValue || dm1Typing || !!pendingRoll || !!fallbackRoll}
+                >
+                  Roll
+                </button>
+                {selectedCharacterRoll && (
+                  <div className="character-roll-breakdown">
+                    <strong>{selectedCharacterRoll.staticValue ? `${selectedCharacterRoll.label}` : formulaText(selectedCharacterRoll)}</strong>
+                    <span>{selectedCharacterRoll.breakdown}</span>
+                  </div>
+                )}
+              </div>
+            )}
             <div className="input-row">
               <textarea
                 className="story-textarea"
