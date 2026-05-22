@@ -142,6 +142,9 @@ function characterSheetToWorldStats(characterSheet) {
     languages: characterSheet.languages || characterSheet.proficiencies?.languages || [],
     resistances: characterSheet.resistances || [],
     species_spells: (characterSheet.species_spells || []).map((spell) => spell.id || spell),
+    class_cantrips: characterSheet.spellcasting?.cantrips_known || [],
+    class_spells: characterSheet.spellcasting?.spells_prepared || characterSheet.spellcasting?.spells_known || [],
+    origin_magic: characterSheet.origin?.magic_initiate || {},
     conditions: stats.conditions || [],
     weapon_name: primaryAttack?.name || '',
     ability_scores: modifiers,
@@ -859,6 +862,16 @@ io.on('connection', (socket) => {
             if (ps.languages?.length) statParts.push(`Languages: ${ps.languages.join(', ')}`);
             if (ps.resistances?.length) statParts.push(`Resistances: ${ps.resistances.join(', ')}`);
             if (ps.species_spells?.length) statParts.push(`Species spells: ${ps.species_spells.join(', ')}`);
+            if (ps.class_cantrips?.length) statParts.push(`Class cantrips: ${ps.class_cantrips.join(', ')}`);
+            if (ps.class_spells?.length) statParts.push(`Class spells: ${ps.class_spells.join(', ')}`);
+            const originMagic = Object.values(ps.origin_magic || {});
+            if (originMagic.length) {
+              const originSpellText = originMagic.flatMap((choice) => [
+                ...(choice.cantrips || []).map((spell) => `cantrip ${spell}`),
+                choice.spell ? `level 1 ${choice.spell}` : null,
+              ].filter(Boolean));
+              if (originSpellText.length) statParts.push(`Origin magic: ${originSpellText.join(', ')}`);
+            }
             if (ps.conditions?.length) statParts.push(`Conditions: ${ps.conditions.join(', ')}`);
             // BUG-023: weapon and ability scores so DM2 can answer damage/attack questions without asking
             if (ps.weapon_name) statParts.push(`Weapon: ${ps.weapon_name}`);

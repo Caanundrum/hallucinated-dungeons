@@ -583,6 +583,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
         <CharacterSummary
           step={step}
           draft={draft}
+          content={content}
           selectedSpecies={selectedSpecies}
           selectedClass={selectedClass}
           selectedBackground={selectedBackground}
@@ -891,7 +892,13 @@ function InfoRow({ title, body, meta }) {
 function ReviewPanel({ draft, content, finalScores, abilityMods, backgroundBonus, acPreview, hpPreview, guidanceNotes, selectedClass, selectedSpecies, selectedBackground, originFeatEntries, equipmentItems, allSkillIds }) {
   const skillMap = Object.fromEntries(content.skills.map((skill) => [skill.id, skill]));
   const languageMap = Object.fromEntries((content.languages || []).map((language) => [language.id, language]));
-  const originFeatBody = originFeatEntries.map((entry) => entry.feat.name).join(', ');
+  const originFeatBody = originFeatEntries
+    .map((entry) => formatOriginFeatSummary(entry, draft, content))
+    .join('; ');
+  const classSpellBody = [
+    ...draft.cantripsKnown.map((id) => `Cantrip: ${spellName(content, id)}`),
+    ...draft.spellsKnown.map((id) => `Level 1: ${spellName(content, id)}`),
+  ].join(', ');
   return (
     <div className="review-grid">
       <InfoRow title={draft.name} meta={`${selectedSpecies?.name} ${selectedClass?.name}`} body={selectedBackground?.name} />
@@ -909,7 +916,7 @@ function ReviewPanel({ draft, content, finalScores, abilityMods, backgroundBonus
         draft.equipmentChoice === 'pack' ? equipmentItems.map((item) => item.name).join(', ') : 'Class starting gold',
         draft.backgroundEquipmentChoice === 'equipment' ? `${selectedBackground?.name} background package` : '50 GP background alternative',
       ].filter(Boolean).join('; ')} />
-      {selectedClass?.spellcasting && <InfoRow title="Spells" meta={selectedClass.spellcasting.ability.toUpperCase()} body={[...draft.cantripsKnown, ...draft.spellsKnown].map((id) => content.spells.find((spell) => spell.id === id)?.name).filter(Boolean).join(', ')} />}
+      {selectedClass?.spellcasting && <InfoRow title="Class Spells" meta={selectedClass.spellcasting.ability.toUpperCase()} body={classSpellBody} />}
     </div>
   );
 }
@@ -917,6 +924,7 @@ function ReviewPanel({ draft, content, finalScores, abilityMods, backgroundBonus
 function CharacterSummary({
   step,
   draft,
+  content,
   selectedSpecies,
   selectedClass,
   selectedBackground,
@@ -983,9 +991,10 @@ function CharacterSummary({
       {showOrigin && (
         <DetailBlock
           title="Origin Feats"
-          body={originFeatEntries.map((entry) => `${entry.feat.name}: ${entry.feat.description}`).join(' ')}
+          body={originFeatEntries.map((entry) => formatOriginFeatSummary(entry, draft, content)).join(' ')}
           items={[
             draft.humanSkillId ? `Human Skillful: ${skillMap[draft.humanSkillId]?.name || draft.humanSkillId}` : null,
+            ...originFeatEntries.flatMap((entry) => formatOriginFeatChoiceItems(entry, draft, content)),
           ]}
         />
       )}
@@ -1051,6 +1060,26 @@ function formatSpeciesChoiceSummary(species, choices = {}, skillMap = {}) {
     const option = (choice.options || []).find((item) => item.id === value);
     return `${choice.label}: ${option?.name || value}`;
   }).filter(Boolean);
+}
+
+function spellName(content, spellId) {
+  return content.spells.find((spell) => spell.id === spellId)?.name || spellId.replaceAll('_', ' ');
+}
+
+function formatOriginFeatChoiceItems(entry, draft, content = { spells: [] }) {
+  const choice = draft.magicInitiateChoices?.[entry.source];
+  if (!choice) return [];
+  const cantrips = (choice.cantrips || []).map((id) => spellName(content, id));
+  const spell = choice.spell ? spellName(content, choice.spell) : null;
+  return [
+    cantrips.length ? `${entry.feat.name} cantrips: ${cantrips.join(', ')}` : null,
+    spell ? `${entry.feat.name} level 1 spell: ${spell}` : null,
+  ].filter(Boolean);
+}
+
+function formatOriginFeatSummary(entry, draft, content = { spells: [] }) {
+  const choices = formatOriginFeatChoiceItems(entry, draft, content);
+  return `${entry.feat.name}: ${entry.feat.description}${choices.length ? ` (${choices.join('; ')})` : ''}`;
 }
 
 function validBackgroundBonus(bonus, background) {

@@ -713,13 +713,13 @@ function App() {
 
       </main>
       {sheetOpen && currentCharacter && (
-        <CharacterSheetModal character={currentCharacter} onClose={() => setSheetOpen(false)} />
+        <CharacterSheetModal character={currentCharacter} content={characterContent} onClose={() => setSheetOpen(false)} />
       )}
     </div>
   );
 }
 
-function CharacterSheetModal({ character, onClose }) {
+function CharacterSheetModal({ character, content, onClose }) {
   const identity = character.identity || {};
   const abilities = character.abilities || {};
   const derived = character.derived_stats || {};
@@ -732,6 +732,15 @@ function CharacterSheetModal({ character, onClose }) {
   const languages = character.languages || character.proficiencies?.languages || [];
   const speciesSpells = character.species_spells || [];
   const resistances = character.resistances || [];
+  const spellcasting = character.spellcasting || null;
+  const magicInitiate = character.origin?.magic_initiate || {};
+  const spellName = (spellId) => content?.spells?.find((spell) => spell.id === spellId)?.name || String(spellId || '').replaceAll('_', ' ');
+  const magicInitiateRows = Object.entries(magicInitiate).map(([source, choice]) => ({
+    source,
+    label: source === 'background_feat' ? 'Background Magic Initiate' : 'Human Magic Initiate',
+    cantrips: (choice.cantrips || []).map(spellName),
+    spell: choice.spell ? spellName(choice.spell) : '',
+  }));
 
   return (
     <div className="sheet-backdrop" role="dialog" aria-modal="true" aria-label="Character sheet">
@@ -818,10 +827,42 @@ function CharacterSheetModal({ character, onClose }) {
             {speciesSpells.length > 0 && (
               <div className="sheet-line">
                 <strong>Species Spells</strong>
-                <span>{speciesSpells.map((spell) => spell.id.replaceAll('_', ' ')).join(', ')}</span>
+                <span>{speciesSpells.map((spell) => spellName(spell.id || spell)).join(', ')}</span>
               </div>
             )}
           </section>
+
+          {(spellcasting || magicInitiateRows.length > 0) && (
+            <section className="sheet-section">
+              <h3>Spells</h3>
+              {spellcasting && (
+                <>
+                  <div className="sheet-line">
+                    <strong>Spellcasting</strong>
+                    <span>{spellcasting.ability?.toUpperCase()} - Attack {fmtMod(derived.spell_attack_bonus)}, DC {derived.spell_save_dc ?? '--'}</span>
+                  </div>
+                  {(spellcasting.cantrips_known || []).length > 0 && (
+                    <div className="sheet-line">
+                      <strong>Cantrips</strong>
+                      <span>{spellcasting.cantrips_known.map(spellName).join(', ')}</span>
+                    </div>
+                  )}
+                  {(spellcasting.spells_prepared || spellcasting.spells_known || []).length > 0 && (
+                    <div className="sheet-line">
+                      <strong>Level 1</strong>
+                      <span>{(spellcasting.spells_prepared || spellcasting.spells_known || []).map(spellName).join(', ')}</span>
+                    </div>
+                  )}
+                </>
+              )}
+              {magicInitiateRows.map((row) => (
+                <div key={row.source} className="sheet-line">
+                  <strong>{row.label}</strong>
+                  <span>{[row.cantrips.length ? `Cantrips: ${row.cantrips.join(', ')}` : null, row.spell ? `Level 1: ${row.spell}` : null].filter(Boolean).join('; ')}</span>
+                </div>
+              ))}
+            </section>
+          )}
 
           <section className="sheet-section">
             <h3>Features</h3>
