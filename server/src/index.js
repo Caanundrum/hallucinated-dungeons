@@ -123,6 +123,7 @@ function isValidSessionToken(sessionId, token) {
 function characterSheetToWorldStats(characterSheet) {
   const stats = characterSheet.derived_stats || {};
   const identity = characterSheet.identity || {};
+  const details = characterSheet.character_details || {};
   const modifiers = characterSheet.abilities?.modifiers || {};
   const primaryAttack = stats.attack_breakdowns?.[0];
   return {
@@ -134,7 +135,13 @@ function characterSheetToWorldStats(characterSheet) {
     temp_hp: stats.temp_hp || 0,
     armor_class: stats.armor_class || 10,
     speed: stats.speed || 30,
+    alignment: details.alignment || '',
+    appearance: details.appearance || '',
+    personality: details.personality || '',
+    backstory: details.backstory || '',
     languages: characterSheet.languages || characterSheet.proficiencies?.languages || [],
+    resistances: characterSheet.resistances || [],
+    species_spells: (characterSheet.species_spells || []).map((spell) => spell.id || spell),
     conditions: stats.conditions || [],
     weapon_name: primaryAttack?.name || '',
     ability_scores: modifiers,
@@ -845,7 +852,13 @@ io.on('connection', (socket) => {
             if (ps.hp !== null) statParts.push(`HP: ${ps.hp}/${ps.max_hp}`);
             if (ps.armor_class) statParts.push(`AC: ${ps.armor_class}`);
             if (ps.speed) statParts.push(`Speed: ${ps.speed} ft`);
+            if (ps.alignment) statParts.push(`Alignment: ${ps.alignment}`);
+            if (ps.appearance) statParts.push(`Appearance: ${ps.appearance}`);
+            if (ps.personality) statParts.push(`Personality: ${ps.personality}`);
+            if (ps.backstory) statParts.push(`Backstory: ${ps.backstory}`);
             if (ps.languages?.length) statParts.push(`Languages: ${ps.languages.join(', ')}`);
+            if (ps.resistances?.length) statParts.push(`Resistances: ${ps.resistances.join(', ')}`);
+            if (ps.species_spells?.length) statParts.push(`Species spells: ${ps.species_spells.join(', ')}`);
             if (ps.conditions?.length) statParts.push(`Conditions: ${ps.conditions.join(', ')}`);
             // BUG-023: weapon and ability scores so DM2 can answer damage/attack questions without asking
             if (ps.weapon_name) statParts.push(`Weapon: ${ps.weapon_name}`);
