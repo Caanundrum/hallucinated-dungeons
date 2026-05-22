@@ -819,7 +819,7 @@ function FeatChoicePanel({ entry, content, selectedSkills, unavailableSkillIds, 
   const spells = magicList ? content.spells.filter((spell) => spell.level === 1 && spell.classes.includes(magicList)) : [];
   return (
     <div className="impact-box">
-      <h3>{feat.name}</h3>
+      <h3>{entry.label}: {feat.name}</h3>
       <p>{feat.description}</p>
       {feat.choice?.type === 'skills' && (
         <>
@@ -1079,7 +1079,7 @@ function formatOriginFeatChoiceItems(entry, draft, content = { spells: [] }) {
 
 function formatOriginFeatSummary(entry, draft, content = { spells: [] }) {
   const choices = formatOriginFeatChoiceItems(entry, draft, content);
-  return `${entry.feat.name}: ${entry.feat.description}${choices.length ? ` (${choices.join('; ')})` : ''}`;
+  return `${entry.label}: ${entry.feat.name}: ${entry.feat.description}${choices.length ? ` (${choices.join('; ')})` : ''}`;
 }
 
 function validBackgroundBonus(bonus, background) {
