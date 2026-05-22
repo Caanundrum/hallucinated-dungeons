@@ -20,13 +20,14 @@ const CAMPAIGN_LOG_TOKEN_BUDGET = 2000;
  */
 async function build({ sessionId, dm1Prompt, playerMessage }) {
   // ── Fetch all context components in parallel ──────────────────────────
-  const [worldStateRow, campaignLog, chapterSummaries, rollingWindowRows, partyPresence] =
+  const [worldStateRow, campaignLog, chapterSummaries, rollingWindowRows, partyPresence, activeCharacter] =
     await Promise.all([
       db.getWorldState(sessionId),
       db.getCampaignLog(sessionId),
       db.getChapterSummaries(sessionId),
       db.getRollingWindow(sessionId, 40), // 20 pairs = 40 rows
       db.getCharacterPresenceForCampaign().catch(() => []),
+      db.getCharacterForSession(sessionId).catch(() => null),
     ]);
 
   const worldState = worldStateRow?.state || db.DEFAULT_WORLD_STATE;
@@ -55,6 +56,12 @@ async function build({ sessionId, dm1Prompt, playerMessage }) {
   if (partyPresenceText) {
     staticSystemPrompt += '## ACTIVE PARTY PRESENCE\n';
     staticSystemPrompt += partyPresenceText + '\n\n';
+  }
+
+  const characterSheetText = buildActiveCharacterText(activeCharacter?.character_sheet);
+  if (characterSheetText) {
+    staticSystemPrompt += '## ACTIVE CHARACTER SHEET\n';
+    staticSystemPrompt += characterSheetText + '\n\n';
   }
 
   // Tier 2: campaign log (latest entries only, capped so long campaigns keep breathing)
@@ -154,6 +161,48 @@ function buildPartyPresenceText(rows) {
       return `- ${name}: ${row.presence}; ${className} level ${level}.${combatNote}`;
     })
     .join('\n');
+}
+
+function buildActiveCharacterText(characterSheet) {
+  if (!characterSheet) return '';
+  const identity = characterSheet.identity || {};
+  const abilities = characterSheet.abilities || {};
+  const derived = characterSheet.derived_stats || {};
+  const spellcasting = characterSheet.spellcasting || {};
+  const attacks = derived.attack_breakdowns || [];
+  const features = characterSheet.features || [];
+  const inventory = characterSheet.inventory || [];
+  const languages = characterSheet.languages || characterSheet.proficiencies?.languages || [];
+  const lines = [];
+
+  lines.push(`Name: ${identity.name || 'Unnamed'}`);
+  lines.push(`Build: ${identity.species_name || identity.species || 'Unknown species'} ${identity.class_name || identity.class || 'Unknown class'} level ${identity.level || derived.level || 1}`);
+  lines.push(`Core stats: HP ${derived.hp ?? '--'}/${derived.max_hp ?? '--'}, AC ${derived.armor_class ?? '--'}, Speed ${derived.speed ?? '--'} ft, Initiative ${fmtSigned(derived.initiative)}, Proficiency ${fmtSigned(derived.proficiency_bonus)}`);
+  if (abilities.final_scores) {
+    lines.push(`Ability modifiers: ${Object.entries(abilities.modifiers || {}).map(([key, value]) => `${key.toUpperCase()} ${fmtSigned(value)}`).join(', ')}`);
+  }
+  if (attacks.length) {
+    lines.push(`Attacks: ${attacks.map((attack) => `${attack.name} hit ${fmtSigned(attack.attack_total)}, damage ${attack.damage_formula}`).join('; ')}`);
+  }
+  if (features.length) {
+    lines.push(`Features: ${features.map((feature) => feature.name).join(', ')}`);
+  }
+  if (inventory.length) {
+    lines.push(`Equipment: ${inventory.map((item) => item.name).join(', ')}`);
+  }
+  if (spellcasting.ability) {
+    const cantrips = spellcasting.cantrips_known || [];
+    const spells = spellcasting.spells_prepared || spellcasting.spells_known || [];
+    lines.push(`Spellcasting: ${spellcasting.ability.toUpperCase()}, cantrips ${formatSceneList(cantrips)}, level 1 ${formatSceneList(spells)}`);
+  }
+  if (languages.length) lines.push(`Languages: ${languages.join(', ')}`);
+  lines.push('Capability rule: only grant supernatural actions, flight, telepathy, special senses, spells, or class features that appear here, in current world state, or in established inventory.');
+  return lines.join('\n');
+}
+
+function fmtSigned(value) {
+  const number = Number(value || 0);
+  return number >= 0 ? `+${number}` : String(number);
 }
 
 /**

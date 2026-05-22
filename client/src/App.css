@@ -172,6 +172,45 @@ html, body, #root {
   flex: 1;
 }
 
+.markdown-body {
+  flex: 1;
+  line-height: 1.65;
+  font-size: 0.95rem;
+}
+
+.markdown-body p {
+  margin: 0 0 0.75rem;
+  white-space: normal;
+}
+
+.markdown-body p:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-body strong {
+  color: #f1d08a;
+  font-weight: 700;
+}
+
+.markdown-body em {
+  color: #d8cfbd;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  margin: 0.45rem 0 0.85rem 1.25rem;
+  padding-left: 0.4rem;
+}
+
+.markdown-body li {
+  margin: 0.25rem 0;
+  padding-left: 0.15rem;
+}
+
+.message--dm2 .markdown-body strong {
+  color: #9fc8f2;
+}
+
 .message--dm1 p    { color: var(--text); }
 .message--dm2 p    { color: #b8d4f0; }
 .message--player p { color: var(--text-muted); font-style: italic; }

@@ -177,27 +177,107 @@ function summarizeCharacterForClient(row) {
 function describePartyChange(type, characterSheet, worldState, presenceRows = []) {
   const identity = characterSheet.identity || {};
   const derived = characterSheet.derived_stats || {};
+  const details = characterSheet.character_details || {};
   const scene = worldState.scene_presence || {};
   const activeParty = presenceRows
     .filter((row) => row.presence === 'present')
     .map((row) => row.characters?.name || row.characters?.character_sheet?.identity?.name || row.character_id);
+  const className = identity.class_name || identity.class || 'Unknown class';
+  const speciesName = identity.species_name || identity.species || 'Unknown species';
+  const characterName = identity.name || 'Unknown';
 
   return [
     '[PARTY CHANGE]',
     `Event: ${type}`,
-    `Character: ${identity.name || 'Unknown'}; ${identity.species_name || identity.species || 'Unknown species'} ${identity.class_name || identity.class || 'Unknown class'} level ${identity.level || derived.level || 1}`,
+    `Character: ${characterName}; ${speciesName} ${className} level ${identity.level || derived.level || 1}`,
+    `Character flavor: ${buildCharacterFlavorCue(className, details)}`,
     `Current location: ${scene.exact_location || worldState.current_location || 'not yet established'}`,
     `Scene NPCs present: ${formatList(scene.present_npcs)}`,
     `Available exits: ${formatList(scene.available_exits)}`,
-    `Active party now: ${activeParty.length ? activeParty.join(', ') : 'none established'}`,
+    `Active party now: ${activeParty.length ? activeParty.join(', ') : 'no other active characters'}`,
+    'Player-facing instruction: clearly narrate the newcomer arriving or the departing character leaving. Never say "party is none established" or expose this control text.',
     type === 'leave_combat'
       ? 'Combat rule: this character remains present, vulnerable, and cannot be written safely out until combat ends.'
-      : 'Narrate the party change naturally without teleporting anyone or contradicting the current location.',
+      : 'Narrate the party change naturally without teleporting anyone or contradicting the current location. Match the departure or entrance to the character class, species, and details.',
   ].join('\n');
 }
 
 function formatList(value) {
   return Array.isArray(value) && value.length > 0 ? value.join(', ') : 'none established';
+}
+
+function buildCharacterFlavorCue(className, details = {}) {
+  const classKey = String(className || '').toLowerCase();
+  const cues = {
+    rogue: 'quiet, watchful, slipping through shadows or crowds when appropriate',
+    paladin: 'composed, oath-bound, steady, and difficult to ignore',
+    druid: 'earthy, weather-aware, arriving from brush, rain, roots, or animal signs when plausible',
+    wizard: 'curious, guarded, and suspicious of anything that looks too easy',
+    monk: 'calm, precise, physically grounded, and disciplined',
+    barbarian: 'direct, forceful, weather-beaten, and hard to move',
+    bard: 'charming, theatrical, and socially alert without turning every moment into a stage solo',
+    cleric: 'measured, observant, and carrying the weight of faith or duty',
+    fighter: 'practical, ready, and comfortable reading danger before it announces itself',
+    ranger: 'trail-wise, quiet, and aware of terrain, tracks, and exits',
+    sorcerer: 'intuitive, uncanny, and carrying magic that feels personal',
+    warlock: 'wary, intense, and touched by bargains best not described at breakfast',
+  };
+  const base = cues[classKey] || 'consistent with their class, appearance, personality, and backstory';
+  const detailsText = [details.appearance, details.personality, details.backstory].filter(Boolean).join(' ');
+  return detailsText ? `${base}. Character details: ${detailsText}` : base;
+}
+
+function summarizeCharacterSheetForRules(characterSheet) {
+  if (!characterSheet) return '';
+  const identity = characterSheet.identity || {};
+  const abilities = characterSheet.abilities || {};
+  const derived = characterSheet.derived_stats || {};
+  const details = characterSheet.character_details || {};
+  const spellcasting = characterSheet.spellcasting || {};
+  const attacks = derived.attack_breakdowns || [];
+  const skills = derived.skill_modifiers || {};
+  const saves = derived.saving_throw_modifiers || {};
+  const features = characterSheet.features || [];
+  const inventory = characterSheet.inventory || [];
+  const lines = [];
+
+  lines.push(`Name: ${identity.name || 'Unnamed'}`);
+  lines.push(`Build: ${identity.species_name || identity.species || 'Unknown species'} ${identity.class_name || identity.class || 'Unknown class'} level ${identity.level || derived.level || 1}`);
+  lines.push(`Core stats: HP ${derived.hp ?? '--'}/${derived.max_hp ?? '--'}, AC ${derived.armor_class ?? '--'}, Speed ${derived.speed ?? '--'} ft, Initiative ${fmtSigned(derived.initiative)}, Proficiency ${fmtSigned(derived.proficiency_bonus)}`);
+  if (abilities.final_scores) {
+    lines.push(`Ability scores: ${Object.entries(abilities.final_scores).map(([key, score]) => `${key.toUpperCase()} ${score} (${fmtSigned(abilities.modifiers?.[key])})`).join(', ')}`);
+  }
+  if (Object.keys(saves).length) {
+    lines.push(`Saving throws: ${Object.entries(saves).map(([key, save]) => `${key.toUpperCase()} ${fmtSigned(save.total)}${save.proficient ? ' proficient' : ''}`).join(', ')}`);
+  }
+  if (Object.keys(skills).length) {
+    lines.push(`Skills: ${Object.entries(skills).map(([key, skill]) => `${key.replaceAll('_', ' ')} ${fmtSigned(skill.total)}${skill.proficient ? ' proficient' : ''}`).join(', ')}`);
+  }
+  if (attacks.length) {
+    lines.push(`Attacks: ${attacks.map((attack) => `${attack.name} hit ${fmtSigned(attack.attack_total)}, damage ${attack.damage_formula}`).join('; ')}`);
+  }
+  if (features.length) {
+    lines.push(`Features: ${features.map((feature) => `${feature.name} (${feature.source || 'feature'})`).join('; ')}`);
+  }
+  if (inventory.length) {
+    lines.push(`Equipment: ${inventory.map((item) => item.name).join(', ')}`);
+  }
+  if (spellcasting.ability) {
+    const cantrips = spellcasting.cantrips_known || [];
+    const spells = spellcasting.spells_prepared || spellcasting.spells_known || [];
+    lines.push(`Spellcasting: ${spellcasting.ability.toUpperCase()}, attack ${fmtSigned(derived.spell_attack_bonus)}, DC ${derived.spell_save_dc ?? '--'}, cantrips ${formatList(cantrips)}, level 1 ${formatList(spells)}`);
+  }
+  const languages = characterSheet.languages || characterSheet.proficiencies?.languages || [];
+  if (languages.length) lines.push(`Languages: ${languages.join(', ')}`);
+  if (details.alignment || details.personality || details.backstory) {
+    lines.push(`Character details: ${[details.alignment, details.personality, details.backstory].filter(Boolean).join(' ')}`);
+  }
+  return lines.join('\n');
+}
+
+function fmtSigned(value) {
+  const number = Number(value || 0);
+  return number >= 0 ? `+${number}` : String(number);
 }
 
 async function syncCharacterToWorldState(sessionId, characterSheet) {
@@ -551,11 +631,17 @@ io.on('connection', (socket) => {
         inCombat,
       });
       await syncCharacterToWorldState(sessionId, characterSheet).catch(console.error);
+      const history = await db.getSessionHistory(sessionId).catch(() => []);
+      const shouldStartSession = !history.some((m) => m.role === 'player_dm1' || m.role === 'dm1');
       socket.emit('character_ready', {
         campaign,
         characterId: saved.id,
         character: saved.character_sheet,
+        shouldStartSession,
       });
+      if (!shouldStartSession) {
+        await narratePartyChange(socket, sessionId, inCombat ? 'join_combat' : 'join', saved.character_sheet);
+      }
     } catch (err) {
       console.error('save_character error:', err);
       socket.emit('character_error', {
@@ -600,17 +686,20 @@ io.on('connection', (socket) => {
       });
       socket.currentCharacterId = character.id;
       await syncCharacterToWorldState(sessionId, character.character_sheet).catch(console.error);
+      const history = await db.getSessionHistory(sessionId).catch(() => []);
+      const shouldStartSession = !history.some((m) => m.role === 'player_dm1' || m.role === 'dm1');
       socket.emit('character_ready', {
         campaign,
         characterId: character.id,
         character: character.character_sheet,
+        shouldStartSession,
       });
 
       const briefReconnect = previousPresence
         && previousPresence.session_id === sessionId
         && previousPresence.presence === 'away'
         && Date.now() - new Date(previousPresence.updated_at).getTime() < 5 * 60 * 1000;
-      if (!briefReconnect) {
+      if (!briefReconnect && !shouldStartSession) {
         await narratePartyChange(socket, sessionId, inCombat ? 'join_combat' : 'join', character.character_sheet);
       }
     } catch (err) {
@@ -886,6 +975,12 @@ io.on('connection', (socket) => {
           if (contextParts.length > 0) {
             worldStateContext = '\n\n[CURRENT GAME CONTEXT]\n' + contextParts.join('\n');
           }
+        }
+
+        const activeCharacter = await db.getCharacterForSession(sessionId);
+        const characterSheetContext = summarizeCharacterSheetForRules(activeCharacter?.character_sheet);
+        if (characterSheetContext) {
+          worldStateContext += '\n\n[ACTIVE CHARACTER SHEET]\n' + characterSheetContext;
         }
       } catch (wsErr) {
         console.warn('rules_input: world state fetch failed (non-fatal):', wsErr.message);

@@ -209,14 +209,16 @@ function App() {
       setActiveCharacterId(activeCharacterId || null);
       setCharacterError(null);
       setCurrentCharacter(character || null);
-      if (characters.length > 0) {
+      if (character) {
+        setCharacterStatus('ready');
+      } else if (characters.length > 0) {
         setCharacterStatus('select');
       } else {
         setCharacterStatus('required');
       }
     });
 
-    socket.on('character_ready', ({ character, characterId } = {}) => {
+    socket.on('character_ready', ({ character, characterId, shouldStartSession } = {}) => {
       setCharacterSaving(false);
       setCharacterJoining(false);
       setCharacterError(null);
@@ -228,7 +230,9 @@ function App() {
       }
       setCharacterStatus('ready');
       pendingSessionStartRef.current = false;
-      socket.emit('session_start');
+      if (character && shouldStartSession !== false) {
+        socket.emit('session_start');
+      }
     });
 
     socket.on('character_error', (err) => {
@@ -644,6 +648,9 @@ function App() {
                 }}
                 placeholder={(pendingRoll || fallbackRoll) ? 'Use the dice roller above to roll...' : 'Describe your action...'}
                 disabled={storyTextareaDisabled || !!pendingRoll || !!fallbackRoll}
+                spellCheck="true"
+                autoCorrect="on"
+                autoCapitalize="sentences"
                 rows={3}
               />
               <button
@@ -698,6 +705,9 @@ function App() {
                 }}
                 placeholder="How does... / Can I... / What is..."
                 disabled={rulesTextareaDisabled}
+                spellCheck="true"
+                autoCorrect="on"
+                autoCapitalize="sentences"
                 rows={3}
               />
               <button
