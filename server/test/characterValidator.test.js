@@ -268,3 +268,59 @@ test('validates every 2024 species and applies species-level rules', () => {
     }
   }
 });
+
+test('caster spell lists cover the largest level 1 creation choices', () => {
+  const content = getContentBundle();
+  for (const characterClass of content.classes) {
+    const spellcasting = characterClass.spellcasting;
+    if (!spellcasting) continue;
+    const cantripOptions = content.spells.filter((spell) => spell.level === 0 && spell.classes.includes(characterClass.id));
+    const levelOneOptions = content.spells.filter((spell) => spell.level === 1 && spell.classes.includes(characterClass.id));
+    const requiredLevelOne = spellcasting.spells_known || (spellcasting.prepared_formula ? 4 : 0);
+
+    assert.ok(
+      cantripOptions.length >= (spellcasting.cantrips || 0),
+      `${characterClass.name} needs ${spellcasting.cantrips || 0} cantrips but only has ${cantripOptions.length}`,
+    );
+    assert.ok(
+      levelOneOptions.length >= requiredLevelOne,
+      `${characterClass.name} needs ${requiredLevelOne} level 1 spell choices but only has ${levelOneOptions.length}`,
+    );
+  }
+});
+
+test('validates Human Paladin Noble with high Charisma and spell choices', () => {
+  const content = getContentBundle();
+  const sheet = validateCharacter(baseDraft({
+    name: 'Noble Paladin',
+    speciesId: 'human',
+    speciesChoices: { size: 'medium' },
+    backgroundId: 'noble',
+    classId: 'paladin',
+    abilityScores: {
+      str: 14,
+      dex: 10,
+      con: 13,
+      int: 8,
+      wis: 12,
+      cha: 15,
+      backgroundBonus: { cha: 2, str: 1 },
+    },
+    selectedSkills: ['athletics', 'insight'],
+    humanSkillId: 'deception',
+    humanOriginFeatId: 'magic_initiate_cleric',
+    featSkillChoices: {
+      background_feat: ['acrobatics', 'arcana', 'animal_handling'],
+    },
+    magicInitiateChoices: {
+      human_feat: { cantrips: ['light', 'guidance'], spell: 'healing_word' },
+    },
+    cantripsKnown: [],
+    spellsKnown: ['cure_wounds', 'bless', 'command', 'shield_of_faith'],
+  }), content);
+
+  assert.equal(sheet.identity.class, 'paladin');
+  assert.deepEqual(sheet.spellcasting.spells_prepared, ['cure_wounds', 'bless', 'command', 'shield_of_faith']);
+  assert.equal(sheet.origin.magic_initiate.human_feat.spell, 'healing_word');
+  assert.equal(sheet.derived_stats.spell_save_dc, 13);
+});
