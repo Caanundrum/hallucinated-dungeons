@@ -13,6 +13,7 @@ function baseDraft(overrides = {}) {
     name: 'Rulecheck',
     speciesId: 'human',
     speciesChoices: { size: 'medium' },
+    languages: ['elvish', 'dwarvish'],
     classId: 'fighter',
     backgroundId: 'farmer',
     abilityMethod: 'standard_array',
@@ -81,6 +82,7 @@ test('applies Human Skillful, Human Versatile, background Origin feat, and stati
   assert.equal(sheet.origin.background_feat, 'tough');
   assert.equal(sheet.origin.human_origin_feat, 'alert');
   assert.equal(sheet.origin.human_skill, 'perception');
+  assert.deepEqual(sheet.languages, ['common', 'elvish', 'dwarvish']);
   assert.equal(sheet.derived_stats.max_hp, 14);
   assert.equal(sheet.derived_stats.initiative, 3);
   assert.deepEqual(
@@ -156,6 +158,18 @@ test('rejects duplicate non-repeatable Human Origin feats and duplicate granted 
   assert.throws(
     () => validateCharacter(baseDraft({ selectedSkills: ['athletics', 'perception'] }), getContentBundle()),
     /must not duplicate/,
+  );
+});
+
+test('requires two standard language choices in addition to Common', () => {
+  assert.throws(
+    () => validateCharacter(baseDraft({ languages: ['elvish'] }), getContentBundle()),
+    /exactly two languages/,
+  );
+
+  assert.throws(
+    () => validateCharacter(baseDraft({ languages: ['elvish', 'infernal'] }), getContentBundle()),
+    /standard languages/,
   );
 });
 

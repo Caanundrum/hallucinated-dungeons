@@ -134,6 +134,7 @@ function characterSheetToWorldStats(characterSheet) {
     temp_hp: stats.temp_hp || 0,
     armor_class: stats.armor_class || 10,
     speed: stats.speed || 30,
+    languages: characterSheet.languages || characterSheet.proficiencies?.languages || [],
     conditions: stats.conditions || [],
     weapon_name: primaryAttack?.name || '',
     ability_scores: modifiers,
@@ -844,6 +845,7 @@ io.on('connection', (socket) => {
             if (ps.hp !== null) statParts.push(`HP: ${ps.hp}/${ps.max_hp}`);
             if (ps.armor_class) statParts.push(`AC: ${ps.armor_class}`);
             if (ps.speed) statParts.push(`Speed: ${ps.speed} ft`);
+            if (ps.languages?.length) statParts.push(`Languages: ${ps.languages.join(', ')}`);
             if (ps.conditions?.length) statParts.push(`Conditions: ${ps.conditions.join(', ')}`);
             // BUG-023: weapon and ability scores so DM2 can answer damage/attack questions without asking
             if (ps.weapon_name) statParts.push(`Weapon: ${ps.weapon_name}`);

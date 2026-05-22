@@ -43,6 +43,7 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
   const abilityModifiers = Object.fromEntries(ABILITIES.map((ability) => [ability, abilityMod(abilityScores[ability])]));
 
   const selectedSkills = Array.isArray(draft.selectedSkills) ? draft.selectedSkills.map(normalizeId) : [];
+  const languages = validateLanguages(draft, content);
   const speciesData = validateSpeciesChoices(draft, species, content);
   const origin = validateOriginChoices(draft, species, background, content, speciesData.skillProficiencies);
   const skillSet = validateSkills(selectedSkills, characterClass, background, content, [
@@ -135,6 +136,7 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
       class_skills: selectedSkills,
       origin_skills: origin.skillProficiencies,
       tools: [background.tool].filter(Boolean),
+      languages,
       armor: characterClass.armor,
       weapons: characterClass.weapons,
     },
@@ -161,6 +163,7 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
     ],
     species_choices: speciesData.choices,
     species_spells: speciesData.spells,
+    languages,
     origin: {
       background_feat: origin.backgroundFeat?.id || null,
       human_origin_feat: origin.humanFeat?.id || null,
@@ -271,6 +274,21 @@ function validateBackgroundBonus(background, submittedBonus) {
     }
   }
   return bonus;
+}
+
+function validateLanguages(draft, content) {
+  const allLanguages = new Set((content.languages || []).map((language) => language.id));
+  const standardLanguages = new Set((content.languages || [])
+    .filter((language) => language.category === 'standard' && language.id !== 'common')
+    .map((language) => language.id));
+  const selected = Array.isArray(draft.languages) ? draft.languages.map(normalizeId).filter(Boolean) : [];
+  const unique = [...new Set(selected)];
+  if (unique.length !== 2) fail('origin', 'languages', 'Choose exactly two languages in addition to Common.');
+  for (const languageId of unique) {
+    if (!allLanguages.has(languageId)) fail('origin', 'languages', 'Choose valid languages.');
+    if (!standardLanguages.has(languageId)) fail('origin', 'languages', 'Starting language choices must be standard languages.');
+  }
+  return ['common', ...unique];
 }
 
 function validateSpeciesChoices(draft, species, content) {

@@ -43,6 +43,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
     name: '',
     speciesId: '',
     speciesChoices: {},
+    languages: [],
     classId: '',
     backgroundId: '',
     abilityMethod: 'standard_array',
@@ -91,6 +92,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
   const skillMap = Object.fromEntries(content.skills.map((skill) => [skill.id, skill]));
   const selectedClassSkills = new Set(draft.selectedSkills);
   const allSkillIds = new Set([...speciesSkillIds, ...backgroundSkills, ...selectedClassSkills, ...originSkillIds]);
+  const languageMap = Object.fromEntries((content.languages || []).map((language) => [language.id, language]));
   const cantripOptions = content.spells.filter((spell) => spell.level === 0 && spell.classes.includes(draft.classId));
   const spellOptions = content.spells.filter((spell) => spell.level === 1 && spell.classes.includes(draft.classId));
   const requiredCantrips = selectedClass?.spellcasting?.cantrips || 0;
@@ -135,6 +137,15 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
       speciesChoices: { ...current.speciesChoices, [choiceId]: value },
       selectedSkills: [],
     }));
+  }
+
+  function toggleLanguage(languageId) {
+    setDraft((current) => {
+      const selected = new Set(current.languages || []);
+      if (selected.has(languageId)) selected.delete(languageId);
+      else if (selected.size < 2) selected.add(languageId);
+      return { ...current, languages: [...selected] };
+    });
   }
 
   function updateScore(ability, value) {
@@ -250,7 +261,8 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
     if (step === 0) return draft.name.trim().length > 0
       && draft.name.trim().length <= 30
       && draft.speciesId
-      && validSpeciesChoices(draft, selectedSpecies, content);
+      && validSpeciesChoices(draft, selectedSpecies, content)
+      && validLanguages(draft, content);
     if (step === 1) return Boolean(draft.classId);
     if (step === 2) return Boolean(draft.backgroundId) && validBackgroundBonus(backgroundBonus, selectedBackground);
     if (step === 3) return validOriginChoices(draft, selectedSpecies, selectedBackground, originFeatEntries, content, speciesSkillIds);
@@ -313,6 +325,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
                 ...current,
                 speciesId: id,
                 speciesChoices: {},
+                languages: [],
                 humanSkillId: '',
                 humanOriginFeatId: '',
                 featSkillChoices: {},
@@ -320,12 +333,19 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
                 selectedSkills: [],
               }))} />
               {selectedSpecies && (
-                <SpeciesChoiceStep
-                  species={selectedSpecies}
-                  content={content}
-                  choices={draft.speciesChoices}
-                  onChoice={updateSpeciesChoice}
-                />
+                <>
+                  <SpeciesChoiceStep
+                    species={selectedSpecies}
+                    content={content}
+                    choices={draft.speciesChoices}
+                    onChoice={updateSpeciesChoice}
+                  />
+                  <LanguageStep
+                    languages={content.languages || []}
+                    selectedLanguages={draft.languages}
+                    onToggle={toggleLanguage}
+                  />
+                </>
               )}
             </ChoiceStep>
           )}
@@ -446,7 +466,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
           {step === 5 && (
             <ChoiceStep title="Skill Proficiencies">
               <p className="helper-text">
-                Already granted: {[...new Set([...(selectedBackground?.skills || []), ...originSkillIds])]
+                Already granted: {[...new Set([...speciesSkillIds, ...(selectedBackground?.skills || []), ...originSkillIds])]
                   .map((id) => skillMap[id]?.name)
                   .filter(Boolean)
                   .join(', ') || 'None'}.
@@ -456,7 +476,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
                 {(selectedClass?.skill_options || []).map((skillId) => {
                   const skill = skillMap[skillId];
                   const checked = draft.selectedSkills.includes(skillId);
-                  const locked = backgroundSkills.has(skillId) || originSkillIds.has(skillId);
+                  const locked = speciesSkillIds.has(skillId) || backgroundSkills.has(skillId) || originSkillIds.has(skillId);
                   return (
                     <label key={skillId} className={`check-card ${checked ? 'selected' : ''} ${locked ? 'locked' : ''}`}>
                       <input type="checkbox" checked={checked || locked} disabled={locked} onChange={() => toggleSkill(skillId)} />
@@ -522,6 +542,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
           finalScores={finalScores}
           abilityMods={abilityMods}
           allSkillIds={allSkillIds}
+          languageMap={languageMap}
           equipmentItems={equipmentItems}
           acPreview={acPreview}
           hpPreview={hpPreview}
@@ -582,6 +603,33 @@ function SpeciesChoiceStep({ species, content, choices, onChoice }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function LanguageStep({ languages, selectedLanguages, onToggle }) {
+  const standard = languages.filter((language) => language.category === 'standard' && language.id !== 'common');
+  return (
+    <div className="impact-box">
+      <h3>Languages</h3>
+      <p className="helper-text">Common is automatic. Choose two more standard languages. Selected: {selectedLanguages.length}/2.</p>
+      <div className="option-list">
+        {standard.map((language) => {
+          const selected = selectedLanguages.includes(language.id);
+          return (
+            <label key={language.id} className={`check-card ${selected ? 'selected' : ''}`}>
+              <input
+                type="checkbox"
+                checked={selected}
+                disabled={!selected && selectedLanguages.length >= 2}
+                onChange={() => onToggle(language.id)}
+              />
+              <span><strong>{language.name}</strong></span>
+              <small>{language.description}</small>
+            </label>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -792,6 +840,7 @@ function InfoRow({ title, body, meta }) {
 
 function ReviewPanel({ draft, content, finalScores, abilityMods, backgroundBonus, acPreview, hpPreview, guidanceNotes, selectedClass, selectedSpecies, selectedBackground, originFeatEntries, equipmentItems, allSkillIds }) {
   const skillMap = Object.fromEntries(content.skills.map((skill) => [skill.id, skill]));
+  const languageMap = Object.fromEntries((content.languages || []).map((language) => [language.id, language]));
   const originFeatBody = originFeatEntries.map((entry) => entry.feat.name).join(', ');
   return (
     <div className="review-grid">
@@ -804,6 +853,7 @@ function ReviewPanel({ draft, content, finalScores, abilityMods, backgroundBonus
       ))}
       <InfoRow title="Ability Scores" meta="Final" body={ABILITIES.map((ability) => `${ability.toUpperCase()} ${finalScores[ability]} (${fmtMod(abilityMods[ability])}; base ${draft.abilityScores[ability]} + ${backgroundBonus[ability] || 0})`).join('; ')} />
       <InfoRow title="Skills" meta={`${allSkillIds.size} proficient`} body={[...allSkillIds].map((id) => skillMap[id]?.name).filter(Boolean).join(', ')} />
+      <InfoRow title="Languages" meta={`${(draft.languages || []).length + 1} known`} body={['common', ...(draft.languages || [])].map((id) => languageMap[id]?.name).filter(Boolean).join(', ')} />
       <InfoRow title="Equipment" meta={draft.equipmentChoice} body={equipmentItems.map((item) => item.name).join(', ') || 'Starting gold'} />
       {selectedClass?.spellcasting && <InfoRow title="Spells" meta={selectedClass.spellcasting.ability.toUpperCase()} body={[...draft.cantripsKnown, ...draft.spellsKnown].map((id) => content.spells.find((spell) => spell.id === id)?.name).filter(Boolean).join(', ')} />}
     </div>
@@ -818,6 +868,7 @@ function CharacterSummary({
   selectedBackground,
   originFeatEntries,
   skillMap,
+  languageMap,
   backgroundBonus,
   finalScores,
   abilityMods,
@@ -847,6 +898,7 @@ function CharacterSummary({
           items={[
             ...(selectedSpecies.traits?.map((trait) => `${trait.name}: ${trait.description}`) || []),
             ...formatSpeciesChoiceSummary(selectedSpecies, draft.speciesChoices, skillMap),
+            `Languages: ${['common', ...(draft.languages || [])].map((id) => languageMap[id]?.name).filter(Boolean).join(', ') || 'Choose two more'}`,
           ]}
         />
       )}
@@ -960,6 +1012,14 @@ function validSpeciesChoices(draft, species, content) {
     if (choice.type === 'option' && !(choice.options || []).some((option) => option.id === value)) return false;
   }
   return true;
+}
+
+function validLanguages(draft, content) {
+  const standardLanguages = new Set((content.languages || [])
+    .filter((language) => language.category === 'standard' && language.id !== 'common')
+    .map((language) => language.id));
+  const selected = draft.languages || [];
+  return new Set(selected).size === 2 && selected.every((languageId) => standardLanguages.has(languageId));
 }
 
 function getSpeciesSkillIds(draft, species) {

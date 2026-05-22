@@ -1,0 +1,21 @@
+[
+  { "id": "common", "name": "Common", "category": "standard", "description": "The default shared language of most adventuring parties and settlements." },
+  { "id": "common_sign", "name": "Common Sign Language", "category": "standard", "description": "A signed language used across many communities." },
+  { "id": "draconic", "name": "Draconic", "category": "standard", "description": "A language associated with dragons and dragonborn cultures." },
+  { "id": "dwarvish", "name": "Dwarvish", "category": "standard", "description": "A language associated with dwarven communities, craft, and stone halls." },
+  { "id": "elvish", "name": "Elvish", "category": "standard", "description": "A language associated with elves, old magic, and fey-influenced cultures." },
+  { "id": "giant", "name": "Giant", "category": "standard", "description": "A language associated with giants and their descendants." },
+  { "id": "gnomish", "name": "Gnomish", "category": "standard", "description": "A language associated with gnomes, clever craft, and quick minds." },
+  { "id": "goblin", "name": "Goblin", "category": "standard", "description": "A language associated with goblinoid peoples." },
+  { "id": "halfling", "name": "Halfling", "category": "standard", "description": "A language associated with halfling communities and travelers." },
+  { "id": "orc", "name": "Orc", "category": "standard", "description": "A language associated with orcs and related cultures." },
+  { "id": "abyssal", "name": "Abyssal", "category": "rare", "description": "A rare language associated with demons and the Abyss." },
+  { "id": "celestial", "name": "Celestial", "category": "rare", "description": "A rare language associated with celestials and the Upper Planes." },
+  { "id": "deep_speech", "name": "Deep Speech", "category": "rare", "description": "A rare language associated with alien minds and deep places." },
+  { "id": "druidic", "name": "Druidic", "category": "rare", "description": "A rare language tied to druidic circles and nature rites." },
+  { "id": "infernal", "name": "Infernal", "category": "rare", "description": "A rare language associated with devils and infernal contracts." },
+  { "id": "primordial", "name": "Primordial", "category": "rare", "description": "A rare elemental language covering Aquan, Auran, Ignan, and Terran dialects." },
+  { "id": "sylvan", "name": "Sylvan", "category": "rare", "description": "A rare language associated with fey creatures and wild magic." },
+  { "id": "thieves_cant", "name": "Thieves' Cant", "category": "rare", "description": "A rare coded language used by rogues and criminal networks." },
+  { "id": "undercommon", "name": "Undercommon", "category": "rare", "description": "A rare trade language of the Underdark." }
+]

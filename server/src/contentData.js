@@ -13,6 +13,7 @@ const content = {
   classes: readJson('classes.json'),
   backgrounds: readJson('backgrounds.json'),
   skills: readJson('skills.json'),
+  languages: readJson('languages.json'),
   equipment: readJson('equipment.json'),
   spells: readJson('spells.json'),
   feats: readJson('feats.json'),

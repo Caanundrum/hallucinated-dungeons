@@ -728,6 +728,9 @@ function CharacterSheetModal({ character, onClose }) {
   const saves = derived.saving_throw_modifiers || {};
   const features = character.features || [];
   const inventory = character.inventory || [];
+  const languages = character.languages || character.proficiencies?.languages || [];
+  const speciesSpells = character.species_spells || [];
+  const resistances = character.resistances || [];
 
   return (
     <div className="sheet-backdrop" role="dialog" aria-modal="true" aria-label="Character sheet">
@@ -785,6 +788,26 @@ function CharacterSheetModal({ character, onClose }) {
                 <span key={skill}>{skill.replaceAll('_', ' ')} {fmtMod(data.total)}{data.proficient ? ' *' : ''}</span>
               ))}
             </div>
+          </section>
+
+          <section className="sheet-section">
+            <h3>Origin</h3>
+            <div className="sheet-line">
+              <strong>Languages</strong>
+              <span>{languages.length ? languages.join(', ') : 'None recorded'}</span>
+            </div>
+            {resistances.length > 0 && (
+              <div className="sheet-line">
+                <strong>Resistances</strong>
+                <span>{resistances.join(', ')}</span>
+              </div>
+            )}
+            {speciesSpells.length > 0 && (
+              <div className="sheet-line">
+                <strong>Species Spells</strong>
+                <span>{speciesSpells.map((spell) => spell.id.replaceAll('_', ' ')).join(', ')}</span>
+              </div>
+            )}
           </section>
 
           <section className="sheet-section">
