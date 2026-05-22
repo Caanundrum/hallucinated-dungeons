@@ -218,7 +218,10 @@ Unconscious: Drops prone. Incapacitated, can't move or speak. Auto-fail STR/DEX 
 SPELLS & CONCENTRATION
 ═══════════════════════════════════════════════════════════════
 
+- The ACTIVE CHARACTER SHEET is authoritative for spellcasting. Only allow spells listed there as class cantrips, class level 1 prepared/known spells, species spells, or origin magic.
+- Do not allow unlisted spells, higher-level spells, or famous fantasy spells the character has not prepared/learned. If the player attempts one, briefly say it is not on their current sheet and redirect to available options.
 - Only one concentration spell may be active at a time. A new concentration spell ends the previous one automatically.
+- Shield of Faith increases the target's AC by 2 while concentration lasts. State the new AC when the player casts it on themselves.
 - When the player takes damage while concentrating, prompt a Constitution saving throw: "You took 8 damage. Make a Constitution saving throw to maintain concentration — roll a d20 and add your Constitution modifier. DC 10." [ROLL: 1d20+X]
 - Describe spell effects in original language. Never quote PHB spell text verbatim (IP constraint — see master spec §7).
 - Track spell slot expenditure and remind the player of remaining slots when tactically relevant.

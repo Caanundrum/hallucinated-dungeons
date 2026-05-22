@@ -5,6 +5,7 @@
 
 const db             = require('./db');
 const { estimateTokens } = require('./tokenUtils');
+const { getContentBundle, byId } = require('./contentData');
 
 const TOKEN_BUDGET = 8000; // trim if total estimated input exceeds this
 const CAMPAIGN_LOG_TOKEN_BUDGET = 2000;
@@ -191,13 +192,23 @@ function buildActiveCharacterText(characterSheet) {
     lines.push(`Equipment: ${inventory.map((item) => item.name).join(', ')}`);
   }
   if (spellcasting.ability) {
+    const content = getContentBundle();
     const cantrips = spellcasting.cantrips_known || [];
     const spells = spellcasting.spells_prepared || spellcasting.spells_known || [];
-    lines.push(`Spellcasting: ${spellcasting.ability.toUpperCase()}, cantrips ${formatSceneList(cantrips)}, level 1 ${formatSceneList(spells)}`);
+    lines.push(`Spellcasting: ${spellcasting.ability.toUpperCase()}, cantrips ${formatSpellList(cantrips, content)}, level 1 prepared ${formatSpellList(spells, content)}`);
+    lines.push('Spell rule: only these listed cantrips and level 1 prepared/known spells are currently castable. Do not allow unlisted spells or spells above level 1.');
   }
   if (languages.length) lines.push(`Languages: ${languages.join(', ')}`);
   lines.push('Capability rule: only grant supernatural actions, flight, telepathy, special senses, spells, or class features that appear here, in current world state, or in established inventory.');
   return lines.join('\n');
+}
+
+function formatSpellList(ids, content) {
+  if (!Array.isArray(ids) || ids.length === 0) return 'none established';
+  return ids.map((id) => {
+    const spell = byId(content.spells, id);
+    return spell ? `${spell.name} (${spell.id}; level ${spell.level}; ${spell.description})` : id;
+  }).join(', ');
 }
 
 function fmtSigned(value) {

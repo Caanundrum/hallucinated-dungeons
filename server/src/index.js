@@ -280,6 +280,85 @@ function fmtSigned(value) {
   return number >= 0 ? `+${number}` : String(number);
 }
 
+function normalizeSpellName(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function getCastSpellFromMessage(message, content) {
+  const match = String(message || '').match(/\bcast\s+(?:the\s+)?([a-z][a-z' -]{2,40})/i);
+  if (!match) return null;
+  const spoken = normalizeSpellName(match[1].replace(/\b(on|at|toward|towards|to|for|with|and)\b.*$/i, ''));
+  if (!spoken) return null;
+  const spell = content.spells.find((item) => normalizeSpellName(item.name) === spoken || normalizeSpellName(item.id) === spoken);
+  return spell || { id: spoken.replaceAll(' ', '_'), name: spoken.replace(/\b\w/g, (char) => char.toUpperCase()), unknown: true };
+}
+
+function getKnownSpellIds(characterSheet) {
+  const ids = new Set([
+    ...(characterSheet.spellcasting?.cantrips_known || []),
+    ...(characterSheet.spellcasting?.spells_prepared || characterSheet.spellcasting?.spells_known || []),
+    ...(characterSheet.species_spells || []).map((spell) => spell.id || spell),
+  ]);
+  for (const choice of Object.values(characterSheet.origin?.magic_initiate || {})) {
+    for (const cantrip of choice.cantrips || []) ids.add(cantrip);
+    if (choice.spell) ids.add(choice.spell);
+  }
+  return ids;
+}
+
+function summarizeKnownSpells(characterSheet, content) {
+  const ids = [...getKnownSpellIds(characterSheet)];
+  return ids.map((id) => content.spells.find((spell) => spell.id === id)?.name || id).join(', ') || 'no spells';
+}
+
+async function handleDeterministicSpellAction(socket, sessionId, message) {
+  const content = getContentBundle();
+  const spell = getCastSpellFromMessage(message, content);
+  if (!spell) return false;
+
+  const character = await db.getCharacterForSession(sessionId);
+  const sheet = character?.character_sheet;
+  if (!character || !sheet) return false;
+
+  const knownSpellIds = getKnownSpellIds(sheet);
+  if (spell.unknown || !knownSpellIds.has(spell.id)) {
+    const reply = `You reach for ${spell.name}, but it is not on your current character sheet. At level ${sheet.identity?.level || 1}, you can work with: ${summarizeKnownSpells(sheet, content)}. The magic shelves are not self-service.`;
+    const currentTurn = (await db.getWorldState(sessionId))?.state?.session_turn ?? 0;
+    await db.saveMessage(sessionId, 'player_dm1', message, currentTurn);
+    await db.saveMessage(sessionId, 'dm1', reply, currentTurn);
+    await db.incrementSessionTurn(sessionId);
+    socket.emit('dm1_response', { message: reply });
+    return true;
+  }
+
+  if (spell.id === 'shield_of_faith') {
+    const derived = sheet.derived_stats || {};
+    const activeSpellEffects = derived.active_spell_effects || [];
+    if (!activeSpellEffects.some((effect) => effect.id === 'shield_of_faith')) {
+      const updatedSheet = {
+        ...sheet,
+        derived_stats: {
+          ...derived,
+          armor_class: Number(derived.armor_class || 10) + 2,
+          armor_class_breakdown: [
+            ...(derived.armor_class_breakdown || []),
+            { label: 'Shield of Faith', value: 2 },
+          ],
+          active_spell_effects: [
+            ...activeSpellEffects,
+            { id: 'shield_of_faith', name: 'Shield of Faith', target: 'armor_class_bonus', value: 2, concentration: true },
+          ],
+        },
+      };
+      const saved = await db.updateCharacterSheet(character.id, updatedSheet);
+      await syncCharacterToWorldState(sessionId, saved.character_sheet).catch(console.error);
+      socket.emit('character_ready', { characterId: saved.id, character: saved.character_sheet, shouldStartSession: false });
+    }
+  }
+
+  return false;
+}
+
 async function syncCharacterToWorldState(sessionId, characterSheet) {
   const row = await db.getWorldState(sessionId);
   const current = row?.state || db.DEFAULT_WORLD_STATE;
@@ -775,6 +854,10 @@ io.on('connection', (socket) => {
       }
 
       // Get pre-increment session_turn — both messages for this exchange share it
+      if (await handleDeterministicSpellAction(socket, sessionId, message)) {
+        return;
+      }
+
       const worldStateRow = await db.getWorldState(sessionId);
       const currentTurn   = worldStateRow?.state?.session_turn ?? 0;
 

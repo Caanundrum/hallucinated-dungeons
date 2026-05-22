@@ -165,6 +165,20 @@ async function saveCharacterForSession(sessionId, characterSheet) {
   return data;
 }
 
+async function updateCharacterSheet(characterId, characterSheet) {
+  const { data, error } = await supabase
+    .from('characters')
+    .update({
+      character_sheet: characterSheet,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', characterId)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 async function upsertCharacterPresence({
   sessionId,
   characterId,
@@ -495,6 +509,7 @@ module.exports = {
   setActiveCharacterForSession,
   clearActiveCharacterForSession,
   saveCharacterForSession,
+  updateCharacterSheet,
   upsertCharacterPresence,
   getCharacterPresenceForCampaign,
   getCharacterPresence,

@@ -827,7 +827,13 @@ function CharacterSheetModal({ character, content, onClose }) {
   const resistances = character.resistances || [];
   const spellcasting = character.spellcasting || null;
   const magicInitiate = character.origin?.magic_initiate || {};
-  const spellName = (spellId) => content?.spells?.find((spell) => spell.id === spellId)?.name || String(spellId || '').replaceAll('_', ' ');
+  const spellById = (spellId) => content?.spells?.find((spell) => spell.id === spellId);
+  const spellName = (spellId) => spellById(spellId)?.name || String(spellId || '').replaceAll('_', ' ');
+  const spellSummary = (spellId) => {
+    const spell = spellById(spellId);
+    if (!spell) return spellName(spellId);
+    return `${spell.name}: ${spell.description} (${spell.casting_time}, ${spell.range}, ${spell.duration})`;
+  };
   const magicInitiateRows = Object.entries(magicInitiate).map(([source, choice]) => ({
     source,
     label: source === 'background_feat' ? 'Background Magic Initiate' : 'Human Magic Initiate',
@@ -920,7 +926,7 @@ function CharacterSheetModal({ character, content, onClose }) {
             {speciesSpells.length > 0 && (
               <div className="sheet-line">
                 <strong>Species Spells</strong>
-                <span>{speciesSpells.map((spell) => spellName(spell.id || spell)).join(', ')}</span>
+                <span>{speciesSpells.map((spell) => spellSummary(spell.id || spell)).join(' | ')}</span>
               </div>
             )}
           </section>
@@ -937,13 +943,13 @@ function CharacterSheetModal({ character, content, onClose }) {
                   {(spellcasting.cantrips_known || []).length > 0 && (
                     <div className="sheet-line">
                       <strong>Cantrips</strong>
-                      <span>{spellcasting.cantrips_known.map(spellName).join(', ')}</span>
+                      <span>{spellcasting.cantrips_known.map(spellSummary).join(' | ')}</span>
                     </div>
                   )}
                   {(spellcasting.spells_prepared || spellcasting.spells_known || []).length > 0 && (
                     <div className="sheet-line">
                       <strong>Level 1</strong>
-                      <span>{(spellcasting.spells_prepared || spellcasting.spells_known || []).map(spellName).join(', ')}</span>
+                      <span>{(spellcasting.spells_prepared || spellcasting.spells_known || []).map(spellSummary).join(' | ')}</span>
                     </div>
                   )}
                 </>
@@ -951,7 +957,10 @@ function CharacterSheetModal({ character, content, onClose }) {
               {magicInitiateRows.map((row) => (
                 <div key={row.source} className="sheet-line">
                   <strong>{row.label}</strong>
-                  <span>{[row.cantrips.length ? `Cantrips: ${row.cantrips.join(', ')}` : null, row.spell ? `Level 1: ${row.spell}` : null].filter(Boolean).join('; ')}</span>
+                  <span>{[
+                    row.cantrips.length ? `Cantrips: ${(magicInitiate[row.source]?.cantrips || []).map(spellSummary).join(' | ')}` : null,
+                    row.spell ? `Level 1: ${spellSummary(magicInitiate[row.source]?.spell)}` : null,
+                  ].filter(Boolean).join('; ')}</span>
                 </div>
               ))}
             </section>
