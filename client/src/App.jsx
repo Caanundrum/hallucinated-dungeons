@@ -199,7 +199,6 @@ function App() {
       const divider = { type: 'divider', text: '— Session resumed —', id: 'divider-resume' };
       setNarrative([...narrativeHistory, divider]);
       setRulesLog(rulesHistory);
-      setCharacterStatus('loading');
       socket.emit('get_character_data', { sessionId: id, sessionToken });
     });
 

@@ -435,6 +435,15 @@ io.on('connection', (socket) => {
 
     } catch (err) {
       console.error('join_session error:', err);
+      if (sessionId && sessionToken && isValidSessionToken(sessionId, sessionToken)) {
+        socket.emit('character_error', {
+          step: 'session',
+          field: 'sessionToken',
+          message: 'The campaign connection hiccupped. Your session was not replaced; try again in a moment.',
+        });
+        return;
+      }
+
       const fallbackId = uuidv4();
       try {
         await db.createSession(fallbackId);
