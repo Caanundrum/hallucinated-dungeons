@@ -24,6 +24,21 @@ const gateState = {
   ],
 };
 
+const townHallDoorState = {
+  current_location: 'Morrowgate town hall',
+  scene_presence: {
+    exact_location: 'Town hall, main door on the south side of Morrowgate (in front of heavy stone entry door)',
+    location_type: 'town hall door',
+    present_npcs: ['middle-aged clerk at the cracked door'],
+    present_objects: ['heavy stone entry door', 'iron latch', 'rain-slick steps'],
+    available_exits: ['town square', 'inside town hall'],
+    nearby_locations: ['reeve office'],
+  },
+  npcs_encountered: [
+    { name: 'middle-aged clerk', last_seen: 'town hall door' },
+  ],
+};
+
 function guardMessage(message, state = gateState) {
   return checkSpatialAction(message, state)?.message || null;
 }
@@ -50,6 +65,17 @@ test('blocks clear generic interactions with absent places and objects', () => {
 
 test('does not treat previously encountered NPCs as present when scene presence exists', () => {
   assert.match(guardMessage('I ask the innkeeper for ale.'), /innkeeper is not here/);
+});
+
+test('allows social phrasing toward present NPCs', () => {
+  assert.equal(
+    guardMessage('Introduce myself as friendly as possible. I want to disarm the guy so he is not so annoyed. Be nice.', townHallDoorState),
+    null
+  );
+  assert.equal(
+    guardMessage('Introduce myself to the clerk as friendly as possible and ask about the reeve.', townHallDoorState),
+    null
+  );
 });
 
 test('merges scene presence as a full normalized scene snapshot', () => {

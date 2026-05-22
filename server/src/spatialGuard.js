@@ -36,6 +36,13 @@ const MOVEMENT_VERBS = /\b(go|walk|head|travel|move|return|enter|leave|approach|
 const LOCATION_PREPOSITIONS = /\b(?:in|inside|at|within|on)\s+(?:the\s+|a\s+|an\s+)?([a-z][a-z' -]{2,40})\b/i;
 const DEFINITE_TARGET = /\b(?:the|that)\s+([a-z][a-z' -]{2,40})\b/i;
 const VAGUE_TARGETS = new Set([
+  'guy',
+  'person',
+  'someone',
+  'somebody',
+  'man',
+  'woman',
+  'people',
   'way',
   'area',
   'place',
@@ -118,7 +125,7 @@ function isKnownPresentOrReachable(worldState, term) {
 
 function cleanCandidate(value) {
   const cleaned = compact(value)
-    .replace(/\b(to|from|with|about|for|in|inside|at|on|within|before|after|while|and|or|but)\b.*$/i, '')
+    .replace(/\b(to|from|with|about|for|in|inside|at|on|within|before|after|while|and|or|but|as|so|because)\b.*$/i, '')
     .trim();
   if (!cleaned || cleaned.length < 3 || VAGUE_TARGETS.has(cleaned)) return '';
   return cleaned;
