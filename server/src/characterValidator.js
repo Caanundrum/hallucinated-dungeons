@@ -43,8 +43,12 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
   const abilityModifiers = Object.fromEntries(ABILITIES.map((ability) => [ability, abilityMod(abilityScores[ability])]));
 
   const selectedSkills = Array.isArray(draft.selectedSkills) ? draft.selectedSkills.map(normalizeId) : [];
-  const origin = validateOriginChoices(draft, species, background, content);
-  const skillSet = validateSkills(selectedSkills, characterClass, background, content, origin.skillProficiencies);
+  const speciesData = validateSpeciesChoices(draft, species, content);
+  const origin = validateOriginChoices(draft, species, background, content, speciesData.skillProficiencies);
+  const skillSet = validateSkills(selectedSkills, characterClass, background, content, [
+    ...speciesData.skillProficiencies,
+    ...origin.skillProficiencies,
+  ]);
 
   const equipmentChoice = normalizeId(draft.equipmentChoice || 'pack');
   if (!['pack', 'gold'].includes(equipmentChoice)) {
@@ -58,7 +62,7 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
     source_feat_id: entry.feat.id,
     source_feat_name: entry.feat.name,
   })));
-  const activeEffects = [...buildActiveEffects(equipped, content), ...featEffects];
+  const activeEffects = [...buildActiveEffects(equipped, content), ...speciesData.effects, ...featEffects];
 
   const spellcasting = buildSpellcasting(draft, characterClass, content, abilityModifiers);
   const level = 1;
@@ -77,7 +81,14 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
     temp_hp: 0,
     armor_class: armorBreakdown.total,
     armor_class_breakdown: armorBreakdown.parts,
-    speed: species.speed,
+    speed: species.speed + activeEffects
+      .filter((effect) => effect.target === 'speed_bonus')
+      .reduce((sum, effect) => sum + Number(effect.value || 0), 0),
+    senses: {
+      darkvision: activeEffects
+        .filter((effect) => effect.target === 'darkvision_override')
+        .reduce((value, effect) => Math.max(value, Number(effect.value || 0)), species.darkvision || 0),
+    },
     initiative: initiativeBreakdown.total,
     initiative_breakdown: initiativeBreakdown.parts,
     death_saves: { successes: 0, failures: 0 },
@@ -119,6 +130,7 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
     proficiencies: {
       saving_throws: characterClass.saving_throws,
       skills: [...skillSet],
+      species_skills: speciesData.skillProficiencies,
       background_skills: background.skills,
       class_skills: selectedSkills,
       origin_skills: origin.skillProficiencies,
@@ -129,6 +141,7 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
     inventory,
     equipped,
     active_effects: activeEffects,
+    resistances: speciesData.resistances,
     features: [
       ...species.traits.map((trait) => ({
         source: 'species',
@@ -146,6 +159,8 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
         description: entry.feat.description,
       })),
     ],
+    species_choices: speciesData.choices,
+    species_spells: speciesData.spells,
     origin: {
       background_feat: origin.backgroundFeat?.id || null,
       human_origin_feat: origin.humanFeat?.id || null,
@@ -258,7 +273,77 @@ function validateBackgroundBonus(background, submittedBonus) {
   return bonus;
 }
 
-function validateOriginChoices(draft, species, background, content) {
+function validateSpeciesChoices(draft, species, content) {
+  const submitted = draft.speciesChoices && typeof draft.speciesChoices === 'object' ? draft.speciesChoices : {};
+  const allSkillIds = new Set(content.skills.map((skill) => skill.id));
+  const allSpellIds = new Set(content.spells.map((spell) => spell.id));
+  const choices = {};
+  const skillProficiencies = [];
+  const spells = [];
+  const resistances = [];
+  const effects = [];
+
+  for (const trait of species.traits || []) {
+    for (const spellId of trait.spells || []) {
+      if (!allSpellIds.has(spellId)) fail('species', 'spells', `${species.name} references an unavailable species spell.`);
+      spells.push({ id: spellId, source: trait.name, ability: trait.spellcasting_ability || null });
+    }
+    resistances.push(...(trait.resistances || []));
+    effects.push(...(trait.effects || []).map((effect) => ({
+      ...effect,
+      source_species_id: species.id,
+      source_species_name: species.name,
+      source_trait_name: trait.name,
+    })));
+  }
+
+  for (const choice of species.choices || []) {
+    const value = normalizeId(submitted[choice.id]);
+    if (choice.required && !value) fail('species', choice.id, `${species.name} requires ${choice.label}.`);
+
+    if (choice.type === 'skill') {
+      const allowed = new Set(choice.options || []);
+      if (!allowed.has(value) || !allSkillIds.has(value)) fail('species', choice.id, `Choose a valid ${choice.label}.`);
+      choices[choice.id] = value;
+      skillProficiencies.push(value);
+      continue;
+    }
+
+    if (choice.type === 'ability') {
+      if (!ABILITIES.includes(value) || !(choice.options || []).includes(value)) fail('species', choice.id, `Choose a valid ${choice.label}.`);
+      choices[choice.id] = value;
+      continue;
+    }
+
+    if (choice.type === 'option') {
+      const option = (choice.options || []).find((item) => item.id === value);
+      if (!option) fail('species', choice.id, `Choose a valid ${choice.label}.`);
+      choices[choice.id] = value;
+      for (const spellId of option.spells || []) {
+        if (!allSpellIds.has(spellId)) fail('species', choice.id, `${option.name} references an unavailable species spell.`);
+        spells.push({ id: spellId, source: option.name, ability: null });
+      }
+      resistances.push(...(option.resistances || []));
+      effects.push(...(option.effects || []).map((effect) => ({
+        ...effect,
+        source_species_id: species.id,
+        source_species_name: species.name,
+        source_trait_name: option.name,
+      })));
+    }
+  }
+
+  const spellAbility = choices.lineage_spell_ability || choices.legacy_spell_ability || null;
+  return {
+    choices,
+    skillProficiencies: [...new Set(skillProficiencies)],
+    spells: spells.map((spell) => ({ ...spell, ability: spell.ability || spellAbility })),
+    resistances: [...new Set(resistances)],
+    effects,
+  };
+}
+
+function validateOriginChoices(draft, species, background, content, speciesSkills = []) {
   const backgroundFeat = byId(content.feats, normalizeId(background.origin_feat));
   if (!backgroundFeat || backgroundFeat.category !== 'origin') {
     fail('background', 'origin_feat', 'Background must grant a valid Origin feat.');
@@ -280,8 +365,8 @@ function validateOriginChoices(draft, species, background, content) {
   if (isHuman && !allSkillIds.has(humanSkill)) {
     fail('origin', 'humanSkillId', 'Human characters must choose one extra skill proficiency.');
   }
-  if (isHuman && (background.skills || []).includes(humanSkill)) {
-    fail('origin', 'humanSkillId', 'Human Skillful must choose a skill not already granted by the background.');
+  if (isHuman && [...(background.skills || []), ...speciesSkills].includes(humanSkill)) {
+    fail('origin', 'humanSkillId', 'Human Skillful must choose a skill not already granted by the background or species.');
   }
 
   const entries = [
@@ -290,7 +375,7 @@ function validateOriginChoices(draft, species, background, content) {
   ];
   const skillProficiencies = [];
   if (humanSkill) skillProficiencies.push(humanSkill);
-  const reservedSkills = new Set([...(background.skills || []), ...(humanSkill ? [humanSkill] : [])]);
+  const reservedSkills = new Set([...(background.skills || []), ...speciesSkills, ...(humanSkill ? [humanSkill] : [])]);
   const skillChoices = {};
   const magicInitiate = {};
 

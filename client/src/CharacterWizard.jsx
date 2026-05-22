@@ -42,6 +42,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
   const [draft, setDraft] = useState(() => ({
     name: '',
     speciesId: '',
+    speciesChoices: {},
     classId: '',
     backgroundId: '',
     abilityMethod: 'standard_array',
@@ -69,6 +70,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
   const backgroundOriginFeat = originFeatMap[selectedBackground?.origin_feat];
   const humanOriginFeat = originFeatMap[draft.humanOriginFeatId];
   const isHuman = selectedSpecies?.id === 'human';
+  const speciesSkillIds = new Set(getSpeciesSkillIds(draft, selectedSpecies));
   const originFeatEntries = [
     backgroundOriginFeat ? { source: 'background_feat', label: 'Background Origin Feat', feat: backgroundOriginFeat } : null,
     isHuman && humanOriginFeat ? { source: 'human_feat', label: 'Human Versatile Feat', feat: humanOriginFeat } : null,
@@ -88,7 +90,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
   const backgroundSkills = new Set(selectedBackground?.skills || []);
   const skillMap = Object.fromEntries(content.skills.map((skill) => [skill.id, skill]));
   const selectedClassSkills = new Set(draft.selectedSkills);
-  const allSkillIds = new Set([...backgroundSkills, ...selectedClassSkills, ...originSkillIds]);
+  const allSkillIds = new Set([...speciesSkillIds, ...backgroundSkills, ...selectedClassSkills, ...originSkillIds]);
   const cantripOptions = content.spells.filter((spell) => spell.level === 0 && spell.classes.includes(draft.classId));
   const spellOptions = content.spells.filter((spell) => spell.level === 1 && spell.classes.includes(draft.classId));
   const requiredCantrips = selectedClass?.spellcasting?.cantrips || 0;
@@ -100,8 +102,15 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
   const shieldItem = equipmentItems.find((item) => item.type === 'shield');
   const hasCompleteScores = ABILITIES.every((ability) => isFilledInteger(draft.abilityScores[ability]));
   const showAbilityMath = step >= 4 && hasCompleteScores;
+  const activeCreationEffects = [
+    ...getSpeciesEffects(selectedSpecies, draft.speciesChoices),
+    ...originFeatEntries.flatMap((entry) => entry.feat.effects || []),
+  ];
+  const hpStaticBonus = activeCreationEffects
+    .filter((effect) => effect.target === 'max_hp_per_level_bonus')
+    .reduce((sum, effect) => sum + Number(effect.value || 0), 0);
   const acPreview = selectedClass && showAbilityMath ? calculateAcPreview(armorItem, shieldItem, abilityMods, selectedClass) : null;
-  const hpPreview = selectedClass && showAbilityMath ? Math.max(1, (selectedClass.hit_die || 8) + (abilityMods.con || 0)) : null;
+  const hpPreview = selectedClass && showAbilityMath ? Math.max(1, (selectedClass.hit_die || 8) + (abilityMods.con || 0) + hpStaticBonus) : null;
   const acGuidance = selectedClass && showAbilityMath ? getAcGuidance(acPreview, selectedClass, abilityMods, armorItem) : null;
   const guidanceNotes = getGuidanceNotes({
     selectedClass,
@@ -118,6 +127,14 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
 
   function update(field, value) {
     setDraft((current) => ({ ...current, [field]: value }));
+  }
+
+  function updateSpeciesChoice(choiceId, value) {
+    setDraft((current) => ({
+      ...current,
+      speciesChoices: { ...current.speciesChoices, [choiceId]: value },
+      selectedSkills: [],
+    }));
   }
 
   function updateScore(ability, value) {
@@ -230,10 +247,13 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
   }
 
   function canAdvance() {
-    if (step === 0) return draft.name.trim().length > 0 && draft.name.trim().length <= 30 && draft.speciesId;
+    if (step === 0) return draft.name.trim().length > 0
+      && draft.name.trim().length <= 30
+      && draft.speciesId
+      && validSpeciesChoices(draft, selectedSpecies, content);
     if (step === 1) return Boolean(draft.classId);
     if (step === 2) return Boolean(draft.backgroundId) && validBackgroundBonus(backgroundBonus, selectedBackground);
-    if (step === 3) return validOriginChoices(draft, selectedSpecies, selectedBackground, originFeatEntries, content);
+    if (step === 3) return validOriginChoices(draft, selectedSpecies, selectedBackground, originFeatEntries, content, speciesSkillIds);
     if (step === 4) return validAbilityScores(draft);
     if (step === 5) return draft.selectedSkills.length === (selectedClass?.skill_count || 0);
     if (step === 6) return Boolean(draft.equipmentChoice);
@@ -289,7 +309,24 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
                 Character name
                 <input value={draft.name} maxLength={30} onChange={(e) => update('name', e.target.value)} placeholder="Kael the Bold-ish" />
               </label>
-              <CardGrid items={content.species} selectedId={draft.speciesId} onSelect={(id) => update('speciesId', id)} />
+              <CardGrid items={content.species} selectedId={draft.speciesId} onSelect={(id) => setDraft((current) => ({
+                ...current,
+                speciesId: id,
+                speciesChoices: {},
+                humanSkillId: '',
+                humanOriginFeatId: '',
+                featSkillChoices: {},
+                magicInitiateChoices: {},
+                selectedSkills: [],
+              }))} />
+              {selectedSpecies && (
+                <SpeciesChoiceStep
+                  species={selectedSpecies}
+                  content={content}
+                  choices={draft.speciesChoices}
+                  onChoice={updateSpeciesChoice}
+                />
+              )}
             </ChoiceStep>
           )}
 
@@ -340,7 +377,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
                 content={content}
                 selectedSpecies={selectedSpecies}
                 backgroundOriginFeat={backgroundOriginFeat}
-                backgroundSkillIds={backgroundSkills}
+                backgroundSkillIds={new Set([...speciesSkillIds, ...backgroundSkills])}
                 humanOriginFeatId={draft.humanOriginFeatId}
                 onHumanFeatChange={(id) => setDraft((current) => ({
                   ...current,
@@ -508,6 +545,43 @@ function CardGrid({ items, selectedId, onSelect }) {
           <span>{item.description}</span>
         </button>
       ))}
+    </div>
+  );
+}
+
+function SpeciesChoiceStep({ species, content, choices, onChoice }) {
+  const skillMap = Object.fromEntries(content.skills.map((skill) => [skill.id, skill]));
+  return (
+    <div className="impact-box">
+      <h3>{species.name} choices</h3>
+      {(species.choices || []).length === 0 ? (
+        <p className="helper-text">No extra level 1 species choices are needed.</p>
+      ) : (
+        <div className="option-list">
+          {species.choices.map((choice) => (
+            <label key={choice.id} className="field-label">
+              {choice.label}
+              <select value={choices[choice.id] || ''} onChange={(event) => onChoice(choice.id, event.target.value)}>
+                <option value="">Choose {choice.label}</option>
+                {choice.type === 'skill' && (choice.options || []).map((skillId) => (
+                  <option key={skillId} value={skillId}>
+                    {skillMap[skillId]?.name || skillId} ({skillMap[skillId]?.ability?.toUpperCase() || '?'})
+                  </option>
+                ))}
+                {choice.type === 'ability' && (choice.options || []).map((ability) => (
+                  <option key={ability} value={ability}>{ABILITY_LABELS[ability]}</option>
+                ))}
+                {choice.type === 'option' && (choice.options || []).map((option) => (
+                  <option key={option.id} value={option.id}>{option.name}</option>
+                ))}
+              </select>
+              {choice.type === 'option' && choices[choice.id] && (
+                <small>{choice.options.find((option) => option.id === choices[choice.id])?.description}</small>
+              )}
+            </label>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -770,7 +844,10 @@ function CharacterSummary({
         <DetailBlock
           title={selectedSpecies.name}
           body={selectedSpecies.description}
-          items={selectedSpecies.traits?.map((trait) => `${trait.name}: ${trait.description}`)}
+          items={[
+            ...(selectedSpecies.traits?.map((trait) => `${trait.name}: ${trait.description}`) || []),
+            ...formatSpeciesChoiceSummary(selectedSpecies, draft.speciesChoices, skillMap),
+          ]}
         />
       )}
       {showClass && (
@@ -856,16 +933,58 @@ function normalizeBackgroundBonus(input, background) {
   return bonus;
 }
 
+function formatSpeciesChoiceSummary(species, choices = {}, skillMap = {}) {
+  return (species?.choices || []).map((choice) => {
+    const value = choices[choice.id];
+    if (!value) return null;
+    if (choice.type === 'skill') return `${choice.label}: ${skillMap[value]?.name || value}`;
+    if (choice.type === 'ability') return `${choice.label}: ${ABILITY_LABELS[value] || value.toUpperCase()}`;
+    const option = (choice.options || []).find((item) => item.id === value);
+    return `${choice.label}: ${option?.name || value}`;
+  }).filter(Boolean);
+}
+
 function validBackgroundBonus(bonus, background) {
   const values = (background?.asi_options || []).map((ability) => Number(bonus[ability] || 0)).sort((a, b) => b - a);
   return JSON.stringify(values) === JSON.stringify([2, 1, 0]) || JSON.stringify(values) === JSON.stringify([1, 1, 1]);
 }
 
-function validOriginChoices(draft, selectedSpecies, selectedBackground, originFeatEntries, content) {
+function validSpeciesChoices(draft, species, content) {
+  if (!species) return false;
+  const allSkillIds = new Set(content.skills.map((skill) => skill.id));
+  for (const choice of species.choices || []) {
+    const value = draft.speciesChoices?.[choice.id] || '';
+    if (choice.required && !value) return false;
+    if (choice.type === 'skill' && (!(choice.options || []).includes(value) || !allSkillIds.has(value))) return false;
+    if (choice.type === 'ability' && (!(choice.options || []).includes(value) || !ABILITIES.includes(value))) return false;
+    if (choice.type === 'option' && !(choice.options || []).some((option) => option.id === value)) return false;
+  }
+  return true;
+}
+
+function getSpeciesSkillIds(draft, species) {
+  if (!species) return [];
+  return (species.choices || [])
+    .filter((choice) => choice.type === 'skill')
+    .map((choice) => draft.speciesChoices?.[choice.id])
+    .filter(Boolean);
+}
+
+function getSpeciesEffects(species, choices = {}) {
+  if (!species) return [];
+  const traitEffects = (species.traits || []).flatMap((trait) => trait.effects || []);
+  const choiceEffects = (species.choices || []).flatMap((choice) => {
+    const option = (choice.options || []).find((item) => item.id === choices[choice.id]);
+    return option?.effects || [];
+  });
+  return [...traitEffects, ...choiceEffects];
+}
+
+function validOriginChoices(draft, selectedSpecies, selectedBackground, originFeatEntries, content, speciesSkillIds = new Set()) {
   const isHuman = selectedSpecies?.id === 'human';
   const allSkillIds = new Set(content.skills.map((skill) => skill.id));
   const originFeats = (content.feats || []).filter((feat) => feat.category === 'origin');
-  const grantedSkillIds = new Set(selectedBackground?.skills || []);
+  const grantedSkillIds = new Set([...(selectedBackground?.skills || []), ...speciesSkillIds]);
   if (isHuman) {
     if (!allSkillIds.has(draft.humanSkillId)) return false;
     if (grantedSkillIds.has(draft.humanSkillId)) return false;
