@@ -38,6 +38,7 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
   const background = byId(content.backgrounds, normalizeId(draft.backgroundId));
   if (!background) fail('background', 'backgroundId', 'Choose a valid background.');
 
+  const characterDetails = validateCharacterDetails(draft.characterDetails);
   const abilityData = validateAbilityScores(draft.abilityMethod, draft.abilityScores, draft.rolledStats, background, verifyRolledStats);
   const abilityScores = abilityData.finalScores;
   const abilityModifiers = Object.fromEntries(ABILITIES.map((ability) => [ability, abilityMod(abilityScores[ability])]));
@@ -55,8 +56,12 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
   if (!['pack', 'gold'].includes(equipmentChoice)) {
     fail('equipment', 'equipmentChoice', 'Choose equipment pack or gold.');
   }
+  const backgroundEquipmentChoice = normalizeId(draft.backgroundEquipmentChoice || 'equipment');
+  if (!['equipment', 'gold'].includes(backgroundEquipmentChoice)) {
+    fail('equipment', 'backgroundEquipmentChoice', 'Choose background equipment package or 50 GP.');
+  }
 
-  const inventory = buildInventory(characterClass, content, equipmentChoice);
+  const inventory = buildInventory(characterClass, content, equipmentChoice, background, backgroundEquipmentChoice);
   const equipped = buildEquipped(inventory, content);
   const featEffects = origin.feats.flatMap((entry) => (entry.feat.effects || []).map((effect) => ({
     ...effect,
@@ -128,6 +133,7 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
       modifiers: abilityModifiers,
       audit: abilityData.audit,
     },
+    character_details: characterDetails,
     proficiencies: {
       saving_throws: characterClass.saving_throws,
       skills: [...skillSet],
@@ -274,6 +280,20 @@ function validateBackgroundBonus(background, submittedBonus) {
     }
   }
   return bonus;
+}
+
+function validateCharacterDetails(input = {}) {
+  const details = {
+    alignment: String(input.alignment || '').trim(),
+    appearance: String(input.appearance || '').trim(),
+    personality: String(input.personality || '').trim(),
+    backstory: String(input.backstory || '').trim(),
+  };
+  if (details.alignment.length > 40) fail('details', 'alignment', 'Alignment must be 40 characters or fewer.');
+  if (details.appearance.length > 500) fail('details', 'appearance', 'Appearance must be 500 characters or fewer.');
+  if (details.personality.length > 500) fail('details', 'personality', 'Personality must be 500 characters or fewer.');
+  if (details.backstory.length > 800) fail('details', 'backstory', 'Backstory note must be 800 characters or fewer.');
+  return details;
 }
 
 function validateLanguages(draft, content) {
@@ -465,14 +485,28 @@ function validateSkills(selectedSkills, characterClass, background, content, ori
   return new Set([...(background.skills || []), ...picked, ...originSkills]);
 }
 
-function buildInventory(characterClass, content, equipmentChoice) {
+function buildInventory(characterClass, content, equipmentChoice, background, backgroundEquipmentChoice) {
+  const inventory = [];
   if (equipmentChoice === 'gold') {
-    return [{ id: 'starting_gold', name: 'Starting Gold', type: 'currency', quantity: 1, description: 'Gold option selected. Purchase flow is deferred.' }];
-  }
-  return (characterClass.equipment_pack || []).map((id) => {
+    inventory.push({ id: 'class_starting_gold', name: 'Class Starting Gold', type: 'currency', quantity: 1, description: 'Class gold option selected. Purchase flow is deferred.' });
+  } else {
+    inventory.push(...(characterClass.equipment_pack || []).map((id) => {
     const item = byId(content.equipment, id);
     return item ? { ...item, quantity: 1 } : { id, name: id, type: 'item', quantity: 1, description: 'Starting item.' };
-  });
+    }));
+  }
+  if (backgroundEquipmentChoice === 'gold') {
+    inventory.push({ id: 'background_50_gp', name: '50 GP', type: 'currency', quantity: 50, description: 'Background gold alternative selected.' });
+  } else {
+    inventory.push({
+      id: `background_equipment_${background.id}`,
+      name: `${background.name} Background Equipment`,
+      type: 'background_equipment',
+      quantity: 1,
+      description: `Starting background package, including ${background.tool || 'the listed tool'} and personal gear.`,
+    });
+  }
+  return inventory;
 }
 
 function buildEquipped(inventory, content) {

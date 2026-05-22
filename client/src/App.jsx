@@ -728,6 +728,7 @@ function CharacterSheetModal({ character, onClose }) {
   const saves = derived.saving_throw_modifiers || {};
   const features = character.features || [];
   const inventory = character.inventory || [];
+  const details = character.character_details || {};
   const languages = character.languages || character.proficiencies?.languages || [];
   const speciesSpells = character.species_spells || [];
   const resistances = character.resistances || [];
@@ -792,6 +793,18 @@ function CharacterSheetModal({ character, onClose }) {
 
           <section className="sheet-section">
             <h3>Origin</h3>
+            {details.alignment && (
+              <div className="sheet-line">
+                <strong>Alignment</strong>
+                <span>{details.alignment}</span>
+              </div>
+            )}
+            {[details.appearance, details.personality, details.backstory].filter(Boolean).length > 0 && (
+              <div className="sheet-line">
+                <strong>Details</strong>
+                <span>{[details.appearance, details.personality, details.backstory].filter(Boolean).join(' ')}</span>
+              </div>
+            )}
             <div className="sheet-line">
               <strong>Languages</strong>
               <span>{languages.length ? languages.join(', ') : 'None recorded'}</span>

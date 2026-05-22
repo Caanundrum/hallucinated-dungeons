@@ -44,6 +44,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
     speciesId: '',
     speciesChoices: {},
     languages: [],
+    characterDetails: { alignment: '', appearance: '', personality: '', backstory: '' },
     classId: '',
     backgroundId: '',
     abilityMethod: 'standard_array',
@@ -56,6 +57,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
     rolledAssignment: emptyRolledAssignments(),
     selectedSkills: [],
     equipmentChoice: 'pack',
+    backgroundEquipmentChoice: 'equipment',
     cantripsKnown: [],
     spellsKnown: [],
     rolledStats: { attemptsUsed: 0, currentSet: [], acceptedSet: [], rollToken: null },
@@ -65,7 +67,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
   const selectedClass = content.classes.find((item) => item.id === draft.classId);
   const selectedBackground = content.backgrounds.find((item) => item.id === draft.backgroundId);
   const isCaster = Boolean(selectedClass?.spellcasting);
-  const totalSteps = isCaster ? 9 : 8;
+  const totalSteps = isCaster ? 10 : 9;
   const visibleStepName = stepsForClass(isCaster)[step];
   const originFeatMap = Object.fromEntries((content.feats || []).map((feat) => [feat.id, feat]));
   const backgroundOriginFeat = originFeatMap[selectedBackground?.origin_feat];
@@ -103,7 +105,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
   const armorItem = equipmentItems.find((item) => item.type === 'armor');
   const shieldItem = equipmentItems.find((item) => item.type === 'shield');
   const hasCompleteScores = ABILITIES.every((ability) => isFilledInteger(draft.abilityScores[ability]));
-  const showAbilityMath = step >= 4 && hasCompleteScores;
+  const showAbilityMath = step >= 5 && hasCompleteScores;
   const activeCreationEffects = [
     ...getSpeciesEffects(selectedSpecies, draft.speciesChoices),
     ...originFeatEntries.flatMap((entry) => entry.feat.effects || []),
@@ -146,6 +148,13 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
       else if (selected.size < 2) selected.add(languageId);
       return { ...current, languages: [...selected] };
     });
+  }
+
+  function updateDetail(field, value) {
+    setDraft((current) => ({
+      ...current,
+      characterDetails: { ...current.characterDetails, [field]: value },
+    }));
   }
 
   function updateScore(ability, value) {
@@ -239,7 +248,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
   }
 
   function toggleSkill(skillId) {
-    if (backgroundSkills.has(skillId) || originSkillIds.has(skillId)) return;
+    if (speciesSkillIds.has(skillId) || backgroundSkills.has(skillId) || originSkillIds.has(skillId)) return;
     setDraft((current) => {
       const next = new Set(current.selectedSkills);
       if (next.has(skillId)) next.delete(skillId);
@@ -263,13 +272,14 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
       && draft.speciesId
       && validSpeciesChoices(draft, selectedSpecies, content)
       && validLanguages(draft, content);
-    if (step === 1) return Boolean(draft.classId);
-    if (step === 2) return Boolean(draft.backgroundId) && validBackgroundBonus(backgroundBonus, selectedBackground);
-    if (step === 3) return validOriginChoices(draft, selectedSpecies, selectedBackground, originFeatEntries, content, speciesSkillIds);
-    if (step === 4) return validAbilityScores(draft);
-    if (step === 5) return draft.selectedSkills.length === (selectedClass?.skill_count || 0);
-    if (step === 6) return Boolean(draft.equipmentChoice);
-    if (isCaster && step === 7) return draft.cantripsKnown.length === requiredCantrips && draft.spellsKnown.length === requiredSpells;
+    if (step === 1) return validCharacterDetails(draft.characterDetails);
+    if (step === 2) return Boolean(draft.classId);
+    if (step === 3) return Boolean(draft.backgroundId) && validBackgroundBonus(backgroundBonus, selectedBackground);
+    if (step === 4) return validOriginChoices(draft, selectedSpecies, selectedBackground, originFeatEntries, content, speciesSkillIds);
+    if (step === 5) return validAbilityScores(draft);
+    if (step === 6) return draft.selectedSkills.length === (selectedClass?.skill_count || 0);
+    if (step === 7) return Boolean(draft.equipmentChoice) && Boolean(draft.backgroundEquipmentChoice);
+    if (isCaster && step === 8) return draft.cantripsKnown.length === requiredCantrips && draft.spellsKnown.length === requiredSpells;
     return true;
   }
 
@@ -351,6 +361,33 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
           )}
 
           {step === 1 && (
+            <ChoiceStep title="Character Details">
+              <p className="helper-text">Optional story details help the DM keep the character consistent. Skip anything you want to discover during play.</p>
+              <label className="field-label">
+                Alignment
+                <select value={draft.characterDetails.alignment} onChange={(e) => updateDetail('alignment', e.target.value)}>
+                  <option value="">Undecided</option>
+                  {['Lawful Good', 'Neutral Good', 'Chaotic Good', 'Lawful Neutral', 'Neutral', 'Chaotic Neutral', 'Lawful Evil', 'Neutral Evil', 'Chaotic Evil'].map((alignment) => (
+                    <option key={alignment} value={alignment}>{alignment}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="field-label">
+                Appearance
+                <textarea maxLength={500} value={draft.characterDetails.appearance} onChange={(e) => updateDetail('appearance', e.target.value)} placeholder="What would someone notice at a glance?" />
+              </label>
+              <label className="field-label">
+                Personality
+                <textarea maxLength={500} value={draft.characterDetails.personality} onChange={(e) => updateDetail('personality', e.target.value)} placeholder="Habits, ideals, flaws, vibes, suspicious confidence..." />
+              </label>
+              <label className="field-label">
+                Backstory note
+                <textarea maxLength={800} value={draft.characterDetails.backstory} onChange={(e) => updateDetail('backstory', e.target.value)} placeholder="One paragraph is plenty. The campaign can uncover the rest." />
+              </label>
+            </ChoiceStep>
+          )}
+
+          {step === 2 && (
             <ChoiceStep title="Class">
               <CardGrid items={content.classes} selectedId={draft.classId} onSelect={(id) => {
                 update('classId', id);
@@ -359,7 +396,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
             </ChoiceStep>
           )}
 
-          {step === 2 && (
+          {step === 3 && (
             <ChoiceStep title="Background">
               <CardGrid items={content.backgrounds} selectedId={draft.backgroundId} onSelect={(id) => {
                 update('backgroundId', id);
@@ -391,7 +428,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
             </ChoiceStep>
           )}
 
-          {step === 3 && (
+          {step === 4 && (
             <ChoiceStep title="Origin Feats">
               <OriginStep
                 content={content}
@@ -416,7 +453,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
             </ChoiceStep>
           )}
 
-          {step === 4 && (
+          {step === 5 && (
             <ChoiceStep title="Ability Scores">
               <div className="method-tabs">
                 {content.abilityScoreMethods.map((method) => (
@@ -463,7 +500,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
             </ChoiceStep>
           )}
 
-          {step === 5 && (
+          {step === 6 && (
             <ChoiceStep title="Skill Proficiencies">
               <p className="helper-text">
                 Already granted: {[...new Set([...speciesSkillIds, ...(selectedBackground?.skills || []), ...originSkillIds])]
@@ -489,8 +526,9 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
             </ChoiceStep>
           )}
 
-          {step === 6 && (
+          {step === 7 && (
             <ChoiceStep title="Starting Equipment">
+              <h3>Class Equipment</h3>
               <div className="method-tabs">
                 <button type="button" className={draft.equipmentChoice === 'pack' ? 'active' : ''} onClick={() => update('equipmentChoice', 'pack')}>Equipment Pack</button>
                 <button type="button" className={draft.equipmentChoice === 'gold' ? 'active' : ''} onClick={() => update('equipmentChoice', 'gold')}>Starting Gold</button>
@@ -500,10 +538,22 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
                   {equipmentItems.map((item) => <InfoRow key={item.id} title={item.name} body={item.description} meta={item.type} />)}
                 </div>
               ) : <p className="helper-text">Gold purchasing is saved as a choice for now. The full shop economy is not Phase 4A.</p>}
+              <h3>Background Equipment</h3>
+              <div className="method-tabs">
+                <button type="button" className={draft.backgroundEquipmentChoice === 'equipment' ? 'active' : ''} onClick={() => update('backgroundEquipmentChoice', 'equipment')}>Background Package</button>
+                <button type="button" className={draft.backgroundEquipmentChoice === 'gold' ? 'active' : ''} onClick={() => update('backgroundEquipmentChoice', 'gold')}>50 GP</button>
+              </div>
+              {draft.backgroundEquipmentChoice === 'equipment' ? (
+                <InfoRow
+                  title={`${selectedBackground?.name || 'Background'} Equipment`}
+                  meta={selectedBackground?.tool || 'Background tool'}
+                  body="Records the background's starting package and personal gear for Phase 4 inventory tracking."
+                />
+              ) : <p className="helper-text">50 GP alternative selected. Shopping and exact item purchasing remain outside Phase 4A.</p>}
             </ChoiceStep>
           )}
 
-          {isCaster && step === 7 && (
+          {isCaster && step === 8 && (
             <ChoiceStep title="Spells and Cantrips">
               <p className="helper-text">Choose {requiredCantrips} cantrips and {requiredSpells} level 1 spells.</p>
               <SpellPicker title="Cantrips" spells={cantripOptions} selected={draft.cantripsKnown} limit={requiredCantrips} onToggle={(id) => toggleSpell('cantripsKnown', id, requiredCantrips)} />
@@ -854,7 +904,11 @@ function ReviewPanel({ draft, content, finalScores, abilityMods, backgroundBonus
       <InfoRow title="Ability Scores" meta="Final" body={ABILITIES.map((ability) => `${ability.toUpperCase()} ${finalScores[ability]} (${fmtMod(abilityMods[ability])}; base ${draft.abilityScores[ability]} + ${backgroundBonus[ability] || 0})`).join('; ')} />
       <InfoRow title="Skills" meta={`${allSkillIds.size} proficient`} body={[...allSkillIds].map((id) => skillMap[id]?.name).filter(Boolean).join(', ')} />
       <InfoRow title="Languages" meta={`${(draft.languages || []).length + 1} known`} body={['common', ...(draft.languages || [])].map((id) => languageMap[id]?.name).filter(Boolean).join(', ')} />
-      <InfoRow title="Equipment" meta={draft.equipmentChoice} body={equipmentItems.map((item) => item.name).join(', ') || 'Starting gold'} />
+      <InfoRow title="Details" meta={draft.characterDetails?.alignment || 'Unaligned'} body={[draft.characterDetails?.appearance, draft.characterDetails?.personality, draft.characterDetails?.backstory].filter(Boolean).join(' ')} />
+      <InfoRow title="Equipment" meta={`${draft.equipmentChoice} / ${draft.backgroundEquipmentChoice}`} body={[
+        draft.equipmentChoice === 'pack' ? equipmentItems.map((item) => item.name).join(', ') : 'Class starting gold',
+        draft.backgroundEquipmentChoice === 'equipment' ? `${selectedBackground?.name} background package` : '50 GP background alternative',
+      ].filter(Boolean).join('; ')} />
       {selectedClass?.spellcasting && <InfoRow title="Spells" meta={selectedClass.spellcasting.ability.toUpperCase()} body={[...draft.cantripsKnown, ...draft.spellsKnown].map((id) => content.spells.find((spell) => spell.id === id)?.name).filter(Boolean).join(', ')} />}
     </div>
   );
@@ -879,12 +933,12 @@ function CharacterSummary({
   guidanceNotes,
 }) {
   const showSpecies = Boolean(selectedSpecies);
-  const showClass = step >= 1 && Boolean(selectedClass);
-  const showBackground = step >= 2 && Boolean(selectedBackground);
-  const showOrigin = step >= 3 && originFeatEntries.length > 0;
-  const showAbilities = step >= 4 && ABILITIES.every((ability) => isFilledInteger(draft.abilityScores[ability]));
-  const showSkills = step >= 5 && allSkillIds.size > 0;
-  const showEquipment = step >= 6 && Boolean(draft.equipmentChoice);
+  const showClass = step >= 2 && Boolean(selectedClass);
+  const showBackground = step >= 3 && Boolean(selectedBackground);
+  const showOrigin = step >= 4 && originFeatEntries.length > 0;
+  const showAbilities = step >= 5 && ABILITIES.every((ability) => isFilledInteger(draft.abilityScores[ability]));
+  const showSkills = step >= 6 && allSkillIds.size > 0;
+  const showEquipment = step >= 7 && Boolean(draft.equipmentChoice);
 
   return (
     <>
@@ -950,7 +1004,10 @@ function CharacterSummary({
       {showEquipment && (
         <DetailBlock
           title="Equipment"
-          body={draft.equipmentChoice === 'pack' ? equipmentItems.map((item) => item.name).join(', ') : 'Starting gold'}
+          body={[
+            draft.equipmentChoice === 'pack' ? equipmentItems.map((item) => item.name).join(', ') : 'Class starting gold',
+            draft.backgroundEquipmentChoice === 'equipment' ? `${selectedBackground?.name} background package` : '50 GP background alternative',
+          ].filter(Boolean).join('; ')}
         />
       )}
       <div className="impact-box">
@@ -1012,6 +1069,13 @@ function validSpeciesChoices(draft, species, content) {
     if (choice.type === 'option' && !(choice.options || []).some((option) => option.id === value)) return false;
   }
   return true;
+}
+
+function validCharacterDetails(details = {}) {
+  return String(details.alignment || '').length <= 40
+    && String(details.appearance || '').length <= 500
+    && String(details.personality || '').length <= 500
+    && String(details.backstory || '').length <= 800;
 }
 
 function validLanguages(draft, content) {
@@ -1276,7 +1340,7 @@ function getGuidanceNotes({
 }
 
 function stepsForClass(isCaster) {
-  const steps = ['Name and Species', 'Class', 'Background', 'Origin Feats', 'Ability Scores', 'Skills', 'Equipment'];
+  const steps = ['Name and Species', 'Details', 'Class', 'Background', 'Origin Feats', 'Ability Scores', 'Skills', 'Equipment'];
   if (isCaster) steps.push('Spells');
   steps.push('Review');
   return steps;

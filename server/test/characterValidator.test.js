@@ -14,6 +14,12 @@ function baseDraft(overrides = {}) {
     speciesId: 'human',
     speciesChoices: { size: 'medium' },
     languages: ['elvish', 'dwarvish'],
+    characterDetails: {
+      alignment: 'Chaotic Good',
+      appearance: 'Travel-stained cloak and a heroic amount of optimism.',
+      personality: 'Brave, curious, and only occasionally sensible.',
+      backstory: 'Left home chasing rumors of trouble and treasure.',
+    },
     classId: 'fighter',
     backgroundId: 'farmer',
     abilityMethod: 'standard_array',
@@ -28,6 +34,7 @@ function baseDraft(overrides = {}) {
     },
     selectedSkills: ['athletics', 'intimidation'],
     equipmentChoice: 'pack',
+    backgroundEquipmentChoice: 'equipment',
     humanSkillId: 'perception',
     humanOriginFeatId: 'alert',
     featSkillChoices: {},
@@ -82,7 +89,9 @@ test('applies Human Skillful, Human Versatile, background Origin feat, and stati
   assert.equal(sheet.origin.background_feat, 'tough');
   assert.equal(sheet.origin.human_origin_feat, 'alert');
   assert.equal(sheet.origin.human_skill, 'perception');
+  assert.equal(sheet.character_details.alignment, 'Chaotic Good');
   assert.deepEqual(sheet.languages, ['common', 'elvish', 'dwarvish']);
+  assert.equal(sheet.inventory.some((item) => item.id === 'background_equipment_farmer'), true);
   assert.equal(sheet.derived_stats.max_hp, 14);
   assert.equal(sheet.derived_stats.initiative, 3);
   assert.deepEqual(
@@ -170,6 +179,21 @@ test('requires two standard language choices in addition to Common', () => {
   assert.throws(
     () => validateCharacter(baseDraft({ languages: ['elvish', 'infernal'] }), getContentBundle()),
     /standard languages/,
+  );
+});
+
+test('records background 50 GP alternative and validates character detail lengths', () => {
+  const sheet = validateCharacter(baseDraft({
+    backgroundEquipmentChoice: 'gold',
+    characterDetails: { alignment: 'Neutral', appearance: '', personality: '', backstory: '' },
+  }), getContentBundle());
+
+  assert.equal(sheet.inventory.some((item) => item.id === 'background_50_gp' && item.quantity === 50), true);
+  assert.equal(sheet.character_details.alignment, 'Neutral');
+
+  assert.throws(
+    () => validateCharacter(baseDraft({ characterDetails: { backstory: 'x'.repeat(801) } }), getContentBundle()),
+    /800 characters/,
   );
 });
 
