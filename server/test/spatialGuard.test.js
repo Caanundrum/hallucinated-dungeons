@@ -76,6 +76,8 @@ test('allows social phrasing toward present NPCs', () => {
     guardMessage('Introduce myself to the clerk as friendly as possible and ask about the reeve.', townHallDoorState),
     null
   );
+  assert.equal(guardMessage('Ask for the reeve.', townHallDoorState), null);
+  assert.equal(guardMessage('Ask about the missing girl.', townHallDoorState), null);
 });
 
 test('merges scene presence as a full normalized scene snapshot', () => {
