@@ -47,6 +47,8 @@ async function build({ sessionId, dm1Prompt, playerMessage }) {
     `Present NPCs: ${formatSceneList(worldState.scene_presence?.present_npcs)}.`,
     `Present objects: ${formatSceneList(worldState.scene_presence?.present_objects)}.`,
     `Available exits: ${formatSceneList(worldState.scene_presence?.available_exits)}.`,
+    `Practical time: ${formatTimeState(worldState.time_state)}.`,
+    `Active world effects: ${formatActiveEffects(worldState.active_effects)}.`,
     `Nearby but not present locations: ${formatSceneList(worldState.scene_presence?.nearby_locations)}.`,
     'Do not resolve interactions with NPCs, buildings, objects, or rooms unless they are present in the current location or the player explicitly travels to them first.',
     'If the player asks for an absent target, ask whether they head there instead of moving them silently.',
@@ -146,6 +148,29 @@ function formatSceneList(value) {
   return Array.isArray(value) && value.length > 0 ? value.join(', ') : 'none established';
 }
 
+function formatTimeState(value) {
+  if (!value || typeof value !== 'object') return 'not yet established';
+  const parts = [];
+  if (value.scene_time) parts.push(value.scene_time);
+  if (Number(value.elapsed_rounds) > 0) parts.push(`${value.elapsed_rounds} rounds elapsed`);
+  if (Number(value.elapsed_minutes) > 0) parts.push(`${value.elapsed_minutes} minutes elapsed`);
+  return parts.join(', ') || 'not yet established';
+}
+
+function formatActiveEffects(value) {
+  if (!Array.isArray(value) || value.length === 0) return 'none';
+  return value
+    .map((effect) => {
+      const remaining = effect.remaining_rounds != null
+        ? `${effect.remaining_rounds} rounds left`
+        : effect.remaining_minutes != null
+          ? `${effect.remaining_minutes} minutes left`
+          : effect.duration || 'duration unknown';
+      return `${effect.name || effect.id || 'effect'} on ${effect.target || 'unknown target'} (${effect.mechanical_effect || 'effect tracked'}, ${remaining}${effect.concentration ? ', concentration' : ''})`;
+    })
+    .join('; ');
+}
+
 function buildPartyPresenceText(rows) {
   if (!Array.isArray(rows) || rows.length === 0) return '';
   return rows
@@ -187,6 +212,9 @@ function buildActiveCharacterText(characterSheet) {
   }
   if (features.length) {
     lines.push(`Features: ${features.map((feature) => feature.name).join(', ')}`);
+  }
+  if (Array.isArray(derived.active_spell_effects) && derived.active_spell_effects.length) {
+    lines.push(`Active spell effects: ${formatActiveEffects(derived.active_spell_effects)}`);
   }
   if (inventory.length) {
     lines.push(`Equipment: ${inventory.map((item) => item.name).join(', ')}`);

@@ -96,3 +96,27 @@ test('merges scene presence as a full normalized scene snapshot', () => {
   assert.deepEqual(merged.scene_presence.present_npcs, ['guard']);
   assert.deepEqual(merged.scene_presence.present_objects, ['gate']);
 });
+
+test('merges time state and replaces active effects without wiping other state', () => {
+  const merged = mergeWorldState({
+    ...db.DEFAULT_WORLD_STATE,
+    active_quest: 'Find the missing scout',
+    active_effects: [{ id: 'old_effect', name: 'Old Effect' }],
+    time_state: { elapsed_rounds: 1, elapsed_minutes: 0, scene_time: 'round 1' },
+  }, {
+    time_state: { elapsed_rounds: 2, scene_time: 'round 2' },
+    active_effects: [{
+      id: 'shield_of_faith',
+      name: 'Shield of Faith',
+      target: 'Aveline',
+      duration: '1 minute',
+      remaining_rounds: 9,
+      concentration: true,
+      mechanical_effect: '+2 AC',
+    }],
+  });
+
+  assert.equal(merged.active_quest, 'Find the missing scout');
+  assert.deepEqual(merged.time_state, { elapsed_rounds: 2, elapsed_minutes: 0, scene_time: 'round 2' });
+  assert.deepEqual(merged.active_effects.map((effect) => effect.id), ['shield_of_faith']);
+});

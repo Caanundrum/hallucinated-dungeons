@@ -346,7 +346,18 @@ async function handleDeterministicSpellAction(socket, sessionId, message) {
           ],
           active_spell_effects: [
             ...activeSpellEffects,
-            { id: 'shield_of_faith', name: 'Shield of Faith', target: 'armor_class_bonus', value: 2, concentration: true },
+            {
+              id: 'shield_of_faith',
+              name: 'Shield of Faith',
+              source: sheet.identity?.name || 'active character',
+              target: sheet.identity?.name || 'self',
+              value: 2,
+              duration: '1 minute',
+              remaining_rounds: 10,
+              remaining_minutes: 1,
+              concentration: true,
+              mechanical_effect: '+2 AC',
+            },
           ],
         },
       };
@@ -364,6 +375,7 @@ async function syncCharacterToWorldState(sessionId, characterSheet) {
   const current = row?.state || db.DEFAULT_WORLD_STATE;
   await db.updateWorldState(sessionId, {
     ...current,
+    active_effects: characterSheet.derived_stats?.active_spell_effects || current.active_effects || [],
     player_stats: {
       ...(current.player_stats || db.DEFAULT_WORLD_STATE.player_stats),
       ...characterSheetToWorldStats(characterSheet),

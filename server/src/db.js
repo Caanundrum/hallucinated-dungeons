@@ -239,6 +239,12 @@ const DEFAULT_WORLD_STATE = {
   story_flags:       {},
   active_quest:      '',
   session_turn:      0,
+  time_state: {
+    elapsed_rounds:  0,
+    elapsed_minutes: 0,
+    scene_time:      '',
+  },
+  active_effects:    [],
   player_stats: {
     name:           '',
     class:          '',

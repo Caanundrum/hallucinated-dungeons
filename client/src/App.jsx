@@ -816,6 +816,10 @@ function CharacterSheetModal({ character, content, onClose }) {
   const identity = character.identity || {};
   const abilities = character.abilities || {};
   const derived = character.derived_stats || {};
+  const activeEffects = [
+    ...(character.active_effects || []),
+    ...(derived.active_spell_effects || []),
+  ];
   const attacks = derived.attack_breakdowns || [];
   const skills = derived.skill_modifiers || {};
   const saves = derived.saving_throw_modifiers || {};
@@ -869,6 +873,16 @@ function CharacterSheetModal({ character, content, onClose }) {
                 <SheetStat key={ability} label={ability.toUpperCase()} value={`${score} (${fmtMod(abilities.modifiers?.[ability])})`} />
               ))}
             </div>
+          </section>
+
+          <section className="sheet-section">
+            <h3>Active Effects</h3>
+            {activeEffects.length ? activeEffects.map((effect) => (
+              <div key={`${effect.id || effect.name}-${effect.target || 'self'}`} className="sheet-line">
+                <strong>{effect.name || effect.id}</strong>
+                <span>{formatEffectSummary(effect)}</span>
+              </div>
+            )) : <p className="muted-text">No active effects.</p>}
           </section>
 
           <section className="sheet-section">
@@ -998,6 +1012,17 @@ function SheetStat({ label, value }) {
       <strong>{value}</strong>
     </div>
   );
+}
+
+function formatEffectSummary(effect) {
+  const parts = [];
+  if (effect.mechanical_effect) parts.push(effect.mechanical_effect);
+  else if (effect.target && effect.value != null) parts.push(`${effect.target}: ${fmtMod(effect.value)}`);
+  if (effect.duration) parts.push(`Duration ${effect.duration}`);
+  if (effect.remaining_rounds != null) parts.push(`${effect.remaining_rounds} rounds left`);
+  else if (effect.remaining_minutes != null) parts.push(`${effect.remaining_minutes} minutes left`);
+  if (effect.concentration) parts.push('Concentration');
+  return parts.join(' - ') || 'Effect active';
 }
 
 export default App;

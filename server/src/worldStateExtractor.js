@@ -23,6 +23,8 @@ BASIC FIELDS:
 - npcs_encountered: object[] (NEW or UPDATED NPCs only: { name, disposition, last_seen })
 - story_flags: object (new or updated flag keys only: { "flag_name": value })
 - active_quest: string (new quest description if the active quest changed)
+- time_state: object (changed practical time tracking: { "elapsed_rounds": number, "elapsed_minutes": number, "scene_time": string })
+- active_effects: object[] (FULL current active magical/status effects array; use [] when none remain)
 
 SCENE PRESENCE (scene_presence):
 Return this as the FULL current scene whenever the DM response establishes or changes what is physically present.
@@ -52,6 +54,25 @@ Extract only the fields that changed. Use the HP narration standard "(before →
 - player_stats.death_saves: object (current totals — e.g. {"successes": 1, "failures": 0})
 - player_stats.weapon_name: string (primary weapon name if mentioned or established — e.g. "longsword", "shortbow", "dagger")
 - player_stats.ability_scores: object (ability modifiers as integers, only update if established — e.g. {"str": 3, "dex": 1, "con": 2, "int": -1, "wis": 0, "cha": 1}. Use modifier values not raw scores. Key-merge: only include ability keys that changed or were established.)
+
+TIME AND ACTIVE EFFECTS:
+Track practical D&D time when the DM response advances rounds, travel, searching, rests, spell durations, or scene time.
+In combat, one round is about 6 seconds. Outside combat, estimate elapsed minutes from the narration.
+active_effects schema:
+[
+  {
+    "id": "<stable effect id, e.g. shield_of_faith>",
+    "name": "<effect/spell name>",
+    "source": "<caster or source>",
+    "target": "<affected creature/object>",
+    "duration": "<listed duration, e.g. 1 minute>",
+    "remaining_rounds": <integer or null>,
+    "remaining_minutes": <number or null>,
+    "concentration": <boolean>,
+    "mechanical_effect": "<plain effect, e.g. +2 AC>"
+  }
+]
+Return active_effects as the FULL current array whenever an effect starts, ends, or duration changes. Use [] if all effects end.
 
 COMBAT STATE (combat_state):
 When combat is active, return the FULL updated combat_state object (full replace — never partial).
@@ -84,6 +105,8 @@ MERGE RULES:
 - npcs_encountered: upsert by name
 - story_flags: key-merge (never replace entire object)
 - active_quest: replace
+- time_state: key-merge (only include changed keys)
+- active_effects: FULL REPLACE when provided; OMIT if unchanged
 - player_stats: key-merge (only include fields that changed)
 - player_stats.conditions: FULL REPLACE — return the complete current conditions array
 - player_stats.spell_slots: key-merge (only changed slot levels)
@@ -231,6 +254,14 @@ function mergeWorldState(current, patch) {
   // ── Phase 3 fields ────────────────────────────────────────────────────
 
   // player_stats — key-merge with sub-field rules
+  if (patch.time_state && typeof patch.time_state === 'object' && !Array.isArray(patch.time_state)) {
+    merged.time_state = { ...(merged.time_state || db.DEFAULT_WORLD_STATE.time_state), ...patch.time_state };
+  }
+
+  if (Array.isArray(patch.active_effects)) {
+    merged.active_effects = patch.active_effects;
+  }
+
   if (patch.player_stats && typeof patch.player_stats === 'object' && !Array.isArray(patch.player_stats)) {
     const currentStats = merged.player_stats || db.DEFAULT_WORLD_STATE.player_stats;
     const patchStats   = patch.player_stats;
