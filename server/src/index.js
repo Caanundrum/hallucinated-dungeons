@@ -19,6 +19,7 @@ const { retryWithBackoff } = require('./retryUtils');
 const { getContentBundle } = require('./contentData');
 const { validateCharacter } = require('./characterValidator');
 const { checkSpatialAction } = require('./spatialGuard');
+const { resolvePreNarration } = require('./mechanicsResolver');
 
 // ── Setup ──────────────────────────────────────────────────────────────────
 const app    = express();
@@ -988,40 +989,64 @@ io.on('connection', (socket) => {
       }
 
       // Get pre-increment session_turn — both messages for this exchange share it
+      const worldStateRow = await db.getWorldState(sessionId);
+      const currentTurn   = worldStateRow?.state?.session_turn ?? 0;
+
       if (await handleDeterministicSpellAction(socket, sessionId, message)) {
         return;
       }
 
-      const worldStateRow = await db.getWorldState(sessionId);
-      const currentTurn   = worldStateRow?.state?.session_turn ?? 0;
-
-      const spatialIssue = checkSpatialAction(message, worldStateRow?.state);
-      if (spatialIssue) {
+      const mechanics = resolvePreNarration({ message, worldState: worldStateRow?.state });
+      if (mechanics.handled) {
         await db.saveMessage(sessionId, 'player_dm1', message, currentTurn);
-        await db.saveMessage(sessionId, 'dm1', spatialIssue.message, currentTurn);
+        await db.saveMessage(sessionId, 'dm1', mechanics.response, currentTurn);
         await db.incrementSessionTurn(sessionId);
-        socket.emit('dm1_response', { message: spatialIssue.message });
+        socket.emit('dm1_response', { message: mechanics.response });
         await db.logDmCall({
           sessionId,
-          dm:           'spatial_guard',
+          dm:           mechanics.logType || 'mechanics_resolver',
           model:        'deterministic',
           playerInput:  message,
-          fullPrompt:   JSON.stringify(worldStateRow?.state || {}),
-          dmResponse:   spatialIssue.message,
+          fullPrompt:   JSON.stringify({ intent: mechanics.intent, worldState: worldStateRow?.state || {} }),
+          dmResponse:   mechanics.response,
           inputTokens:  null,
           outputTokens: null,
         }).catch(console.error);
         return;
       }
 
+      if (!mechanics.skipSpatialGuard) {
+        const spatialIssue = checkSpatialAction(message, worldStateRow?.state);
+        if (spatialIssue) {
+          await db.saveMessage(sessionId, 'player_dm1', message, currentTurn);
+          await db.saveMessage(sessionId, 'dm1', spatialIssue.message, currentTurn);
+          await db.incrementSessionTurn(sessionId);
+          socket.emit('dm1_response', { message: spatialIssue.message });
+          await db.logDmCall({
+            sessionId,
+            dm:           'spatial_guard',
+            model:        'deterministic',
+            playerInput:  message,
+            fullPrompt:   JSON.stringify({ intent: mechanics.intent, worldState: worldStateRow?.state || {} }),
+            dmResponse:   spatialIssue.message,
+            inputTokens:  null,
+            outputTokens: null,
+          }).catch(console.error);
+          return;
+        }
+      }
+
       // Save player message with pre-increment turn_number
       await db.saveMessage(sessionId, 'player_dm1', message, currentTurn);
+      const dmPlayerMessage = mechanics.narrativeFrame
+        ? `${message}\n\n${mechanics.narrativeFrame}`
+        : message;
 
       // Assemble three-tier DM1 context
       const { systemPrompt, messages } = await contextBuilder.build({
         sessionId,
         dm1Prompt:     DM1_PROMPT,
-        playerMessage: message,
+        playerMessage: dmPlayerMessage,
       });
 
       socket.emit('dm1_typing', true);
