@@ -38,6 +38,10 @@ function stripRollTag(text) {
     .trim();
 }
 
+function stripRollResultPrefix(text) {
+  return String(text || '').replace(/^\[ROLL RESULT:\s*-?\d+\]\s*/, '');
+}
+
 // Roll dice client-side using Math.random()
 function rollDice(diceCount, dieSides) {
   let total = 0;
@@ -444,7 +448,7 @@ function App() {
     const rollLabel = label ? `${label}: ` : '';
     const rollBreakdown = breakdown ? `; ${breakdown}` : '';
     const rollMsg = `[ROLL RESULT: ${total}] I rolled a ${total} (${rollLabel}${diceCount}d${dieSides}${modStr} = ${total}${rollBreakdown})`;
-    const displayRollMsg = rollMsg.replace(/^\[ROLL RESULT: \d+\]\s*/, '');
+    const displayRollMsg = stripRollResultPrefix(rollMsg);
     setNarrative((prev) => [...prev, { type: 'player', text: displayRollMsg, id: Date.now() }]);
     socket.emit('story_input', { message: rollMsg });
     setPendingRoll(null);
@@ -459,7 +463,7 @@ function App() {
     const { dieSides } = fallbackRoll;
     const modStr = modifier > 0 ? ` + ${modifier}` : modifier < 0 ? ` - ${Math.abs(modifier)}` : '';
     const rollMsg = `[ROLL RESULT: ${total}] I rolled a ${total} (1d${dieSides}${modStr} = ${total})`;
-    const displayRollMsg = rollMsg.replace(/^\[ROLL RESULT: \d+\]\s*/, '');
+    const displayRollMsg = stripRollResultPrefix(rollMsg);
     setNarrative((prev) => [...prev, { type: 'player', text: displayRollMsg, id: Date.now() }]);
     socket.emit('story_input', { message: rollMsg });
     setFallbackRoll(null);
@@ -477,7 +481,7 @@ function App() {
     const rollMsg = `[ROLL RESULT: ${total}] I rolled a ${total} (${diceCount}d${dieSides}${modStr} = ${total})`;
 
     // Display message strips the machine-readable prefix; server message keeps it for DM1 integrity check
-    const displayRollMsg = rollMsg.replace(/^\[ROLL RESULT: \d+\]\s*/, '');
+    const displayRollMsg = stripRollResultPrefix(rollMsg);
     setNarrative((prev) => [...prev, { type: 'player', text: displayRollMsg, id: Date.now() }]);
     socket.emit('story_input', { message: rollMsg });
 

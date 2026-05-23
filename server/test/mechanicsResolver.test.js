@@ -27,6 +27,18 @@ test('gates hidden insight behind a deterministic check prompt', () => {
   assert.match(result.response, /\[CHECK: skill=insight ability=wis\]/);
 });
 
+test('passes authenticated zero roll totals through with an official roll frame', () => {
+  const result = resolvePreNarration({
+    message: '[ROLL RESULT: 0] I rolled a 0 (Persuasion Check: 1d20 - 1 = 0; CHA only = -1)',
+    worldState: {},
+  });
+
+  assert.equal(result.handled, false);
+  assert.equal(result.skipSpatialGuard, true);
+  assert.match(result.narrativeFrame, /authenticated dice-roller result/);
+  assert.match(result.narrativeFrame, /0 or negative/);
+});
+
 test('passes combat actions through with a mechanics frame', () => {
   const result = resolvePreNarration({
     message: 'I take the Dodge action.',

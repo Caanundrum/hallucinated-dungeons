@@ -3,7 +3,12 @@ const { resolveIntent } = require('./intentResolver');
 function resolvePreNarration({ message, worldState }) {
   const intent = resolveIntent(message);
   if (intent.isRollResult) {
-    return { intent, handled: false, skipSpatialGuard: true, narrativeFrame: '' };
+    return {
+      intent,
+      handled: false,
+      skipSpatialGuard: true,
+      narrativeFrame: '[MECHANICS: This is an authenticated dice-roller result because it starts with [ROLL RESULT:]. Accept it as official even if the final total is 0 or negative after modifiers. Resolve the pending check, save, damage roll, or other requested roll from this result.]',
+    };
   }
 
   if (intent.check && shouldGateCheck(intent, worldState)) {
