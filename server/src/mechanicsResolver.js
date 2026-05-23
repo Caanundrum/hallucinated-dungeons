@@ -50,10 +50,31 @@ function buildNarrativeFrame(intent, worldState = {}) {
   }
   if (worldState.combat_state?.active) {
     frames.push(`[MECHANICS: Combat is active. Preserve initiative order, action economy, HP changes, active effects, and round/turn progression. Current round: ${worldState.combat_state.round || 1}.]`);
+    if (intent.ruleAction && consumesCombatTurn(intent.ruleAction)) {
+      frames.push('[MECHANICS: This declared action completes the player character turn unless you must first request one required player roll. If no player roll is pending, immediately advance initiative, resolve every non-player combatant turn in order, update HP/effects/round as needed, and end only at the start of the next player character turn. Do not end with an NPC or monster "up next" while asking the player what they do.]');
+    }
   }
   return frames.join('\n');
 }
 
+function consumesCombatTurn(ruleAction) {
+  return [
+    'attack',
+    'dash',
+    'disengage',
+    'dodge',
+    'help',
+    'hide',
+    'influence',
+    'magic',
+    'ready',
+    'search',
+    'study',
+    'utilize',
+  ].includes(ruleAction);
+}
+
 module.exports = {
   resolvePreNarration,
+  consumesCombatTurn,
 };

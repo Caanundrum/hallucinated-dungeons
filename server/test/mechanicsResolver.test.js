@@ -37,4 +37,6 @@ test('passes combat actions through with a mechanics frame', () => {
   assert.equal(result.skipSpatialGuard, true);
   assert.match(result.narrativeFrame, /DODGE action/);
   assert.match(result.narrativeFrame, /Combat is active/);
+  assert.match(result.narrativeFrame, /end only at the start of the next player character turn/);
+  assert.match(result.narrativeFrame, /Do not end with an NPC or monster "up next"/);
 });
