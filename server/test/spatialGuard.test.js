@@ -98,6 +98,12 @@ test('does not confuse other keeper NPCs with innkeepers', () => {
   );
 });
 
+test('allows D&D action declarations in combat', () => {
+  assert.equal(guardMessage('I stand my ground and take the Dodge action.'), null);
+  assert.equal(guardMessage('I take the Search action to look for a hidden latch.'), null);
+  assert.equal(guardMessage('I ready the Attack action.'), null);
+});
+
 test('merges scene presence as a full normalized scene snapshot', () => {
   const merged = mergeWorldState(db.DEFAULT_WORLD_STATE, {
     current_location: 'Brackenford town gate',

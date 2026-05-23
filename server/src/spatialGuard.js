@@ -36,6 +36,7 @@ const MOVEMENT_VERBS = /\b(go|walk|head|travel|move|return|enter|leave|approach|
 const LOCATION_PREPOSITIONS = /\b(?:in|inside|at|within|on)\s+(?:the\s+|a\s+|an\s+)?([a-z][a-z' -]{2,40})\b/i;
 const DEFINITE_TARGET = /\b(?:the|that)\s+([a-z][a-z' -]{2,40})\b/i;
 const ASK_FOR_INFORMATION = /\b(?:ask|asks|asking|inquire|inquires|request|requests)\s+(?:about|after|for)\b/i;
+const RULES_ACTION_DECLARATION = /\b(?:take|use|ready)\s+the\s+(?:attack|dash|disengage|dodge|help|hide|influence|magic|search|study|utilize|ready)\s+action\b/i;
 const VAGUE_TARGETS = new Set([
   'guy',
   'person',
@@ -135,6 +136,7 @@ function cleanCandidate(value) {
 function findGenericSpatialIssue(input, worldState) {
   const scene = worldState.scene_presence;
   if (!scene || !scene.exact_location) return null;
+  if (RULES_ACTION_DECLARATION.test(input)) return null;
   if (!INTERACTION_VERBS.test(input) || MOVEMENT_VERBS.test(input)) return null;
   if (ASK_FOR_INFORMATION.test(input) && (scene.present_npcs || []).length > 0) return null;
 
