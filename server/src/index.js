@@ -70,11 +70,15 @@ const DM2_PROMPT = fs.readFileSync(
 // Known race condition: if a player submits their next action before these
 // utility model calls complete, the next DM1 context will be one turn behind on
 // world state and campaign log. Acceptable for Phase 2 single player.
-async function runPostResponsePipeline(sessionId, playerMessage, dm1Reply, newTurn) {
+async function runPostResponsePipeline(sessionId, playerMessage, dm1Reply, newTurn, socket = null) {
   await Promise.allSettled([
     worldStateExtractor.extract(sessionId, playerMessage, dm1Reply),
     campaignLogExtractor.extract(sessionId, playerMessage, dm1Reply, newTurn),
   ]);
+
+  if (socket) {
+    await syncCharacterFromWorldState(socket, sessionId).catch(console.error);
+  }
 
   if (newTurn > 0 && newTurn % 50 === 0) {
     await chapterSummarizer.summarize(sessionId, newTurn).catch(console.error);
@@ -311,6 +315,57 @@ function summarizeKnownSpells(characterSheet, content) {
   return ids.map((id) => content.spells.find((spell) => spell.id === id)?.name || id).join(', ') || 'no spells';
 }
 
+function spellHasDuration(spell) {
+  return spell?.duration && !/^instant$/i.test(spell.duration);
+}
+
+function isConcentrationDuration(duration = '') {
+  return /concentration/i.test(duration);
+}
+
+function durationToRemaining(duration = '') {
+  const minuteMatch = duration.match(/(\d+)\s*minute/i);
+  if (minuteMatch) {
+    const minutes = Number(minuteMatch[1]);
+    return { remaining_minutes: minutes, remaining_rounds: minutes * 10 };
+  }
+  const hourMatch = duration.match(/(\d+)\s*hour/i);
+  if (hourMatch) {
+    const hours = Number(hourMatch[1]);
+    return { remaining_minutes: hours * 60, remaining_rounds: hours * 600 };
+  }
+  if (/1 round/i.test(duration)) return { remaining_rounds: 1 };
+  return {};
+}
+
+function buildSpellEffect(characterSheet, spell) {
+  const actor = characterSheet.identity?.name || 'active character';
+  return {
+    id: spell.id,
+    name: spell.name,
+    source: actor,
+    target: spell.range === 'Self' ? actor : 'current scene target',
+    duration: spell.duration,
+    concentration: isConcentrationDuration(spell.duration),
+    mechanical_effect: spell.description,
+    ...durationToRemaining(spell.duration),
+  };
+}
+
+function addActiveSpellEffect(characterSheet, spell) {
+  if (!spellHasDuration(spell)) return characterSheet;
+  const derived = characterSheet.derived_stats || {};
+  const activeSpellEffects = derived.active_spell_effects || [];
+  if (activeSpellEffects.some((effect) => effect.id === spell.id)) return characterSheet;
+  return {
+    ...characterSheet,
+    derived_stats: {
+      ...derived,
+      active_spell_effects: [...activeSpellEffects, buildSpellEffect(characterSheet, spell)],
+    },
+  };
+}
+
 async function handleDeterministicSpellAction(socket, sessionId, message) {
   const content = getContentBundle();
   const spell = getCastSpellFromMessage(message, content);
@@ -365,9 +420,76 @@ async function handleDeterministicSpellAction(socket, sessionId, message) {
       await syncCharacterToWorldState(sessionId, saved.character_sheet).catch(console.error);
       socket.emit('character_ready', { characterId: saved.id, character: saved.character_sheet, shouldStartSession: false });
     }
+  } else if (spellHasDuration(spell)) {
+    const updatedSheet = addActiveSpellEffect(sheet, spell);
+    if (updatedSheet !== sheet) {
+      const saved = await db.updateCharacterSheet(character.id, updatedSheet);
+      await syncCharacterToWorldState(sessionId, saved.character_sheet).catch(console.error);
+      socket.emit('character_ready', { characterId: saved.id, character: saved.character_sheet, shouldStartSession: false });
+    }
   }
 
   return false;
+}
+
+async function syncCharacterFromWorldState(socket, sessionId) {
+  const [character, worldStateRow] = await Promise.all([
+    db.getCharacterForSession(sessionId),
+    db.getWorldState(sessionId),
+  ]);
+  const sheet = character?.character_sheet;
+  const worldState = worldStateRow?.state;
+  if (!character || !sheet || !worldState?.player_stats) return;
+
+  const stats = worldState.player_stats;
+  const derived = sheet.derived_stats || {};
+  const nextDerived = { ...derived };
+  let changed = false;
+
+  for (const [worldKey, sheetKey] of [
+    ['hp', 'hp'],
+    ['max_hp', 'max_hp'],
+    ['temp_hp', 'temp_hp'],
+    ['armor_class', 'armor_class'],
+    ['speed', 'speed'],
+  ]) {
+    if (stats[worldKey] !== undefined && stats[worldKey] !== null && nextDerived[sheetKey] !== stats[worldKey]) {
+      nextDerived[sheetKey] = stats[worldKey];
+      changed = true;
+    }
+  }
+
+  if (Array.isArray(stats.conditions) && JSON.stringify(nextDerived.conditions || []) !== JSON.stringify(stats.conditions)) {
+    nextDerived.conditions = stats.conditions;
+    changed = true;
+  }
+
+  const worldEffects = Array.isArray(worldState.active_effects) ? worldState.active_effects : [];
+  if (worldEffects.length > 0 && JSON.stringify(nextDerived.active_spell_effects || []) !== JSON.stringify(worldEffects)) {
+    nextDerived.active_spell_effects = worldEffects;
+    changed = true;
+  }
+
+  let nextSheet = changed ? { ...sheet, derived_stats: nextDerived } : sheet;
+  if (stats.spell_slots && typeof stats.spell_slots === 'object' && !Array.isArray(stats.spell_slots)) {
+    const currentSlots = sheet.spellcasting?.slots || {};
+    const nextSlots = { ...currentSlots, ...stats.spell_slots };
+    if (JSON.stringify(currentSlots) !== JSON.stringify(nextSlots)) {
+      nextSheet = {
+        ...nextSheet,
+        spellcasting: { ...(nextSheet.spellcasting || {}), slots: nextSlots },
+      };
+      changed = true;
+    }
+  }
+
+  if (!changed) return;
+  const saved = await db.updateCharacterSheet(character.id, nextSheet);
+  socket.emit('character_ready', {
+    characterId: saved.id,
+    character: saved.character_sheet,
+    shouldStartSession: false,
+  });
 }
 
 async function syncCharacterToWorldState(sessionId, characterSheet) {
@@ -629,7 +751,7 @@ io.on('connection', (socket) => {
       }).catch(console.error);
 
       socket.emit('dm1_typing', true);
-      await runPostResponsePipeline(sessionId, openingPrompt, dm1Reply, 0).catch(console.error);
+      await runPostResponsePipeline(sessionId, openingPrompt, dm1Reply, 0, socket).catch(console.error);
       socket.emit('dm1_typing', false);
 
     } catch (err) {
@@ -970,7 +1092,7 @@ io.on('connection', (socket) => {
 
       // Keep the turn lock until world state catches up, after the reply is visible.
       socket.emit('dm1_typing', true);
-      await runPostResponsePipeline(sessionId, message, dm1Reply, newTurn).catch(console.error);
+      await runPostResponsePipeline(sessionId, message, dm1Reply, newTurn, socket).catch(console.error);
       socket.emit('dm1_typing', false);
 
     } catch (err) {
