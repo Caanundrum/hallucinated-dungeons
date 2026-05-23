@@ -29,7 +29,7 @@ test('gates hidden insight behind a deterministic check prompt', () => {
 
 test('passes authenticated zero roll totals through with an official roll frame', () => {
   const result = resolvePreNarration({
-    message: '[ROLL RESULT: 0] I rolled a 0 (Persuasion Check: 1d20 - 1 = 0; CHA only = -1)',
+    message: '[ROLL RESULT: 0] I rolled a 0 (Persuasion Check: natural 1; 1d20 - 1 = 0; CHA only = -1)',
     worldState: {},
   });
 
@@ -37,6 +37,8 @@ test('passes authenticated zero roll totals through with an official roll frame'
   assert.equal(result.skipSpatialGuard, true);
   assert.match(result.narrativeFrame, /authenticated dice-roller result/);
   assert.match(result.narrativeFrame, /0 or negative/);
+  assert.match(result.narrativeFrame, /natural 20\/1 automatically matters for attack rolls/);
+  assert.match(result.narrativeFrame, /ordinary ability checks and saving throws use the total/);
 });
 
 test('passes combat actions through with a mechanics frame', () => {

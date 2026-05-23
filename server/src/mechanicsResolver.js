@@ -7,7 +7,7 @@ function resolvePreNarration({ message, worldState }) {
       intent,
       handled: false,
       skipSpatialGuard: true,
-      narrativeFrame: '[MECHANICS: This is an authenticated dice-roller result because it starts with [ROLL RESULT:]. Accept it as official even if the final total is 0 or negative after modifiers. Resolve the pending check, save, damage roll, or other requested roll from this result.]',
+      narrativeFrame: '[MECHANICS: This is an authenticated dice-roller result because it starts with [ROLL RESULT:]. Accept it as official even if the final total is 0 or negative after modifiers. If the message includes "natural 1" or "natural 20", preserve that natural d20 result. Apply 2024 RAW: natural 20/1 automatically matters for attack rolls, and death saves have their special natural 20/1 rules; ordinary ability checks and saving throws use the total against the DC unless a specific rule says otherwise. Resolve the pending check, save, damage roll, or other requested roll from this result.]',
     };
   }
 

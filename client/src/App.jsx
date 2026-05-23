@@ -43,12 +43,18 @@ function stripRollResultPrefix(text) {
 }
 
 // Roll dice client-side using Math.random()
-function rollDice(diceCount, dieSides) {
-  let total = 0;
+function rollDiceResults(diceCount, dieSides) {
+  const rolls = [];
   for (let i = 0; i < diceCount; i++) {
-    total += Math.floor(Math.random() * dieSides) + 1;
+    rolls.push(Math.floor(Math.random() * dieSides) + 1);
   }
-  return total;
+  return rolls;
+}
+
+function formatNaturalRollDetails(rolls, dieSides) {
+  if (!Array.isArray(rolls) || rolls.length === 0) return '';
+  if (dieSides === 20 && rolls.length === 1) return `natural ${rolls[0]}; `;
+  return `dice ${rolls.join(', ')}; `;
 }
 
 function fmtMod(value) {
@@ -442,12 +448,14 @@ function App() {
   const handleRoll = useCallback(() => {
     if (!pendingRoll) return;
     const { diceCount, dieSides, modifier, label, breakdown } = pendingRoll;
-    const rolled = rollDice(diceCount, dieSides);
+    const rolls = rollDiceResults(diceCount, dieSides);
+    const rolled = rolls.reduce((sum, roll) => sum + roll, 0);
     const total  = rolled + modifier;
     const modStr = modifier > 0 ? ` + ${modifier}` : modifier < 0 ? ` - ${Math.abs(modifier)}` : '';
     const rollLabel = label ? `${label}: ` : '';
     const rollBreakdown = breakdown ? `; ${breakdown}` : '';
-    const rollMsg = `[ROLL RESULT: ${total}] I rolled a ${total} (${rollLabel}${diceCount}d${dieSides}${modStr} = ${total}${rollBreakdown})`;
+    const naturalDetails = formatNaturalRollDetails(rolls, dieSides);
+    const rollMsg = `[ROLL RESULT: ${total}] I rolled a ${total} (${rollLabel}${naturalDetails}${diceCount}d${dieSides}${modStr} = ${total}${rollBreakdown})`;
     const displayRollMsg = stripRollResultPrefix(rollMsg);
     setNarrative((prev) => [...prev, { type: 'player', text: displayRollMsg, id: Date.now() }]);
     socket.emit('story_input', { message: rollMsg });
@@ -458,11 +466,13 @@ function App() {
   const handleFallbackRoll = useCallback(() => {
     if (!fallbackRoll) return;
     const modifier = parseInt(fallbackModInput, 10) || 0;
-    const rolled = rollDice(1, fallbackRoll.dieSides);
+    const rolls = rollDiceResults(1, fallbackRoll.dieSides);
+    const rolled = rolls[0];
     const total  = rolled + modifier;
     const { dieSides } = fallbackRoll;
     const modStr = modifier > 0 ? ` + ${modifier}` : modifier < 0 ? ` - ${Math.abs(modifier)}` : '';
-    const rollMsg = `[ROLL RESULT: ${total}] I rolled a ${total} (1d${dieSides}${modStr} = ${total})`;
+    const naturalDetails = formatNaturalRollDetails(rolls, dieSides);
+    const rollMsg = `[ROLL RESULT: ${total}] I rolled a ${total} (${naturalDetails}1d${dieSides}${modStr} = ${total})`;
     const displayRollMsg = stripRollResultPrefix(rollMsg);
     setNarrative((prev) => [...prev, { type: 'player', text: displayRollMsg, id: Date.now() }]);
     socket.emit('story_input', { message: rollMsg });
