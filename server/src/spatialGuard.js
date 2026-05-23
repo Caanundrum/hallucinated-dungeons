@@ -1,7 +1,7 @@
 const ABSENT_TARGETS = [
   {
     id: 'innkeeper',
-    patterns: [/\binnkeeper\b/i, /\bkeeper\b/i],
+    patterns: [/\binnkeeper\b/i],
     requiredLocation: /\b(inn|tavern|alehouse|taproom|common room|leaning lantern)\b/i,
     destination: 'the inn',
   },

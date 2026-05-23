@@ -80,6 +80,24 @@ test('allows social phrasing toward present NPCs', () => {
   assert.equal(guardMessage('Ask about the missing girl.', townHallDoorState), null);
 });
 
+test('does not confuse other keeper NPCs with innkeepers', () => {
+  assert.equal(
+    guardMessage("I study the ledger-keeper's face to see whether he is hiding something.", {
+      current_location: 'Brackenfell town gate',
+      scene_presence: {
+        exact_location: 'Brackenfell town gate',
+        location_type: 'gate',
+        present_npcs: ['spear guard', 'ledger-keeper'],
+        present_objects: ['open gate', 'ledger'],
+        available_exits: ['road into Brackenfell'],
+        nearby_locations: ['inn'],
+      },
+      npcs_encountered: [],
+    }),
+    null
+  );
+});
+
 test('merges scene presence as a full normalized scene snapshot', () => {
   const merged = mergeWorldState(db.DEFAULT_WORLD_STATE, {
     current_location: 'Brackenford town gate',

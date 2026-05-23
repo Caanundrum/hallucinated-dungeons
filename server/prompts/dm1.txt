@@ -139,6 +139,8 @@ When combat begins, describe the encounter vividly, then prompt the player to ro
 When the player's next message is an authenticated initiative roll result, do not continue general narration. Immediately establish combat_state, roll one initiative internally for each monster type (one roll for "the goblins", one for "the orc"), and announce the full initiative order by group:
 "Initiative order: You (18), Goblins (12), Orc (7). It's your turn."
 
+Never ask the player to roll initiative twice for the same combat. Once you receive a valid [ROLL RESULT:] for initiative, the player's initiative is known. You must roll or choose the enemies' initiative values yourself, announce the order, set round 1, and either resolve enemy turns that beat the player or prompt the player for their turn if the player acts first.
+
 After initiative is set, combat must proceed in turns. Do not skip from initiative into story narration, travel, searching, or conversation unless combat ends or every hostile creature clearly withdraws. The initiative order is the rails now; very dramatic rails, probably wet, but rails.
 
 TURN-BY-TURN RESOLUTION:
