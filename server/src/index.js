@@ -20,6 +20,7 @@ const { getContentBundle } = require('./contentData');
 const { validateCharacter } = require('./characterValidator');
 const { checkSpatialAction } = require('./spatialGuard');
 const { resolvePreNarration } = require('./mechanicsResolver');
+const { resolveRefereeAction } = require('./refereeCore');
 
 // ── Setup ──────────────────────────────────────────────────────────────────
 const app    = express();
@@ -1081,6 +1082,40 @@ io.on('connection', (socket) => {
       // Get pre-increment session_turn — both messages for this exchange share it
       const worldStateRow = await db.getWorldState(sessionId);
       const currentTurn   = worldStateRow?.state?.session_turn ?? 0;
+      const activeCharacter = await db.getCharacterForSession(sessionId).catch(() => null);
+
+      const referee = resolveRefereeAction({
+        message,
+        worldState: worldStateRow?.state || db.DEFAULT_WORLD_STATE,
+        characterSheet: activeCharacter?.character_sheet || null,
+        currentTurn,
+      });
+      if (referee?.handled) {
+        await db.updateWorldState(sessionId, referee.worldState);
+        await db.saveMessage(sessionId, 'player_dm1', message, currentTurn);
+        await db.saveMessage(sessionId, 'dm1', referee.reply, currentTurn);
+        const newTurn = await db.incrementSessionTurn(sessionId);
+        socket.emit('dm1_response', { message: referee.reply });
+        await db.logDmCall({
+          sessionId,
+          dm:           referee.logType || 'referee_core',
+          model:        'deterministic',
+          playerInput:  message,
+          fullPrompt:   JSON.stringify({
+            pending_roll: referee.worldState?.pending_roll || null,
+            combat_state: referee.worldState?.combat_state || null,
+            turn: currentTurn,
+          }),
+          dmResponse:   referee.reply,
+          inputTokens:  null,
+          outputTokens: null,
+        }).catch(console.error);
+        await syncCharacterFromWorldState(socket, sessionId).catch(console.error);
+        if (newTurn > 0 && newTurn % 50 === 0) {
+          await chapterSummarizer.summarize(sessionId, newTurn).catch(console.error);
+        }
+        return;
+      }
 
       if (await handleDeterministicSpellAction(socket, sessionId, message)) {
         return;

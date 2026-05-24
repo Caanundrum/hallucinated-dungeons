@@ -260,6 +260,7 @@ const DEFAULT_WORLD_STATE = {
     weapon_name:    '',          // BUG-023: primary weapon for DM2 context
     ability_scores: {},          // BUG-023: ability modifiers e.g. { str: 3, dex: 1, ... }
   },
+  pending_roll: null,
   combat_state: null,
 };
 
