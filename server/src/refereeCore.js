@@ -1,6 +1,10 @@
 const crypto = require('crypto');
 const { resolveIntent } = require('./intentResolver');
 const { tickActiveEffects } = require('./spellEffectEngine');
+const {
+  beginPlayerTurn,
+  spendTurnResource,
+} = require('./actionEconomy');
 
 const DEFAULT_CHECK_DC = 15;
 
@@ -59,6 +63,20 @@ function parseRollResult(message) {
 
 function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCombat }) {
   const check = intent.check;
+  let nextWorldState = worldState;
+  if (inCombat) {
+    const spent = spendTurnResource(worldState, 'action', `${check.label} check`, characterSheet);
+    if (!spent.ok) {
+      return {
+        handled: true,
+        logType: 'referee_action_unavailable',
+        worldState: spent.worldState,
+        reply: spent.reply,
+      };
+    }
+    nextWorldState = spent.worldState;
+  }
+
   const modifier = getCheckModifier(characterSheet, check);
   const dc = chooseDc(intent.raw, check, worldState, inCombat);
   const pendingRoll = {
@@ -84,10 +102,10 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
     handled: true,
     logType: 'referee_pending_roll',
     worldState: {
-      ...worldState,
+      ...nextWorldState,
       pending_roll: pendingRoll,
     },
-    reply: `Make a DC ${dc} ${check.label} check. [CHECK: skill=${check.skill} ability=${check.ability}]`,
+    reply: `Make a DC ${dc} ${check.label} check.${inCombat ? ' This uses your Action.' : ''} [CHECK: skill=${check.skill} ability=${check.ability}]`,
   };
 }
 
@@ -199,7 +217,7 @@ function resolveInitiative({ pending, result, worldState, characterSheet, rollDi
     combatants,
   };
 
-  const nextState = {
+  let nextState = {
     ...worldState,
     pending_roll: null,
     combat_state: combatState,
@@ -210,6 +228,9 @@ function resolveInitiative({ pending, result, worldState, characterSheet, rollDi
       armor_class: player.ac,
     },
   };
+  if (playerIndex === 0) {
+    nextState = beginPlayerTurn(nextState, characterSheet);
+  }
 
   const order = combatants.map((combatant) => `${combatant.name} (${combatant.initiative})`).join(', ');
   if (playerIndex === 0) {
@@ -245,8 +266,12 @@ function resolveCombatAction({ message, intent, worldState, characterSheet, curr
   }
 
   if (/\b(?:dodge|defend|guard myself|guarded stance)\b/i.test(message)) {
+    const spent = spendTurnResource(worldState, 'action', 'Dodge', characterSheet);
+    if (!spent.ok) {
+      return { handled: true, logType: 'referee_action_unavailable', worldState: spent.worldState, reply: spent.reply };
+    }
     const result = advanceEnemyTurns({
-      worldState,
+      worldState: spent.worldState,
       characterSheet,
       rollDie,
       playerTurnNote: 'You take the **Dodge** action, making yourself much harder to hit until your next turn.',
@@ -256,8 +281,12 @@ function resolveCombatAction({ message, intent, worldState, characterSheet, curr
   }
 
   if (/\b(?:disengage|carefully withdraw|withdraw safely)\b/i.test(message)) {
+    const spent = spendTurnResource(worldState, 'action', 'Disengage', characterSheet);
+    if (!spent.ok) {
+      return { handled: true, logType: 'referee_action_unavailable', worldState: spent.worldState, reply: spent.reply };
+    }
     const result = advanceEnemyTurns({
-      worldState,
+      worldState: spent.worldState,
       characterSheet,
       rollDie,
       playerTurnNote: 'You take the **Disengage** action and move without giving nearby enemies a free swing.',
@@ -292,7 +321,17 @@ function shouldPromptCombatCheck(intent) {
 }
 
 function resolvePlayerAttack({ worldState, characterSheet, rollDie }) {
-  const combat = cloneCombatState(worldState.combat_state);
+  const spent = spendTurnResource(worldState, 'action', 'Attack', characterSheet);
+  if (!spent.ok) {
+    return {
+      handled: true,
+      logType: 'referee_action_unavailable',
+      worldState: spent.worldState,
+      reply: spent.reply,
+    };
+  }
+
+  const combat = cloneCombatState(spent.worldState.combat_state);
   const player = combat.combatants.find((combatant) => combatant.is_player);
   const target = combat.combatants.find((combatant) => !combatant.is_player && Number(combatant.hp) > 0);
   if (!player || !target) {
@@ -322,7 +361,7 @@ function resolvePlayerAttack({ worldState, characterSheet, rollDie }) {
 
   if (Number(target.hp) <= 0) {
     const nextState = {
-      ...worldState,
+      ...spent.worldState,
       combat_state: null,
       pending_roll: null,
     };
@@ -335,7 +374,7 @@ function resolvePlayerAttack({ worldState, characterSheet, rollDie }) {
   }
 
   const nextState = {
-    ...worldState,
+    ...spent.worldState,
     combat_state: combat,
   };
   const enemyResult = advanceEnemyTurns({
@@ -405,6 +444,7 @@ function advanceEnemyTurns({ worldState, characterSheet, rollDie = defaultRollDi
       scene_time: `round ${combat.round}`,
     },
   };
+  nextState = beginPlayerTurn(nextState, characterSheet);
   const ticked = tickActiveEffects(nextState, { rounds: advanceRound ? 1 : 0 });
   nextState = ticked.worldState;
 

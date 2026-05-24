@@ -1,3 +1,5 @@
+const { getSpellActionResource } = require('./actionEconomy');
+
 const CONCENTRATION_DURATIONS = {
   bless: 'Concentration, up to 1 minute',
   dancing_lights: 'Concentration, up to 1 minute',
@@ -103,7 +105,7 @@ function resolveSpellOutcome({ spellCast, characterSheet, worldState = {}, rollD
   const combatActive = Boolean(worldState.combat_state?.active);
 
   if (!combatActive && rule?.type !== 'healing') return null;
-  if (!rule && combatActive && spellHasDuration(spell)) {
+  if (!rule && combatActive) {
     return resolveCombatUtilitySpell({ spell, worldState });
   }
   if (!rule) return null;
@@ -543,8 +545,7 @@ function getSpellcastingModifier(characterSheet = {}) {
 }
 
 function consumesCombatTurn(spell = {}) {
-  const castingTime = String(spell.casting_time || '').toLowerCase();
-  return castingTime === 'action' || /^\d+\s*minute/.test(castingTime);
+  return getSpellActionResource(spell) === 'action';
 }
 
 function rollFormula(formula, rollDie, { crit = false, spellMod = 0 } = {}) {

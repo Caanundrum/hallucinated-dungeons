@@ -124,6 +124,28 @@ test('keeps round 1 when enemies beat player initiative and act first', () => {
   assert.equal(result.worldState.combat_state.round, 1);
   assert.match(result.reply, /Bandit moves first/);
   assert.match(result.reply, /Round 1 begins\. It is your turn/);
+  assert.equal(result.worldState.combat_state.turn_resources.action_available, true);
+});
+
+test('initializes action economy when the player wins initiative', () => {
+  const result = adjudicate({
+    message: '[ROLL RESULT: 20] I rolled a 20 (Initiative: natural 19; 1d20+1=20)',
+    worldState: worldState({
+      pending_roll: {
+        kind: 'initiative',
+        modifier: 1,
+        enemy: { name: 'Bandit', initiative_bonus: 1 },
+      },
+    }),
+    characterSheet,
+    rollDie: sequenceRolls([2]),
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.combat_state.round, 1);
+  assert.equal(result.worldState.combat_state.turn_resources.action_available, true);
+  assert.equal(result.worldState.combat_state.turn_resources.bonus_action_available, true);
+  assert.equal(result.worldState.combat_state.turn_resources.reaction_available, true);
 });
 
 test('natural 1 on an attack is an automatic miss even with a high bonus', () => {
@@ -178,4 +200,58 @@ test('blocks free exploration movement while combat is active', () => {
   assert.equal(result.handled, true);
   assert.match(result.reply, /Combat is still active/);
   assert.match(result.reply, /cannot slip into free exploration/);
+});
+
+test('combat skill checks spend the player action until the roll resolves', () => {
+  const result = adjudicate({
+    message: "I study the goblin's face.",
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', hp: 12, max_hp: 12, ac: 16, is_player: true },
+          { name: 'Goblin', hp: 8, max_hp: 8, ac: 12, is_player: false },
+        ],
+      },
+    }),
+    characterSheet,
+    currentTurn: 10,
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.pending_roll.kind, 'skill_check');
+  assert.equal(result.worldState.combat_state.turn_resources.action_available, false);
+  assert.match(result.reply, /uses your Action/);
+});
+
+test('blocks a second action in the same combat turn', () => {
+  const result = adjudicate({
+    message: 'I attack the goblin.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        turn_resources: {
+          actor: 'player',
+          action_available: false,
+          bonus_action_available: true,
+          reaction_available: true,
+          movement_remaining: 30,
+          used: [{ resource: 'action', label: 'Hide' }],
+        },
+        combatants: [
+          { name: 'Sir Testalot', hp: 12, max_hp: 12, ac: 16, is_player: true },
+          { name: 'Goblin', hp: 8, max_hp: 8, ac: 12, is_player: false },
+        ],
+      },
+    }),
+    characterSheet,
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.combat_state.round, 1);
+  assert.match(result.reply, /Action is already spent/);
 });

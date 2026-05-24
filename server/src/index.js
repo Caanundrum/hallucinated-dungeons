@@ -24,8 +24,13 @@ const { resolveRefereeAction, advanceEnemyTurns } = require('./refereeCore');
 const {
   resolveSpellCast,
   resolveSpellOutcome,
+  getCastSpellFromMessage,
   applyActiveEffectsToCharacterSheet,
 } = require('./spellEffectEngine');
+const {
+  spendTurnResource,
+  getSpellActionResource,
+} = require('./actionEconomy');
 
 // ── Setup ──────────────────────────────────────────────────────────────────
 const app    = express();
@@ -308,11 +313,27 @@ async function handleDeterministicSpellAction(socket, sessionId, message) {
 
   const worldStateRow = await db.getWorldState(sessionId);
   const currentWorldState = worldStateRow?.state || db.DEFAULT_WORLD_STATE;
+  const spellForEconomy = getCastSpellFromMessage(message, content);
+  let actionWorldState = currentWorldState;
+  if (spellForEconomy && currentWorldState.combat_state?.active) {
+    const actionResource = getSpellActionResource(spellForEconomy);
+    const spent = spendTurnResource(currentWorldState, actionResource, spellForEconomy.name, sheet);
+    if (!spent.ok) {
+      const currentTurn = currentWorldState.session_turn ?? 0;
+      await db.saveMessage(sessionId, 'player_dm1', message, currentTurn);
+      await db.saveMessage(sessionId, 'dm1', spent.reply, currentTurn);
+      await db.incrementSessionTurn(sessionId);
+      socket.emit('dm1_response', { message: spent.reply });
+      return { matched: true, handled: true };
+    }
+    actionWorldState = spent.worldState;
+  }
+
   const result = resolveSpellCast({
     message,
     content,
     characterSheet: sheet,
-    worldState: currentWorldState,
+    worldState: actionWorldState,
   });
   if (!result?.matched) return { matched: false };
 
