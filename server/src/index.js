@@ -20,9 +20,10 @@ const { getContentBundle } = require('./contentData');
 const { validateCharacter } = require('./characterValidator');
 const { checkSpatialAction } = require('./spatialGuard');
 const { resolvePreNarration } = require('./mechanicsResolver');
-const { resolveRefereeAction } = require('./refereeCore');
+const { resolveRefereeAction, advanceEnemyTurns } = require('./refereeCore');
 const {
   resolveSpellCast,
+  resolveSpellOutcome,
   applyActiveEffectsToCharacterSheet,
 } = require('./spellEffectEngine');
 
@@ -325,6 +326,44 @@ async function handleDeterministicSpellAction(socket, sessionId, message) {
   }
 
   const saved = await db.updateCharacterSheet(character.id, result.characterSheet);
+  const spellOutcome = resolveSpellOutcome({
+    spellCast: result,
+    characterSheet: saved.character_sheet,
+    worldState: result.worldState,
+  });
+  if (spellOutcome?.handled) {
+    let finalWorldState = spellOutcome.worldState;
+    let reply = spellOutcome.reply;
+    if (spellOutcome.consumesTurn && finalWorldState.combat_state?.active) {
+      const enemyTurns = advanceEnemyTurns({
+        worldState: finalWorldState,
+        characterSheet: saved.character_sheet,
+        playerTurnNote: reply,
+      });
+      finalWorldState = enemyTurns.worldState;
+      reply = enemyTurns.reply;
+    }
+
+    const currentTurn = currentWorldState.session_turn ?? 0;
+    await db.updateWorldState(sessionId, finalWorldState);
+    await db.saveMessage(sessionId, 'player_dm1', message, currentTurn);
+    await db.saveMessage(sessionId, 'dm1', reply, currentTurn);
+    await db.incrementSessionTurn(sessionId);
+    socket.emit('dm1_response', { message: reply });
+    await db.logDmCall({
+      sessionId,
+      dm:           spellOutcome.logType || 'spell_referee',
+      model:        'deterministic',
+      playerInput:  message,
+      fullPrompt:   JSON.stringify({ spell: result.spell, worldState: finalWorldState }),
+      dmResponse:   reply,
+      inputTokens:  null,
+      outputTokens: null,
+    }).catch(console.error);
+    await syncCharacterFromWorldState(socket, sessionId).catch(console.error);
+    return { matched: true, handled: true };
+  }
+
   await db.updateWorldState(sessionId, result.worldState);
   socket.emit('character_ready', {
     characterId: saved.id,

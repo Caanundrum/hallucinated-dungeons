@@ -11,6 +11,22 @@ const CONCENTRATION_DURATIONS = {
   shield_of_faith: 'Concentration, up to 10 minutes',
 };
 
+const SPELL_OUTCOMES = {
+  chill_touch: { type: 'spell_attack', damage: '1d10', damage_type: 'necrotic' },
+  fire_bolt: { type: 'spell_attack', damage: '1d10', damage_type: 'fire' },
+  guiding_bolt: { type: 'spell_attack', damage: '4d6', damage_type: 'radiant', rider: 'The next attack against the target has advantage before the end of your next turn.' },
+  produce_flame: { type: 'spell_attack', damage: '1d8', damage_type: 'fire' },
+  magic_missile: { type: 'automatic_damage', darts: 3, damage: '1d4+1', damage_type: 'force' },
+  cure_wounds: { type: 'healing', healing: '2d8+spell_mod' },
+  healing_word: { type: 'healing', healing: '2d4+spell_mod' },
+  poison_spray: { type: 'saving_throw', save: 'con', damage: '1d12', damage_type: 'poison', half_on_success: false },
+  sacred_flame: { type: 'saving_throw', save: 'dex', damage: '1d8', damage_type: 'radiant', half_on_success: false },
+  thunderwave: { type: 'saving_throw', save: 'con', damage: '2d8', damage_type: 'thunder', half_on_success: true },
+  command: { type: 'save_effect', save: 'wis', effect: 'The target obeys a one-word command on its next turn if the command is valid and not directly harmful.' },
+  charm_person: { type: 'save_effect', save: 'wis', effect: 'The humanoid is charmed by you if it fails the save.' },
+  faerie_fire: { type: 'save_effect', save: 'dex', effect: 'Failed targets are outlined, cannot benefit from invisibility, and attacks against them have advantage.' },
+};
+
 function resolveSpellCast({ message, content, characterSheet, worldState = {} }) {
   const spell = getCastSpellFromMessage(message, content);
   if (!spell) return null;
@@ -21,6 +37,15 @@ function resolveSpellCast({ message, content, characterSheet, worldState = {} })
       matched: true,
       blocked: true,
       reply: `You reach for ${spell.name}, but it is not on your current character sheet. At level ${characterSheet?.identity?.level || 1}, you can work with: ${summarizeKnownSpells(characterSheet, content)}. The magic shelves are not self-service.`,
+    };
+  }
+
+  const timingBlock = validateSpellTiming({ spell, message, worldState });
+  if (timingBlock) {
+    return {
+      matched: true,
+      blocked: true,
+      reply: timingBlock,
     };
   }
 
@@ -67,6 +92,218 @@ function resolveSpellCast({ message, content, characterSheet, worldState = {} })
     characterSheet: nextSheet,
     worldState: nextWorldState,
     resourceNote: resource.note,
+  };
+}
+
+function resolveSpellOutcome({ spellCast, characterSheet, worldState = {}, rollDie = defaultRollDie } = {}) {
+  const spell = spellCast?.spell;
+  if (!spell) return null;
+
+  const rule = SPELL_OUTCOMES[spell.id];
+  const combatActive = Boolean(worldState.combat_state?.active);
+
+  if (!combatActive && rule?.type !== 'healing') return null;
+  if (!rule && combatActive && spellHasDuration(spell)) {
+    return resolveCombatUtilitySpell({ spell, worldState });
+  }
+  if (!rule) return null;
+
+  if (rule.type === 'spell_attack') {
+    return resolveSpellAttack({ spell, rule, characterSheet, worldState, rollDie });
+  }
+  if (rule.type === 'automatic_damage') {
+    return resolveAutomaticDamageSpell({ spell, rule, worldState, rollDie });
+  }
+  if (rule.type === 'saving_throw') {
+    return resolveSavingThrowSpell({ spell, rule, characterSheet, worldState, rollDie });
+  }
+  if (rule.type === 'save_effect') {
+    return resolveSaveEffectSpell({ spell, rule, characterSheet, worldState, rollDie });
+  }
+  if (rule.type === 'healing') {
+    return resolveHealingSpell({ spell, rule, characterSheet, worldState, rollDie });
+  }
+
+  return null;
+}
+
+function validateSpellTiming({ spell, message, worldState = {} }) {
+  if (worldState.combat_state?.active && /^\s*\d+\s*minute/i.test(spell.casting_time || '')) {
+    return `${spell.name} takes ${spell.casting_time} to cast. That is not a single combat action; you would need to spend the required rounds maintaining the casting. The initiative tracker has opinions about paperwork.`;
+  }
+
+  if (/reaction/i.test(spell.casting_time || '') && !/\b(reaction|trigger|when|being hit|gets hit|am hit|attacked|attack hits|hits me)\b/i.test(message || '')) {
+    return `${spell.name} is a Reaction spell. You can cast it when its trigger happens, not as a casual pre-emptive vibe check.`;
+  }
+
+  return null;
+}
+
+function resolveSpellAttack({ spell, rule, characterSheet, worldState, rollDie }) {
+  const combat = cloneCombatState(worldState.combat_state);
+  const target = firstEnemy(combat);
+  if (!target) return noSpellTarget(worldState, spell);
+
+  const attackBonus = Number(characterSheet?.derived_stats?.spell_attack_bonus || 0);
+  const natural = rollDie(20);
+  const total = natural + attackBonus;
+  const criticalHit = natural === 20;
+  const criticalMiss = natural === 1;
+  const hit = !criticalMiss && (criticalHit || total >= Number(target.ac || 10));
+  const lines = [
+    `You cast **${spell.name}** at ${target.name}. Spell attack: ${natural}${formatSigned(attackBonus)} = ${total} vs AC ${target.ac}.`,
+  ];
+
+  if (hit) {
+    const damage = rollFormula(rule.damage, rollDie, { crit: criticalHit });
+    const before = Number(target.hp || 0);
+    target.hp = Math.max(0, before - damage.total);
+    lines.push(`${criticalHit ? '**Critical hit.** ' : ''}Hit for ${damage.total} ${rule.damage_type} damage. ${target.name}: (${before} -> ${target.hp} HP).`);
+    if (rule.rider) lines.push(rule.rider);
+  } else if (criticalMiss) {
+    lines.push('**Critical miss.** The spell goes wide, and magic pretends it meant to do that.');
+  } else {
+    lines.push('Miss.');
+  }
+
+  return finishSpellCombatAction({ spell, worldState, combat, lines });
+}
+
+function resolveAutomaticDamageSpell({ spell, rule, worldState, rollDie }) {
+  const combat = cloneCombatState(worldState.combat_state);
+  const target = firstEnemy(combat);
+  if (!target) return noSpellTarget(worldState, spell);
+
+  const rolls = Array.from({ length: Number(rule.darts || 1) }, () => rollFormula(rule.damage, rollDie));
+  const total = rolls.reduce((sum, roll) => sum + roll.total, 0);
+  const before = Number(target.hp || 0);
+  target.hp = Math.max(0, before - total);
+  const lines = [
+    `You cast **${spell.name}** at ${target.name}. The spell hits automatically for ${total} ${rule.damage_type} damage. ${target.name}: (${before} -> ${target.hp} HP).`,
+  ];
+
+  return finishSpellCombatAction({ spell, worldState, combat, lines });
+}
+
+function resolveSavingThrowSpell({ spell, rule, characterSheet, worldState, rollDie }) {
+  const combat = cloneCombatState(worldState.combat_state);
+  const target = firstEnemy(combat);
+  if (!target) return noSpellTarget(worldState, spell);
+
+  const dc = Number(characterSheet?.derived_stats?.spell_save_dc || 10);
+  const saveBonus = getTargetSaveBonus(target, rule.save);
+  const natural = rollDie(20);
+  const total = natural + saveBonus;
+  const success = total >= dc;
+  const damage = rollFormula(rule.damage, rollDie);
+  const appliedDamage = success && rule.half_on_success ? Math.floor(damage.total / 2) : success ? 0 : damage.total;
+  const before = Number(target.hp || 0);
+  target.hp = Math.max(0, before - appliedDamage);
+
+  const lines = [
+    `You cast **${spell.name}** at ${target.name}. ${target.name} rolls a ${rule.save.toUpperCase()} save: ${natural}${formatSigned(saveBonus)} = ${total} vs DC ${dc}.`,
+    success
+      ? `Save succeeds.${appliedDamage ? ` ${target.name} still takes ${appliedDamage} ${rule.damage_type} damage. ${target.name}: (${before} -> ${target.hp} HP).` : ' No damage is applied.'}`
+      : `Save fails. ${target.name} takes ${appliedDamage} ${rule.damage_type} damage. ${target.name}: (${before} -> ${target.hp} HP).`,
+  ];
+
+  return finishSpellCombatAction({ spell, worldState, combat, lines });
+}
+
+function resolveSaveEffectSpell({ spell, rule, characterSheet, worldState, rollDie }) {
+  const combat = cloneCombatState(worldState.combat_state);
+  const target = firstEnemy(combat);
+  if (!target) return noSpellTarget(worldState, spell);
+
+  const dc = Number(characterSheet?.derived_stats?.spell_save_dc || 10);
+  const saveBonus = getTargetSaveBonus(target, rule.save);
+  const natural = rollDie(20);
+  const total = natural + saveBonus;
+  const success = total >= dc;
+  const lines = [
+    `You cast **${spell.name}** at ${target.name}. ${target.name} rolls a ${rule.save.toUpperCase()} save: ${natural}${formatSigned(saveBonus)} = ${total} vs DC ${dc}.`,
+    success ? 'Save succeeds. The spell does not take hold.' : `Save fails. ${rule.effect}`,
+  ];
+  if (!success) {
+    target.conditions = [...new Set([...(target.conditions || []), spell.id])];
+  }
+
+  return finishSpellCombatAction({ spell, worldState, combat, lines });
+}
+
+function resolveHealingSpell({ spell, rule, characterSheet, worldState, rollDie }) {
+  const combat = cloneCombatState(worldState.combat_state);
+  const player = combat.combatants.find((combatant) => combatant.is_player) || null;
+  const spellMod = getSpellcastingModifier(characterSheet);
+  const healing = rollFormula(rule.healing, rollDie, { spellMod });
+  const stats = worldState.player_stats || {};
+  const before = Number(player?.hp ?? stats.hp ?? characterSheet?.derived_stats?.hp ?? 0);
+  const maxHp = Number(player?.max_hp ?? stats.max_hp ?? characterSheet?.derived_stats?.max_hp ?? before);
+  const after = Math.min(maxHp, before + healing.total);
+  if (player) player.hp = after;
+
+  const nextState = {
+    ...worldState,
+    combat_state: combat.active ? combat : worldState.combat_state,
+    player_stats: {
+      ...stats,
+      hp: after,
+      max_hp: maxHp,
+    },
+  };
+  const lines = [
+    `You cast **${spell.name}** and restore ${healing.total} HP. HP: (${before} -> ${after}).`,
+  ];
+
+  return {
+    handled: true,
+    logType: 'spell_healing',
+    spell,
+    worldState: nextState,
+    reply: lines.join('\n\n'),
+    consumesTurn: consumesCombatTurn(spell),
+  };
+}
+
+function resolveCombatUtilitySpell({ spell, worldState }) {
+  return {
+    handled: true,
+    logType: 'spell_utility',
+    spell,
+    worldState,
+    reply: `You cast **${spell.name}**. Its effect is now active in the scene: ${spell.description}`,
+    consumesTurn: consumesCombatTurn(spell),
+  };
+}
+
+function finishSpellCombatAction({ spell, worldState, combat, lines }) {
+  const enemiesAlive = combat.combatants.some((combatant) => !combatant.is_player && Number(combatant.hp) > 0);
+  const nextState = {
+    ...worldState,
+    combat_state: enemiesAlive ? combat : null,
+  };
+  const reply = enemiesAlive
+    ? lines.join('\n\n')
+    : `${lines.join('\n\n')}\n\nAll active enemies are down. **Combat ends.**`;
+
+  return {
+    handled: true,
+    logType: 'spell_combat',
+    spell,
+    worldState: nextState,
+    reply,
+    consumesTurn: enemiesAlive && consumesCombatTurn(spell),
+  };
+}
+
+function noSpellTarget(worldState, spell) {
+  return {
+    handled: true,
+    logType: 'spell_no_target',
+    spell,
+    worldState,
+    reply: `${spell.name} needs a valid target, but there is no active enemy in the combat tracker. The spell fizzles at the edge of bookkeeping instead of rewriting reality.`,
+    consumesTurn: false,
   };
 }
 
@@ -283,6 +520,61 @@ function tickActiveEffects(worldState = {}, { rounds = 0, minutes = 0 } = {}) {
   };
 }
 
+function cloneCombatState(combatState) {
+  return JSON.parse(JSON.stringify(combatState || { active: false, round: 1, turn_index: 0, combatants: [] }));
+}
+
+function firstEnemy(combat) {
+  return (combat.combatants || []).find((combatant) => !combatant.is_player && Number(combatant.hp) > 0) || null;
+}
+
+function getTargetSaveBonus(target = {}, ability) {
+  return Number(
+    target.saves?.[ability]
+      ?? target.save_modifiers?.[ability]
+      ?? target.ability_modifiers?.[ability]
+      ?? 1,
+  );
+}
+
+function getSpellcastingModifier(characterSheet = {}) {
+  const ability = characterSheet.spellcasting?.ability;
+  return Number(characterSheet.abilities?.modifiers?.[ability] || 0);
+}
+
+function consumesCombatTurn(spell = {}) {
+  const castingTime = String(spell.casting_time || '').toLowerCase();
+  return castingTime === 'action' || /^\d+\s*minute/.test(castingTime);
+}
+
+function rollFormula(formula, rollDie, { crit = false, spellMod = 0 } = {}) {
+  const normalized = String(formula || '1').replace(/spell_mod/g, String(spellMod));
+  const match = normalized.match(/(\d+)d(\d+)((?:[+-]\d+)*)/i);
+  if (!match) return { total: Number(normalized) || 0, rolls: [] };
+
+  const diceCount = Number(match[1]);
+  const dieSides = Number(match[2]);
+  const modifierText = match[3] || '';
+  const modifier = (modifierText.match(/[+-]\d+/g) || [])
+    .reduce((sum, value) => sum + Number(value), 0);
+  const rollCount = crit ? diceCount * 2 : diceCount;
+  const rolls = Array.from({ length: rollCount }, () => rollDie(dieSides));
+  return {
+    total: rolls.reduce((sum, roll) => sum + roll, 0) + modifier,
+    rolls,
+    modifier,
+  };
+}
+
+function defaultRollDie(sides) {
+  return Math.floor(Math.random() * Number(sides)) + 1;
+}
+
+function formatSigned(value) {
+  const number = Number(value || 0);
+  return number >= 0 ? `+${number}` : String(number);
+}
+
 function applyActiveEffectsToCharacterSheet(characterSheet = {}, effects = []) {
   const normalizedEffects = normalizeEffects(effects);
   const derived = characterSheet.derived_stats || {};
@@ -371,6 +663,7 @@ function isSpellArmorBreakdown(part = {}) {
 
 module.exports = {
   resolveSpellCast,
+  resolveSpellOutcome,
   getCastSpellFromMessage,
   getKnownSpellIds,
   summarizeKnownSpells,

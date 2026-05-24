@@ -353,7 +353,7 @@ function resolvePlayerAttack({ worldState, characterSheet, rollDie }) {
   };
 }
 
-function advanceEnemyTurns({ worldState, characterSheet, rollDie, playerTurnNote, playerDodging, advanceRound = true }) {
+function advanceEnemyTurns({ worldState, characterSheet, rollDie = defaultRollDie, playerTurnNote, playerDodging = false, advanceRound = true }) {
   const combat = cloneCombatState(worldState.combat_state);
   const player = combat.combatants.find((combatant) => combatant.is_player) || buildPlayerCombatant(characterSheet, worldState);
   const enemies = combat.combatants.filter((combatant) => !combatant.is_player && Number(combatant.hp) > 0);
@@ -602,6 +602,7 @@ function formatSigned(value) {
 module.exports = {
   adjudicate,
   resolveRefereeAction: adjudicate,
+  advanceEnemyTurns,
   parseRollResult,
   promptCheck,
   chooseDc,
