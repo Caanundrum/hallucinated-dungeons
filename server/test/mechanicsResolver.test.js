@@ -41,6 +41,20 @@ test('passes authenticated zero roll totals through with an official roll frame'
   assert.match(result.narrativeFrame, /ordinary ability checks and saving throws use the total/);
 });
 
+test('keeps combat frame attached to authenticated roll results during combat', () => {
+  const result = resolvePreNarration({
+    message: '[ROLL RESULT: 14] I rolled a 14 (Insight Check: 1d20 + 2 = 14)',
+    worldState: { combat_state: { active: true, round: 1 } },
+  });
+
+  assert.equal(result.handled, false);
+  assert.equal(result.skipSpatialGuard, true);
+  assert.match(result.narrativeFrame, /authenticated dice-roller result/);
+  assert.match(result.narrativeFrame, /Combat is active/);
+  assert.match(result.narrativeFrame, /continue initiative instead of switching to free exploration/);
+  assert.match(result.narrativeFrame, /end only at the start of the next player character turn/);
+});
+
 test('passes combat actions through with a mechanics frame', () => {
   const result = resolvePreNarration({
     message: 'I take the Dodge action.',
@@ -53,4 +67,18 @@ test('passes combat actions through with a mechanics frame', () => {
   assert.match(result.narrativeFrame, /Combat is active/);
   assert.match(result.narrativeFrame, /end only at the start of the next player character turn/);
   assert.match(result.narrativeFrame, /Do not end with an NPC or monster "up next"/);
+});
+
+test('frames movement during active combat as turn-bound instead of free exploration', () => {
+  const result = resolvePreNarration({
+    message: 'I follow the fresh drag marks into town.',
+    worldState: { combat_state: { active: true, round: 1 } },
+  });
+
+  assert.equal(result.handled, false);
+  assert.equal(result.skipSpatialGuard, false);
+  assert.match(result.narrativeFrame, /Combat is active/);
+  assert.match(result.narrativeFrame, /Do not allow ordinary exploration travel/);
+  assert.match(result.narrativeFrame, /opportunity attacks/);
+  assert.match(result.narrativeFrame, /Resolve the combat turn before returning control/);
 });

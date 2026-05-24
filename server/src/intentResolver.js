@@ -89,7 +89,7 @@ const CHECK_RULES = [
 ];
 
 const SPATIAL_VERBS = /\b(?:ask|talk|speak|buy|sell|repair|open|unlock|take|grab|pick|attack|hit|pet|touch|use|read|drink|eat|climb|enter|go through)\b/i;
-const MOVEMENT_VERBS = /\b(?:go|walk|head|travel|move|return|enter|leave|approach|step|run|ride|follow|continue)\s+(?:to|toward|towards|into|inside|through|along|down|up|for)\b/i;
+const MOVEMENT_VERBS = /\b(?:go|walk|head|travel|move|return|enter|leave|approach|step|run|ride|follow|continue)\s+(?:to|toward|towards|into|inside|through|along|down|up|for)\b|\b(?:follow|track)\b.{0,80}\b(?:to|toward|towards|into|inside|through|along|down|up)\b/i;
 const ROLL_RESULT = /^\s*\[ROLL RESULT:/i;
 
 function resolveIntent(message) {
