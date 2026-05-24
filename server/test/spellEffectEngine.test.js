@@ -139,6 +139,37 @@ test('casts Shield of Faith by spending a slot and applying the AC effect', () =
   assert.equal(result.worldState.active_effects[0].concentration, true);
 });
 
+test('Shield of Faith updates combat tracker AC while active and when expired', () => {
+  const result = resolveSpellCast({
+    message: 'I cast Shield of Faith on myself.',
+    content,
+    characterSheet: paladinSheet(),
+    worldState: worldState({
+      player_stats: {
+        hp: 12,
+        max_hp: 12,
+        armor_class: 18,
+        base_armor_class: 18,
+        spell_slots: { 1: 2 },
+      },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', hp: 12, max_hp: 12, ac: 18, is_player: true },
+          { name: 'Skeleton', hp: 10, max_hp: 10, ac: 12, is_player: false },
+        ],
+      },
+    }),
+  });
+  const ticked = tickActiveEffects(result.worldState, { rounds: 100 });
+
+  assert.equal(result.worldState.combat_state.combatants[0].ac, 20);
+  assert.equal(ticked.worldState.player_stats.armor_class, 18);
+  assert.equal(ticked.worldState.combat_state.combatants[0].ac, 18);
+});
+
 test('new concentration spell replaces prior concentration and removes its AC bonus', () => {
   const shield = resolveSpellCast({
     message: 'I cast Shield of Faith.',

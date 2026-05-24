@@ -5,7 +5,7 @@ process.env.SUPABASE_SERVICE_ROLE_KEY ||= 'test-key';
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { adjudicate } = require('../src/refereeCore');
+const { adjudicate, advanceEnemyTurns } = require('../src/refereeCore');
 
 const characterSheet = {
   identity: { name: 'Sir Testalot', level: 1 },
@@ -22,6 +22,7 @@ const characterSheet = {
       stealth: { total: 3, ability: 'dex', proficient: true },
     },
     saving_throw_modifiers: {
+      con: { total: 2, proficient: false },
       dex: { total: 3, proficient: true },
       wis: { total: 2, proficient: false },
     },
@@ -92,6 +93,28 @@ test('resolves an authenticated skill roll against the stored DC', () => {
   assert.equal(result.worldState.pending_roll, null);
   assert.match(result.reply, /Roll 7 vs DC 15: \*\*failure\*\*/);
   assert.match(result.reply, /clerk keeps his motive/);
+});
+
+test('blocks new actions until a pending roll is resolved', () => {
+  const result = adjudicate({
+    message: 'I attack the goblin instead.',
+    worldState: worldState({
+      pending_roll: {
+        kind: 'skill_check',
+        skill: 'insight',
+        ability: 'wis',
+        label: 'Wisdom (Insight)',
+        formula: '1d20+4',
+        dc: 15,
+      },
+    }),
+    characterSheet,
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.pending_roll.kind, 'skill_check');
+  assert.match(result.reply, /Resolve the pending Wisdom \(Insight\)/);
+  assert.match(result.reply, /\[CHECK: skill=insight ability=wis\]/);
 });
 
 test('maps declared rule actions to the required check instead of asking the DM to improvise', () => {
@@ -412,4 +435,94 @@ test('natural 20 on a death save restores 1 HP and clears death saves', () => {
   assert.deepEqual(result.worldState.player_stats.death_saves, { successes: 0, failures: 0 });
   assert.equal(result.worldState.combat_state.combatants[0].hp, 1);
   assert.match(result.reply, /Natural 20/);
+});
+
+test('damage while concentrating prompts a concentration save and failure ends the effect', () => {
+  const shield = {
+    id: 'shield_of_faith',
+    name: 'Shield of Faith',
+    concentration: true,
+    remaining_rounds: 100,
+    rules_effects: [{ target: 'armor_class_bonus', value: 2, label: 'Shield of Faith' }],
+  };
+  const damaged = advanceEnemyTurns({
+    worldState: worldState({
+      active_effects: [shield],
+      player_stats: {
+        hp: 12,
+        max_hp: 12,
+        armor_class: 20,
+        base_armor_class: 18,
+      },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', hp: 12, max_hp: 12, ac: 20, is_player: true },
+          { name: 'Goblin', hp: 8, max_hp: 8, ac: 12, is_player: false, attack: { name: 'scimitar', attack_bonus: 3, damage_formula: '1d6+1' } },
+        ],
+      },
+    }),
+    characterSheet,
+    playerTurnNote: 'You hold the line.',
+    rollDie: sequenceRolls([18, 4]),
+  });
+  const failed = adjudicate({
+    message: '[ROLL RESULT: 8] I rolled an 8 (CON Save: natural 6; 1d20+2=8)',
+    worldState: damaged.worldState,
+    characterSheet,
+  });
+
+  assert.equal(damaged.worldState.pending_roll.kind, 'concentration_save');
+  assert.equal(damaged.worldState.pending_roll.dc, 10);
+  assert.match(damaged.reply, /Concentration is at risk/);
+  assert.deepEqual(failed.worldState.active_effects, []);
+  assert.equal(failed.worldState.player_stats.armor_class, 18);
+  assert.equal(failed.worldState.combat_state.combatants[0].ac, 18);
+  assert.match(failed.reply, /Concentration ends on Shield of Faith/);
+});
+
+test('successful concentration save keeps the active effect', () => {
+  const shield = {
+    id: 'shield_of_faith',
+    name: 'Shield of Faith',
+    concentration: true,
+    remaining_rounds: 100,
+    rules_effects: [{ target: 'armor_class_bonus', value: 2, label: 'Shield of Faith' }],
+  };
+  const result = adjudicate({
+    message: '[ROLL RESULT: 14] I rolled a 14 (CON Save: natural 12; 1d20+2=14)',
+    worldState: worldState({
+      active_effects: [shield],
+      player_stats: {
+        hp: 7,
+        max_hp: 12,
+        armor_class: 20,
+        base_armor_class: 18,
+      },
+      pending_roll: {
+        kind: 'concentration_save',
+        ability: 'con',
+        label: 'Constitution Saving Throw (Concentration)',
+        dc: 10,
+        effect_names: ['Shield of Faith'],
+      },
+      combat_state: {
+        active: true,
+        round: 2,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', hp: 7, max_hp: 12, ac: 20, is_player: true },
+          { name: 'Goblin', hp: 8, max_hp: 8, ac: 12, is_player: false },
+        ],
+      },
+    }),
+    characterSheet,
+  });
+
+  assert.equal(result.worldState.pending_roll, null);
+  assert.deepEqual(result.worldState.active_effects.map((effect) => effect.id), ['shield_of_faith']);
+  assert.equal(result.worldState.combat_state.combatants[0].ac, 20);
+  assert.match(result.reply, /maintain concentration/);
 });

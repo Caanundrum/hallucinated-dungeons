@@ -612,13 +612,24 @@ function applyActiveEffectsToWorldState(worldState = {}, effects = [], character
       ?? ((stats.armor_class ?? sheetArmor ?? 10) - currentSpellArmorBonus),
   );
   const spellArmorBonus = sumArmorBonusEffects(normalizedEffects);
+  const nextArmorClass = baseArmorClass + spellArmorBonus;
+  const nextCombatState = worldState.combat_state?.active
+    ? {
+        ...worldState.combat_state,
+        combatants: (worldState.combat_state.combatants || []).map((combatant) => (
+          combatant.is_player ? { ...combatant, ac: nextArmorClass } : combatant
+        )),
+      }
+    : worldState.combat_state;
+
   return {
     ...worldState,
     active_effects: normalizedEffects,
+    combat_state: nextCombatState,
     player_stats: {
       ...stats,
       base_armor_class: baseArmorClass,
-      armor_class: baseArmorClass + spellArmorBonus,
+      armor_class: nextArmorClass,
       spell_slots: characterSheet?.spellcasting?.slots || stats.spell_slots || {},
     },
   };

@@ -16,6 +16,7 @@ function resolveCreatureTurns({
   let player = combatants[playerIndex];
   const actingIndexes = getActingIndexes(combatants, combat.turn_index, playerIndex, advanceRound);
   const lines = [];
+  const damageEvents = [];
 
   for (const index of actingIndexes) {
     const actor = combatants[index];
@@ -32,6 +33,7 @@ function resolveCreatureTurns({
     combatants[index] = action.actor;
     player = action.player;
     lines.push(...action.lines);
+    damageEvents.push(...(action.damageEvents || []));
     if (Number(player.hp || 0) <= 0) break;
   }
 
@@ -47,6 +49,7 @@ function resolveCreatureTurns({
     combat,
     player,
     lines,
+    damageEvents,
     roundsElapsed: advanceRound ? 1 : 0,
   };
 }
@@ -93,6 +96,11 @@ function resolveCreatureAction({ actor, player, characterSheet, worldState, roll
       actor,
       player: { ...player, hp: nextHp },
       lines: [`${actor.name} uses ${attack.name}: rolls ${rollText} vs AC ${ac}. ${criticalHit ? '**Critical hit.** ' : ''}Hit for ${damage.total} damage. ${player.name}: (${before} -> ${nextHp} HP).`],
+      damageEvents: [{
+        target: 'player',
+        source: actor.name,
+        amount: damage.total,
+      }],
     };
   }
 

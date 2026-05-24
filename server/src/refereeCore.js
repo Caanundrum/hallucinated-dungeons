@@ -1,6 +1,9 @@
 const crypto = require('crypto');
 const { resolveIntent } = require('./intentResolver');
-const { tickActiveEffects } = require('./spellEffectEngine');
+const {
+  tickActiveEffects,
+  applyActiveEffectsToWorldState,
+} = require('./spellEffectEngine');
 const {
   beginPlayerTurn,
   spendTurnResource,
@@ -19,6 +22,10 @@ function adjudicate({ message, worldState = {}, characterSheet = null, currentTu
 
   if (intent.isRollResult) {
     return resolvePendingRoll({ message: text, worldState: state, characterSheet: sheet, rollDie });
+  }
+
+  if (state.pending_roll) {
+    return remindPendingRoll({ worldState: state });
   }
 
   if (state.combat_state?.active && getCurrentHp(sheet, state) <= 0) {
@@ -214,7 +221,23 @@ function resolvePendingRoll({ message, worldState, characterSheet, rollDie }) {
     return resolveDeathSave({ pending, result, worldState, characterSheet, rollDie });
   }
 
+  if (pending.kind === 'concentration_save') {
+    return resolveConcentrationSave({ pending, result, worldState, characterSheet });
+  }
+
   return null;
+}
+
+function remindPendingRoll({ worldState }) {
+  const pending = worldState.pending_roll;
+  const tag = rollTagForPending(pending);
+  const label = pending.label || pending.kind || 'roll';
+  return {
+    handled: true,
+    logType: 'referee_pending_roll_required',
+    worldState,
+    reply: `Resolve the pending ${label} before taking another action. The dice are already on stage and refusing to leave.${tag ? ` ${tag}` : ''}`,
+  };
 }
 
 function resolveCheckRoll({ pending, result, worldState, characterSheet, rollDie }) {
@@ -310,6 +333,33 @@ function resolveDeathSave({ result, worldState, characterSheet, rollDie }) {
   };
 }
 
+function resolveConcentrationSave({ pending, result, worldState, characterSheet }) {
+  const dc = Number(pending.dc || 10);
+  const succeeded = Number(result.total || 0) >= dc;
+  let nextState = {
+    ...worldState,
+    pending_roll: null,
+  };
+
+  if (succeeded) {
+    return {
+      handled: true,
+      logType: 'referee_concentration_save',
+      worldState: nextState,
+      reply: `Concentration saving throw ${result.total} vs DC ${dc}: **success**.\n\nYou maintain concentration on ${formatList(pending.effect_names)}. It is your turn.`,
+    };
+  }
+
+  const ended = endConcentration(nextState, characterSheet);
+  nextState = ended.worldState;
+  return {
+    handled: true,
+    logType: 'referee_concentration_save',
+    worldState: nextState,
+    reply: `Concentration saving throw ${result.total} vs DC ${dc}: **failure**.\n\nConcentration ends on ${formatList(ended.endedEffects.map((effect) => effect.name || effect.id))}. It is your turn.`,
+  };
+}
+
 function getRollOutcome({ pending, margin }) {
   if (pending.kind === 'saving_throw') {
     return margin >= 0 ? 'success' : 'failure';
@@ -320,6 +370,7 @@ function getRollOutcome({ pending, margin }) {
 }
 
 function getDeathSaveStatus(worldState = {}) {
+  if (Number(worldState.player_stats?.hp || 0) > 0) return 'conscious';
   const saves = worldState.player_stats?.death_saves || { successes: 0, failures: 0 };
   if (Number(saves.failures || 0) >= 3) return 'dead';
   if (Number(saves.successes || 0) >= 3) return 'stable';
@@ -589,9 +640,31 @@ function advanceEnemyTurns({ worldState, characterSheet, rollDie = defaultRollDi
   const ticked = tickActiveEffects(nextState, { rounds: creatureTurns.roundsElapsed });
   nextState = ticked.worldState;
 
+  if (player.hp <= 0) {
+    const ended = endConcentration(nextState, characterSheet);
+    nextState = ended.worldState;
+    if (ended.endedEffects.length > 0) {
+      lines.push(`Concentration ends: ${ended.endedEffects.map((effect) => effect.name || effect.id).join(', ')}.`);
+    }
+  } else {
+    const concentrationPrompt = buildConcentrationPrompt({
+      worldState: nextState,
+      damageEvents: creatureTurns.damageEvents,
+    });
+    if (concentrationPrompt) {
+      nextState = {
+        ...nextState,
+        pending_roll: concentrationPrompt.pendingRoll,
+      };
+      lines.push(concentrationPrompt.reply);
+    }
+  }
+
   const endLine = player.hp <= 0
     ? '**You drop to 0 HP.** Death saves are now the next thing on the table.'
-    : `**Round ${combat.round} begins. It is your turn.**`;
+    : nextState.pending_roll?.kind === 'concentration_save'
+      ? '**Resolve the concentration save before taking your turn.**'
+      : `**Round ${combat.round} begins. It is your turn.**`;
   if (ticked.expiredEffects.length > 0) {
     lines.push(`Expired effects: ${ticked.expiredEffects.map((effect) => effect.name || effect.id).join(', ')}.`);
   }
@@ -600,6 +673,71 @@ function advanceEnemyTurns({ worldState, characterSheet, rollDie = defaultRollDi
     worldState: nextState,
     reply: `${lines.join('\n\n')}\n\n${endLine}`,
   };
+}
+
+function buildConcentrationPrompt({ worldState, damageEvents = [] }) {
+  const concentrationEffects = getConcentrationEffects(worldState);
+  const playerDamage = damageEvents.filter((event) => event.target === 'player' && Number(event.amount || 0) > 0);
+  if (concentrationEffects.length === 0 || playerDamage.length === 0) return null;
+
+  const highestDamage = Math.max(...playerDamage.map((event) => Number(event.amount || 0)));
+  const dc = Math.max(10, Math.floor(highestDamage / 2));
+  const source = playerDamage.map((event) => event.source).filter(Boolean).join(', ') || 'damage';
+  const effectNames = concentrationEffects.map((effect) => effect.name || effect.id);
+  return {
+    pendingRoll: {
+      id: `roll_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      kind: 'concentration_save',
+      ability: 'con',
+      label: 'Constitution Saving Throw (Concentration)',
+      formula: '1d20',
+      dc,
+      dc_source: `Concentration save after damage from ${source}; DC is max(10, half damage)`,
+      effect_ids: concentrationEffects.map((effect) => effect.id),
+      effect_names: effectNames,
+      consumes: 'forced_save',
+      combat: true,
+      ends_turn: false,
+    },
+    reply: `Concentration is at risk from ${source}. Make a DC ${dc} Constitution Saving Throw to maintain ${formatList(effectNames)}. [SAVE: ability=con]`,
+  };
+}
+
+function endConcentration(worldState, characterSheet) {
+  const activeEffects = Array.isArray(worldState.active_effects) ? worldState.active_effects : [];
+  const endedEffects = activeEffects.filter((effect) => effect.concentration);
+  if (endedEffects.length === 0) return { worldState, endedEffects };
+
+  const retainedEffects = activeEffects.filter((effect) => !effect.concentration);
+  return {
+    endedEffects,
+    worldState: applyActiveEffectsToWorldState(worldState, retainedEffects, characterSheet),
+  };
+}
+
+function getConcentrationEffects(worldState = {}) {
+  return (Array.isArray(worldState.active_effects) ? worldState.active_effects : [])
+    .filter((effect) => effect.concentration);
+}
+
+function rollTagForPending(pending = {}) {
+  if (pending.kind === 'initiative' || pending.kind === 'death_save') {
+    return `[ROLL: ${pending.formula || '1d20'}]`;
+  }
+  if (pending.kind === 'saving_throw' || pending.kind === 'concentration_save') {
+    return `[SAVE: ability=${pending.ability || 'con'}]`;
+  }
+  if (pending.kind === 'skill_check' || pending.kind === 'ability_check') {
+    return `[CHECK:${pending.skill ? ` skill=${pending.skill}` : ''} ability=${pending.ability}]`;
+  }
+  return '';
+}
+
+function formatList(items = []) {
+  const list = (items || []).filter(Boolean);
+  if (list.length === 0) return 'the active effect';
+  if (list.length === 1) return list[0];
+  return `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
 }
 
 function endCombat(worldState, reply) {
