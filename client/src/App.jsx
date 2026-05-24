@@ -183,7 +183,6 @@ function App() {
 
   // Dice roller state
   const [pendingRoll, setPendingRoll] = useState(null);     // { diceCount, dieSides, modifier } | null
-  const [rollResult, setRollResult] = useState(null);       // retained for legacy roll result cleanup
   // BUG-021: fallback roller state for natural-language roll detection without sentinel tag
   const [fallbackRoll, setFallbackRoll] = useState(null);   // { dieSides, modifier } | null — modifier is user-entered
   const [fallbackModInput, setFallbackModInput] = useState('0'); // controlled input for modifier
@@ -480,26 +479,6 @@ function App() {
     setFallbackModInput('0');
   }, [fallbackRoll, fallbackModInput]);
 
-  const handleSubmitRoll = useCallback(() => {
-    if (!rollResult || !pendingRoll) return;
-    const { diceCount, dieSides, modifier } = pendingRoll;
-    const { total } = rollResult;
-
-    // Format the roll result message — [ROLL RESULT: X] prefix authenticates this as a
-    // dice-roller submission (not a player-typed claim). DM1 only accepts rolls with this prefix.
-    const modStr = modifier > 0 ? ` + ${modifier}` : modifier < 0 ? ` - ${Math.abs(modifier)}` : '';
-    const rollMsg = `[ROLL RESULT: ${total}] I rolled a ${total} (${diceCount}d${dieSides}${modStr} = ${total})`;
-
-    // Display message strips the machine-readable prefix; server message keeps it for DM1 integrity check
-    const displayRollMsg = stripRollResultPrefix(rollMsg);
-    setNarrative((prev) => [...prev, { type: 'player', text: displayRollMsg, id: Date.now() }]);
-    socket.emit('story_input', { message: rollMsg });
-
-    // Clear the dice roller
-    setPendingRoll(null);
-    setRollResult(null);
-  }, [rollResult, pendingRoll]);
-
   const handleSaveCharacter = useCallback((characterDraft) => {
     if (!sessionId || !sessionToken) {
       setCharacterError({ message: 'No active session. Please refresh.' });
@@ -577,7 +556,6 @@ function App() {
   const storyTextareaDisabled = !connected || !sessionId;
   // During a pending roll (primary or fallback), the story input is locked — the dice roller takes over
   const storyDisabled = dm1Typing || !connected || !sessionId || !!pendingRoll || !!fallbackRoll;
-  void handleSubmitRoll;
   // BUG-017: rules textarea stays active during DM2 typing; only the ASK button locks
   const rulesTextareaDisabled = !connected || !sessionId;
   const rulesDisabled = dm2Typing || !connected || !sessionId;
