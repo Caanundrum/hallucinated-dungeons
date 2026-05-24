@@ -5,6 +5,7 @@ const {
   beginPlayerTurn,
   spendTurnResource,
 } = require('./actionEconomy');
+const { resolveCreatureTurns } = require('./creatureTurnEngine');
 
 const DEFAULT_CHECK_DC = 15;
 
@@ -213,7 +214,7 @@ function resolveInitiative({ pending, result, worldState, characterSheet, rollDi
   const combatState = {
     active: true,
     round: 1,
-    turn_index: playerIndex,
+    turn_index: playerIndex === 0 ? playerIndex : 0,
     combatants,
   };
 
@@ -393,40 +394,16 @@ function resolvePlayerAttack({ worldState, characterSheet, rollDie }) {
 }
 
 function advanceEnemyTurns({ worldState, characterSheet, rollDie = defaultRollDie, playerTurnNote, playerDodging = false, advanceRound = true }) {
-  const combat = cloneCombatState(worldState.combat_state);
-  const player = combat.combatants.find((combatant) => combatant.is_player) || buildPlayerCombatant(characterSheet, worldState);
-  const enemies = combat.combatants.filter((combatant) => !combatant.is_player && Number(combatant.hp) > 0);
-  const lines = [playerTurnNote];
-
-  for (const enemy of enemies) {
-    const attack = enemy.attack || { name: 'attack', attack_bonus: 3, damage_formula: '1d6+1' };
-    const first = rollDie(20);
-    const second = playerDodging ? rollDie(20) : null;
-    const natural = playerDodging ? Math.min(first, second) : first;
-    const attackTotal = natural + Number(attack.attack_bonus || 0);
-    const ac = Number(player.ac || getArmorClass(characterSheet, worldState));
-    const rollText = playerDodging
-      ? `${first}/${second} with disadvantage, using ${natural}${formatSigned(attack.attack_bonus)} = ${attackTotal}`
-      : `${natural}${formatSigned(attack.attack_bonus)} = ${attackTotal}`;
-
-    const criticalMiss = natural === 1;
-    if (!criticalMiss && (attackTotal >= ac || natural === 20)) {
-      const damage = rollDamage(attack.damage_formula || '1d6+1', rollDie, natural === 20);
-      const before = Number(player.hp ?? getCurrentHp(characterSheet, worldState));
-      player.hp = Math.max(0, before - damage.total);
-      lines.push(`${enemy.name} uses ${attack.name}: rolls ${rollText} vs AC ${ac}. Hit for ${damage.total} damage. ${player.name}: (${before} -> ${player.hp} HP).`);
-    } else if (criticalMiss) {
-      lines.push(`${enemy.name} uses ${attack.name}: rolls ${rollText} vs AC ${ac}. **Critical miss.** Even the initiative tracker winces.`);
-    } else {
-      lines.push(`${enemy.name} uses ${attack.name}: rolls ${rollText} vs AC ${ac}. Miss.`);
-    }
-  }
-
-  combat.round = advanceRound ? Number(combat.round || 1) + 1 : Number(combat.round || 1);
-  combat.turn_index = combat.combatants.findIndex((combatant) => combatant.is_player);
-  combat.combatants = combat.combatants.map((combatant) => (
-    combatant.is_player ? { ...combatant, hp: player.hp, conditions: clearTurnConditions(combatant.conditions) } : combatant
-  ));
+  const creatureTurns = resolveCreatureTurns({
+    worldState,
+    characterSheet,
+    rollDie,
+    playerDodging,
+    advanceRound,
+  });
+  const combat = creatureTurns.combat;
+  const player = creatureTurns.player;
+  const lines = [playerTurnNote, ...creatureTurns.lines].filter(Boolean);
 
   let nextState = {
     ...worldState,
@@ -440,12 +417,12 @@ function advanceEnemyTurns({ worldState, characterSheet, rollDie = defaultRollDi
     },
     time_state: {
       ...(worldState.time_state || {}),
-      elapsed_rounds: Number(worldState.time_state?.elapsed_rounds || 0) + (advanceRound ? 1 : 0),
+      elapsed_rounds: Number(worldState.time_state?.elapsed_rounds || 0) + creatureTurns.roundsElapsed,
       scene_time: `round ${combat.round}`,
     },
   };
   nextState = beginPlayerTurn(nextState, characterSheet);
-  const ticked = tickActiveEffects(nextState, { rounds: advanceRound ? 1 : 0 });
+  const ticked = tickActiveEffects(nextState, { rounds: creatureTurns.roundsElapsed });
   nextState = ticked.worldState;
 
   const endLine = player.hp <= 0
@@ -476,10 +453,6 @@ function endCombat(worldState, reply) {
 
 function cloneCombatState(combatState) {
   return JSON.parse(JSON.stringify(combatState || { active: true, round: 1, turn_index: 0, combatants: [] }));
-}
-
-function clearTurnConditions(conditions = []) {
-  return (conditions || []).filter((condition) => !/^dodg/i.test(String(condition)));
 }
 
 function getCheckModifier(characterSheet, check) {
@@ -620,14 +593,6 @@ function rollDamage(formula, rollDie, crit = false) {
     total: rolls.reduce((sum, roll) => sum + roll, 0) + modifier,
     rolls,
   };
-}
-
-function getCurrentHp(characterSheet, worldState) {
-  return Number(worldState.player_stats?.hp ?? characterSheet?.derived_stats?.hp ?? characterSheet?.derived_stats?.max_hp ?? 10);
-}
-
-function getArmorClass(characterSheet, worldState) {
-  return Number(worldState.player_stats?.armor_class ?? characterSheet?.derived_stats?.armor_class ?? 10);
 }
 
 function isMovementIntent(message) {

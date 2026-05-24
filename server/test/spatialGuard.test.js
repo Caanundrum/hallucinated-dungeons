@@ -196,3 +196,40 @@ test('preserves deterministic active effect rules when utility model updates dur
   assert.equal(merged.active_effects[0].remaining_rounds, 99);
   assert.deepEqual(merged.active_effects[0].rules_effects, [{ target: 'armor_class_bonus', value: 2, label: 'Shield of Faith' }]);
 });
+
+test('preserves deterministic turn resources when utility model rewrites combat state', () => {
+  const turnResources = {
+    actor: 'player',
+    action_available: false,
+    bonus_action_available: true,
+    reaction_available: true,
+    movement_remaining: 30,
+    used: [{ resource: 'action', label: 'Attack' }],
+  };
+  const merged = mergeWorldState({
+    ...db.DEFAULT_WORLD_STATE,
+    combat_state: {
+      active: true,
+      round: 1,
+      turn_index: 0,
+      turn_resources: turnResources,
+      combatants: [
+        { name: 'Ari', hp: 12, max_hp: 12, ac: 16, is_player: true },
+        { name: 'Skeleton', hp: 8, max_hp: 8, ac: 12, is_player: false },
+      ],
+    },
+  }, {
+    combat_state: {
+      active: true,
+      round: 1,
+      turn_index: 0,
+      combatants: [
+        { name: 'Ari', hp: 12, max_hp: 12, ac: 16, is_player: true },
+        { name: 'Skeleton', hp: 5, max_hp: 8, ac: 12, is_player: false },
+      ],
+    },
+  });
+
+  assert.deepEqual(merged.combat_state.turn_resources, turnResources);
+  assert.equal(merged.combat_state.combatants[1].hp, 5);
+});

@@ -88,6 +88,14 @@ combat_state schema:
   "active": true,
   "round": <integer>,
   "turn_index": <integer>,
+  "turn_resources": {
+    "actor": "player",
+    "action_available": <boolean>,
+    "bonus_action_available": <boolean>,
+    "reaction_available": <boolean>,
+    "movement_remaining": <integer>,
+    "used": [{"resource": "<action|bonus_action|reaction|movement>", "label": "<string>", "feet": <integer if movement>}]
+  },
   "combatants": [
     {
       "name": "<string>",
@@ -314,7 +322,10 @@ function mergeWorldState(current, patch) {
     if (patch.combat_state === null) {
       merged.combat_state = null;
     } else if (patch.combat_state && typeof patch.combat_state === 'object') {
-      merged.combat_state = patch.combat_state;
+      merged.combat_state = {
+        ...patch.combat_state,
+        turn_resources: patch.combat_state.turn_resources || current.combat_state?.turn_resources,
+      };
     }
   }
 
