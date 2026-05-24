@@ -15,16 +15,15 @@ test('classifies rules actions before spatial checks', () => {
   assert.equal(intent.mayNeedSpatialGuard, false);
 });
 
-test('gates hidden insight behind a deterministic check prompt', () => {
+test('leaves skill-check gating to referee core', () => {
   const result = resolvePreNarration({
     message: "I study the ledger-keeper's face to see whether he is hiding something.",
     worldState: {},
   });
 
-  assert.equal(result.handled, true);
+  assert.equal(result.handled, false);
   assert.equal(result.skipSpatialGuard, true);
-  assert.match(result.response, /Wisdom \(Insight\)/);
-  assert.match(result.response, /\[CHECK: skill=insight ability=wis\]/);
+  assert.equal(result.narrativeFrame, '');
 });
 
 test('passes authenticated zero roll totals through with an official roll frame', () => {

@@ -16,38 +16,12 @@ function resolvePreNarration({ message, worldState }) {
     };
   }
 
-  if (intent.check && shouldGateCheck(intent, worldState)) {
-    return {
-      intent,
-      handled: true,
-      skipSpatialGuard: true,
-      response: buildCheckPrompt(intent.check),
-      logType: 'mechanics_check_gate',
-    };
-  }
-
   return {
     intent,
     handled: false,
     skipSpatialGuard: intent.isMechanicsAction,
     narrativeFrame: buildNarrativeFrame(intent, worldState),
   };
-}
-
-function shouldGateCheck(intent, worldState = {}) {
-  const text = intent.raw.toLowerCase();
-  const combatActive = Boolean(worldState.combat_state?.active);
-
-  if (combatActive && intent.ruleAction && !['hide', 'search', 'study', 'influence'].includes(intent.ruleAction)) {
-    return false;
-  }
-
-  if (/\b(?:just|only)\s+(?:look|glance|say hello|wave)\b/i.test(text)) return false;
-  return true;
-}
-
-function buildCheckPrompt(check) {
-  return `Make a ${check.label} check. [CHECK: skill=${check.skill} ability=${check.ability}]`;
 }
 
 function buildNarrativeFrame(intent, worldState = {}) {
