@@ -5,7 +5,7 @@ process.env.SUPABASE_SERVICE_ROLE_KEY ||= 'test-key';
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { adjudicate, advanceEnemyTurns } = require('../src/refereeCore');
+const { adjudicate, advanceEnemyTurns, advanceNarrativeTime } = require('../src/refereeCore');
 
 const characterSheet = {
   identity: { name: 'Sir Testalot', level: 1 },
@@ -70,28 +70,31 @@ test('creates a server-owned pending skill check with a DC', () => {
   assert.equal(result.worldState.pending_roll.dc, 15);
   assert.equal(result.worldState.pending_roll.created_turn, 4);
   assert.match(result.reply, /DC 15 Wisdom \(Insight\)/);
-  assert.match(result.reply, /\[CHECK: skill=insight ability=wis/);
+  assert.match(result.reply, /\[CHECK: id=.*skill=insight ability=wis/);
 });
 
 test('resolves an authenticated skill roll against the stored DC', () => {
   const result = adjudicate({
-    message: '[ROLL RESULT: 7] I rolled a 7 (Insight Check: natural 5; 1d20+2=7)',
+    message: '[ROLL REQUEST: roll_test]',
     worldState: worldState({
       pending_roll: {
+        id: 'roll_test',
         kind: 'skill_check',
         skill: 'insight',
         ability: 'wis',
         label: 'Wisdom (Insight)',
+        modifier: 2,
         dc: 15,
         failure_result: 'The clerk keeps his motive tucked away.',
       },
     }),
     characterSheet,
+    rollDie: sequenceRolls([5]),
   });
 
   assert.equal(result.handled, true);
   assert.equal(result.worldState.pending_roll, null);
-  assert.match(result.reply, /Roll 7 vs DC 15: \*\*failure\*\*/);
+  assert.match(result.reply, /Roll 7 .* vs DC 15: \*\*failure\*\*/);
   assert.match(result.reply, /clerk keeps his motive/);
 });
 
@@ -155,7 +158,7 @@ test('prompts deterministic saving throws with character save modifiers', () => 
   assert.equal(result.worldState.pending_roll.ability, 'dex');
   assert.equal(result.worldState.pending_roll.modifier, 3);
   assert.match(result.reply, /DC 15 Dexterity Saving Throw/);
-  assert.match(result.reply, /\[SAVE: ability=dex/);
+  assert.match(result.reply, /\[SAVE: id=.*ability=dex/);
 });
 
 test('prompts a social check for speeches meant to change minds', () => {
@@ -190,17 +193,17 @@ test('combat saving throws do not consume the player action or advance enemy tur
     currentTurn: 6,
   });
   const result = adjudicate({
-    message: '[ROLL RESULT: 12] I rolled a 12 (DEX Save: natural 9; 1d20+3=12)',
+    message: `[ROLL REQUEST: ${prompt.worldState.pending_roll.id}]`,
     worldState: prompt.worldState,
     characterSheet,
-    rollDie: sequenceRolls([19]),
+    rollDie: sequenceRolls([9]),
   });
 
   assert.equal(result.handled, true);
   assert.equal(result.worldState.pending_roll, null);
   assert.equal(result.worldState.combat_state.round, 1);
   assert.doesNotMatch(result.reply, /Goblin uses/);
-  assert.match(result.reply, /Dexterity Saving Throw 12 vs DC 15: \*\*failure\*\*/);
+  assert.match(result.reply, /Dexterity Saving Throw 12 .* vs DC 15: \*\*failure\*\*/);
 });
 
 test('starts combat by asking for initiative instead of narrating a free attack', () => {
@@ -215,21 +218,22 @@ test('starts combat by asking for initiative instead of narrating a free attack'
   assert.equal(result.worldState.pending_roll.kind, 'initiative');
   assert.equal(result.worldState.pending_roll.created_turn, 8);
   assert.match(result.reply, /Combat begins/);
-  assert.match(result.reply, /\[ROLL: 1d20\+1\]/);
+  assert.match(result.reply, /\[ROLL: id=.* 1d20\+1\]/);
 });
 
 test('keeps round 1 when enemies beat player initiative and act first', () => {
   const result = adjudicate({
-    message: '[ROLL RESULT: 12] I rolled a 12 (Initiative: natural 11; 1d20+1=12)',
+    message: '[ROLL REQUEST: roll_init]',
     worldState: worldState({
       pending_roll: {
+        id: 'roll_init',
         kind: 'initiative',
         modifier: 1,
         enemy: { name: 'Bandit', initiative_bonus: 1 },
       },
     }),
     characterSheet,
-    rollDie: sequenceRolls([18, 8]),
+    rollDie: sequenceRolls([11, 18, 8]),
   });
 
   assert.equal(result.handled, true);
@@ -243,16 +247,17 @@ test('keeps round 1 when enemies beat player initiative and act first', () => {
 
 test('initializes action economy when the player wins initiative', () => {
   const result = adjudicate({
-    message: '[ROLL RESULT: 20] I rolled a 20 (Initiative: natural 19; 1d20+1=20)',
+    message: '[ROLL REQUEST: roll_init]',
     worldState: worldState({
       pending_roll: {
+        id: 'roll_init',
         kind: 'initiative',
         modifier: 1,
         enemy: { name: 'Bandit', initiative_bonus: 1 },
       },
     }),
     characterSheet,
-    rollDie: sequenceRolls([2]),
+    rollDie: sequenceRolls([19, 2]),
   });
 
   assert.equal(result.handled, true);
@@ -394,9 +399,10 @@ test('prompts death saves at 0 HP and applies natural 1 as two failures', () => 
     currentTurn: 12,
   });
   const result = adjudicate({
-    message: '[ROLL RESULT: 1] I rolled a 1 (Death Save: natural 1; 1d20=1)',
+    message: `[ROLL REQUEST: ${prompt.worldState.pending_roll.id}]`,
     worldState: prompt.worldState,
     characterSheet,
+    rollDie: sequenceRolls([1, 10]),
   });
 
   assert.equal(prompt.worldState.pending_roll.kind, 'death_save');
@@ -407,7 +413,7 @@ test('prompts death saves at 0 HP and applies natural 1 as two failures', () => 
 
 test('natural 20 on a death save restores 1 HP and clears death saves', () => {
   const result = adjudicate({
-    message: '[ROLL RESULT: 20] I rolled a 20 (Death Save: natural 20; 1d20=20)',
+    message: '[ROLL REQUEST: death_roll]',
     worldState: worldState({
       player_stats: {
         hp: 0,
@@ -416,6 +422,7 @@ test('natural 20 on a death save restores 1 HP and clears death saves', () => {
         death_saves: { successes: 0, failures: 2 },
       },
       pending_roll: {
+        id: 'death_roll',
         kind: 'death_save',
       },
       combat_state: {
@@ -429,6 +436,7 @@ test('natural 20 on a death save restores 1 HP and clears death saves', () => {
       },
     }),
     characterSheet,
+    rollDie: sequenceRolls([20]),
   });
 
   assert.equal(result.worldState.player_stats.hp, 1);
@@ -469,9 +477,10 @@ test('damage while concentrating prompts a concentration save and failure ends t
     rollDie: sequenceRolls([18, 4]),
   });
   const failed = adjudicate({
-    message: '[ROLL RESULT: 8] I rolled an 8 (CON Save: natural 6; 1d20+2=8)',
+    message: `[ROLL REQUEST: ${damaged.worldState.pending_roll.id}]`,
     worldState: damaged.worldState,
     characterSheet,
+    rollDie: sequenceRolls([6]),
   });
 
   assert.equal(damaged.worldState.pending_roll.kind, 'concentration_save');
@@ -492,7 +501,7 @@ test('successful concentration save keeps the active effect', () => {
     rules_effects: [{ target: 'armor_class_bonus', value: 2, label: 'Shield of Faith' }],
   };
   const result = adjudicate({
-    message: '[ROLL RESULT: 14] I rolled a 14 (CON Save: natural 12; 1d20+2=14)',
+    message: '[ROLL REQUEST: concentration_roll]',
     worldState: worldState({
       active_effects: [shield],
       player_stats: {
@@ -502,7 +511,9 @@ test('successful concentration save keeps the active effect', () => {
         base_armor_class: 18,
       },
       pending_roll: {
+        id: 'concentration_roll',
         kind: 'concentration_save',
+        modifier: 2,
         ability: 'con',
         label: 'Constitution Saving Throw (Concentration)',
         dc: 10,
@@ -519,6 +530,7 @@ test('successful concentration save keeps the active effect', () => {
       },
     }),
     characterSheet,
+    rollDie: sequenceRolls([12]),
   });
 
   assert.equal(result.worldState.pending_roll, null);
@@ -541,9 +553,10 @@ test('Guidance adds a bonus die to the next check and expires after the roll', (
     characterSheet,
   });
   const result = adjudicate({
-    message: '[ROLL RESULT: 18] I rolled an 18 (Insight Check: natural 12; 1d20 + 4 + 1d4 (2) = 18)',
+    message: `[ROLL REQUEST: ${prompt.worldState.pending_roll.id}]`,
     worldState: prompt.worldState,
     characterSheet,
+    rollDie: sequenceRolls([12, 2]),
   });
 
   assert.equal(prompt.worldState.pending_roll.bonus_die, '1d4');
@@ -608,4 +621,81 @@ test('long rest resets HP, death saves, spell slots, and active effects', () => 
   assert.deepEqual(result.worldState.player_stats.spell_slots, { 1: 2 });
   assert.deepEqual(result.worldState.active_effects, []);
   assert.match(result.reply, /long rest/);
+});
+
+test('server rejects typed roll results for pending rolls', () => {
+  const result = adjudicate({
+    message: '[ROLL RESULT: 99] I rolled very honestly.',
+    worldState: worldState({
+      pending_roll: {
+        id: 'roll_test',
+        kind: 'skill_check',
+        skill: 'insight',
+        ability: 'wis',
+        label: 'Wisdom (Insight)',
+        dc: 15,
+      },
+    }),
+    characterSheet,
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.pending_roll.id, 'roll_test');
+  assert.match(result.reply, /Typed results are not accepted/);
+});
+
+test('narrative time ticks active effects outside combat', () => {
+  const result = advanceNarrativeTime({
+    message: 'I ask the clerk what he knows.',
+    worldState: worldState({
+      active_effects: [{
+        id: 'shield_of_faith',
+        name: 'Shield of Faith',
+        concentration: true,
+        remaining_rounds: 1,
+        rules_effects: [{ target: 'armor_class_bonus', value: 2, label: 'Shield of Faith' }],
+      }],
+      player_stats: {
+        hp: 12,
+        max_hp: 12,
+        armor_class: 18,
+        base_armor_class: 16,
+      },
+      time_state: { elapsed_rounds: 0, elapsed_minutes: 0 },
+    }),
+    characterSheet,
+  });
+
+  assert.deepEqual(result.worldState.active_effects, []);
+  assert.equal(result.worldState.player_stats.armor_class, 16);
+  assert.equal(result.worldState.time_state.elapsed_rounds, 1);
+  assert.match(result.replySuffix, /Shield of Faith/);
+});
+
+test('short rest spends available Hit Dice for healing', () => {
+  const result = adjudicate({
+    message: 'We take a short rest.',
+    worldState: worldState({
+      player_stats: {
+        hp: 3,
+        max_hp: 12,
+        armor_class: 16,
+        hit_dice: { die: 10, remaining: 1, max: 1 },
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      identity: { ...characterSheet.identity, class: 'fighter', class_name: 'Fighter', level: 1 },
+      abilities: {
+        ...characterSheet.abilities,
+        modifiers: { ...characterSheet.abilities.modifiers, con: 2 },
+      },
+    },
+    rollDie: sequenceRolls([6]),
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.player_stats.hp, 11);
+  assert.equal(result.worldState.player_stats.hit_dice.remaining, 0);
+  assert.match(result.reply, /Spent 1 Hit Die/);
 });

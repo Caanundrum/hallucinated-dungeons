@@ -10,6 +10,7 @@ const {
   resolveSpellCast,
   resolveSpellOutcome,
   tickActiveEffects,
+  getActiveDamageDice,
 } = require('../src/spellEffectEngine');
 const { advanceEnemyTurns } = require('../src/refereeCore');
 
@@ -475,4 +476,93 @@ test('Armor of Agathys grants temporary HP and retaliates when hit', () => {
   assert.equal(advanced.worldState.player_stats.temp_hp, 0);
   assert.equal(skeleton.hp, 5);
   assert.match(advanced.reply, /lashes back for 5 cold damage/);
+});
+
+test('non-combat save spells resolve against present scene targets', () => {
+  const sheet = casterSheet({
+    spellcasting: {
+      ability: 'int',
+      cantrips_known: [],
+      spells_prepared: ['charm_person'],
+      slots: { 1: 1 },
+    },
+  });
+  const cast = resolveSpellCast({
+    message: 'I cast Charm Person on the clerk.',
+    content,
+    characterSheet: sheet,
+    worldState: worldState({
+      scene_presence: {
+        exact_location: 'town hall door',
+        present_npcs: ['clerk'],
+        present_objects: [],
+        available_exits: ['square'],
+      },
+    }),
+  });
+  const outcome = resolveSpellOutcome({
+    spellCast: cast,
+    characterSheet: cast.characterSheet,
+    worldState: cast.worldState,
+    rollDie: sequenceRolls([5]),
+  });
+
+  assert.equal(outcome.handled, true);
+  assert.equal(outcome.worldState.scene_target_states[0].name, 'clerk');
+  assert.equal(outcome.worldState.scene_target_states[0].conditions.includes('charm_person'), true);
+  assert.equal(outcome.worldState.active_effects[0].target, 'clerk');
+  assert.match(outcome.reply, /WIS save: 5/);
+});
+
+test('Sleep distributes its HP pool across multiple eligible enemies', () => {
+  const sheet = casterSheet({
+    spellcasting: {
+      cantrips_known: [],
+      spells_prepared: ['sleep'],
+      slots: { 1: 1 },
+    },
+  });
+  const cast = resolveSpellCast({
+    message: 'I cast Sleep.',
+    content,
+    characterSheet: sheet,
+    worldState: combatWorld({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Mira', hp: 8, max_hp: 8, ac: 12, is_player: true },
+          { name: 'Goblin', hp: 4, max_hp: 7, ac: 12, is_player: false },
+          { name: 'Skeleton', hp: 8, max_hp: 10, ac: 12, is_player: false },
+        ],
+      },
+    }),
+  });
+  const outcome = resolveSpellOutcome({
+    spellCast: cast,
+    characterSheet: cast.characterSheet,
+    worldState: cast.worldState,
+    rollDie: sequenceRolls([3, 3, 3, 3, 3]),
+  });
+  const goblin = outcome.worldState.combat_state.combatants.find((combatant) => combatant.name === 'Goblin');
+  const skeleton = outcome.worldState.combat_state.combatants.find((combatant) => combatant.name === 'Skeleton');
+
+  assert.equal(goblin.conditions.includes('sleep'), true);
+  assert.equal(skeleton.conditions.includes('sleep'), true);
+  assert.deepEqual(outcome.worldState.active_effects[0].targets.map((target) => target.name), ['Goblin', 'Skeleton']);
+});
+
+test('target-bound damage dice only apply to their marked target', () => {
+  const markedWorld = worldState({
+    active_effects: [{
+      id: 'hunter_mark',
+      name: "Hunter's Mark",
+      target: 'Goblin',
+      rules_effects: [{ target: 'weapon_damage_bonus_die', die: '1d6', damage_type: 'force', label: "Hunter's Mark", target_bound: true }],
+    }],
+  });
+
+  assert.equal(getActiveDamageDice(markedWorld, { name: 'Goblin' }).length, 1);
+  assert.equal(getActiveDamageDice(markedWorld, { name: 'Skeleton' }).length, 0);
 });

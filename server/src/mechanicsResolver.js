@@ -4,7 +4,7 @@ function resolvePreNarration({ message, worldState }) {
   const intent = resolveIntent(message);
   if (intent.isRollResult) {
     const rollFrame = [
-      '[MECHANICS: This is an authenticated dice-roller result because it starts with [ROLL RESULT:]. Accept it as official even if the final total is 0 or negative after modifiers. If the message includes "natural 1" or "natural 20", preserve that natural d20 result. Apply 2024 RAW: natural 20/1 automatically matters for attack rolls, and death saves have their special natural 20/1 rules; ordinary ability checks and saving throws use the total against the DC unless a specific rule says otherwise. Resolve the pending check, save, damage roll, or other requested roll from this result.]',
+      '[MECHANICS: This is a fallback/manual dice result from the client. Server-owned pending rolls use [ROLL REQUEST] and are resolved before narration. If no deterministic pending roll exists, you may use this fallback result for the roll the DM just requested; preserve natural 1/20 text when present. Apply 2024 RAW: natural 20/1 automatically matters for attack rolls, and death saves have their special natural 20/1 rules; ordinary ability checks and saving throws use the total against the DC unless a specific rule says otherwise.]',
       buildCombatFrame(intent, worldState, { resolvingRoll: true }),
     ].filter(Boolean).join('\n');
 

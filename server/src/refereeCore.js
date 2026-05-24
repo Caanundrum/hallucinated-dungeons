@@ -15,6 +15,11 @@ const {
   spendTurnResource,
 } = require('./actionEconomy');
 const { resolveCreatureTurns } = require('./creatureTurnEngine');
+const {
+  getAttackMode,
+  getAttackModeSources,
+  getTurnBlockReason,
+} = require('./conditionEngine');
 
 const DEFAULT_CHECK_DC = 15;
 
@@ -26,7 +31,7 @@ function adjudicate({ message, worldState = {}, characterSheet = null, currentTu
   const state = normalizeWorldState(worldState);
   const sheet = characterSheet || {};
 
-  if (intent.isRollResult) {
+  if (intent.isRollResult || parseRollRequest(text)) {
     return resolvePendingRoll({ message: text, worldState: state, characterSheet: sheet, rollDie });
   }
 
@@ -49,7 +54,7 @@ function adjudicate({ message, worldState = {}, characterSheet = null, currentTu
 
   const restIntent = getRestIntent(text);
   if (restIntent) {
-    return resolveRest({ restIntent, worldState: state, characterSheet: sheet });
+    return resolveRest({ restIntent, worldState: state, characterSheet: sheet, rollDie });
   }
 
   const timeIntent = getTimePassageIntent(text);
@@ -102,6 +107,12 @@ function parseRollResult(message) {
   };
 }
 
+function parseRollRequest(message) {
+  const match = String(message || '').match(/^\s*\[ROLL REQUEST:\s*([a-zA-Z0-9_-]+)\]/i);
+  if (!match) return null;
+  return { id: match[1] };
+}
+
 function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCombat }) {
   const check = intent.check;
   let nextWorldState = worldState;
@@ -150,7 +161,7 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
       ...nextWorldState,
       pending_roll: pendingRoll,
     },
-    reply: `Make a DC ${dc} ${check.label}.${bonus ? ` Add ${bonus.die} from ${bonus.label}.` : ''}${inCombat ? ' This uses your Action.' : ''} [CHECK:${check.skill ? ` skill=${check.skill}` : ''} ability=${check.ability} modifier=${modifier.total} breakdown="${sanitizeTagValue(modifier.breakdown)}"${formatBonusDieTag(bonus)}]`,
+    reply: `Make a DC ${dc} ${check.label}.${bonus ? ` Add ${bonus.die} from ${bonus.label}.` : ''}${inCombat ? ' This uses your Action.' : ''} [CHECK: id=${pendingRoll.id}${check.skill ? ` skill=${check.skill}` : ''} ability=${check.ability} modifier=${modifier.total} breakdown="${sanitizeTagValue(modifier.breakdown)}"${formatBonusDieTag(bonus)}]`,
   };
 }
 
@@ -188,7 +199,7 @@ function promptSavingThrow({ intent, worldState, characterSheet, currentTurn = 0
       ...worldState,
       pending_roll: pendingRoll,
     },
-    reply: `Make a DC ${dc} ${save.label}.${bonus ? ` Add ${bonus.die} from ${bonus.label}.` : ''} [SAVE: ability=${save.ability} modifier=${modifier.total} breakdown="${sanitizeTagValue(modifier.breakdown)}"${formatBonusDieTag(bonus)}]`,
+    reply: `Make a DC ${dc} ${save.label}.${bonus ? ` Add ${bonus.die} from ${bonus.label}.` : ''} [SAVE: id=${pendingRoll.id} ability=${save.ability} modifier=${modifier.total} breakdown="${sanitizeTagValue(modifier.breakdown)}"${formatBonusDieTag(bonus)}]`,
   };
 }
 
@@ -198,7 +209,7 @@ function promptDeathSave({ worldState, currentTurn = 0 }) {
       handled: true,
       logType: 'referee_death_save_pending',
       worldState,
-      reply: 'You are still at 0 HP. Resolve the pending death saving throw before doing anything else. The afterlife paperwork has a queue. [ROLL: 1d20]',
+      reply: `You are still at 0 HP. Resolve the pending death saving throw before doing anything else. The afterlife paperwork has a queue. ${rollTagForPending(worldState.pending_roll)}`,
     };
   }
 
@@ -222,16 +233,47 @@ function promptDeathSave({ worldState, currentTurn = 0 }) {
       ...worldState,
       pending_roll: pendingRoll,
     },
-    reply: 'You are at 0 HP. Make a death saving throw. [ROLL: 1d20]',
+    reply: `You are at 0 HP. Make a death saving throw. ${rollTagForPending(pendingRoll)}`,
   };
 }
 
 function resolvePendingRoll({ message, worldState, characterSheet, rollDie }) {
-  const result = parseRollResult(message);
-  if (!result) return null;
+  const request = parseRollRequest(message);
+  const clientResult = parseRollResult(message);
+  if (!request && !clientResult) return null;
 
   const pending = worldState.pending_roll;
-  if (!pending) return null;
+  if (!pending) {
+    if (request) {
+      return {
+        handled: true,
+        logType: 'referee_no_pending_roll',
+        worldState,
+        reply: 'There is no pending roll to resolve. Declare an action first, then the DM will call for dice when the rules want their dramatic little entrance.',
+      };
+    }
+    return null;
+  }
+
+  if (!request) {
+    return {
+      handled: true,
+      logType: 'referee_client_roll_rejected',
+      worldState,
+      reply: `Use the Roll button for the pending ${pending.label || pending.kind || 'roll'} so the server can roll it authoritatively. Typed results are not accepted; the dice union was very firm about this.${rollTagForPending(pending) ? ` ${rollTagForPending(pending)}` : ''}`,
+    };
+  }
+
+  if (pending.id && request.id !== pending.id) {
+    return {
+      handled: true,
+      logType: 'referee_roll_id_mismatch',
+      worldState,
+      reply: `That roll request does not match the pending ${pending.label || pending.kind || 'roll'}. Use the current Roll button.${rollTagForPending(pending) ? ` ${rollTagForPending(pending)}` : ''}`,
+    };
+  }
+
+  const result = rollPendingRequest(pending, rollDie);
 
   if (pending.kind === 'initiative') {
     return resolveInitiative({ pending, result, worldState, characterSheet, rollDie });
@@ -250,6 +292,26 @@ function resolvePendingRoll({ message, worldState, characterSheet, rollDie }) {
   }
 
   return null;
+}
+
+function rollPendingRequest(pending = {}, rollDie = defaultRollDie) {
+  const natural = rollDie(20);
+  let total = natural + Number(pending.modifier || 0);
+  const parts = [`natural ${natural}`, `1d20${formatSigned(pending.modifier || 0)}=${natural + Number(pending.modifier || 0)}`];
+
+  if (pending.bonus_die) {
+    const bonus = rollDiceExpression(pending.bonus_die, rollDie);
+    if (bonus) {
+      total += bonus.total;
+      parts.push(`${pending.bonus_source || 'bonus'} ${pending.bonus_die}=${bonus.total}`);
+    }
+  }
+
+  return {
+    total,
+    natural,
+    rollText: `${total} (${parts.join('; ')})`,
+  };
 }
 
 function remindPendingRoll({ worldState }) {
@@ -276,6 +338,16 @@ function resolveCheckRoll({ pending, result, worldState, characterSheet, rollDie
   }
 
   let reply = buildCheckResolutionReply(pending, result, outcome);
+  if (!pending.combat) {
+    const advanced = advanceNarrativeTime({
+      message: pending.intent || '',
+      worldState: nextState,
+      characterSheet,
+      defaultElapsed: { minutes: 1 },
+    });
+    nextState = advanced.worldState;
+    if (advanced.replySuffix) reply += advanced.replySuffix;
+  }
   if (pending.combat && pending.ends_turn !== false && worldState.combat_state?.active) {
     const combatResult = advanceEnemyTurns({
       worldState: nextState,
@@ -407,7 +479,8 @@ function getDeathSaveStatus(worldState = {}) {
 function buildCheckResolutionReply(pending, result, outcome) {
   const dc = Number(pending.dc || DEFAULT_CHECK_DC);
   const label = pending.kind === 'saving_throw' ? pending.label || 'Saving throw' : 'Roll';
-  const rollLine = `${label} ${result.total} vs DC ${dc}: ${outcome === 'success' ? '**success**' : outcome === 'near_miss' ? '**near miss**' : '**failure**'}.`;
+  const rolled = result.rollText || String(result.total);
+  const rollLine = `${label} ${rolled} vs DC ${dc}: ${outcome === 'success' ? '**success**' : outcome === 'near_miss' ? '**near miss**' : '**failure**'}.`;
   if (outcome === 'success') return `${rollLine}\n\n${pending.success_result || 'You accomplish what you set out to do.'}`;
   if (outcome === 'near_miss') {
     return `${rollLine}\n\nYou do not get the clean result you wanted, but you catch enough to keep moving: ${pending.failure_result || 'the attempt does not fully work.'}`;
@@ -442,7 +515,7 @@ function getTimePassageIntent(text) {
   return { minutes: amount, label: `${amount} minute${amount === 1 ? '' : 's'}` };
 }
 
-function resolveRest({ restIntent, worldState, characterSheet }) {
+function resolveRest({ restIntent, worldState, characterSheet, rollDie = defaultRollDie }) {
   if (worldState.combat_state?.active) {
     return {
       handled: true,
@@ -462,15 +535,16 @@ function resolveRest({ restIntent, worldState, characterSheet }) {
     },
   };
 
-  const nextState = restIntent.type === 'long'
-    ? completeLongRest(baseState, characterSheet)
-    : completeShortRest(baseState, characterSheet);
+  const restResult = restIntent.type === 'long'
+    ? { worldState: completeLongRest(baseState, characterSheet), note: '' }
+    : completeShortRest(baseState, characterSheet, rollDie);
+  const nextState = restResult.worldState;
   const expired = ticked.expiredEffects.length
     ? ` Expired effects: ${ticked.expiredEffects.map((effect) => effect.name || effect.id).join(', ')}.`
     : '';
   const reply = restIntent.type === 'long'
     ? `You complete a **long rest**. HP, death saves, spell slots, and once-per-rest spell uses reset.${expired}`
-    : `You complete a **short rest**. Time passes, short-rest resources refresh where your sheet supports them, and active durations tick down.${expired}`;
+    : `You complete a **short rest**. Time passes, short-rest resources refresh where your sheet supports them, and active durations tick down.${restResult.note ? ` ${restResult.note}` : ''}${expired}`;
 
   return {
     handled: true,
@@ -518,6 +592,7 @@ function resolveTimePassage({ timeIntent, worldState }) {
 function completeLongRest(worldState, characterSheet = {}) {
   const maxHp = Number(characterSheet?.derived_stats?.max_hp ?? worldState.player_stats?.max_hp ?? worldState.player_stats?.hp ?? 1);
   const maxSlots = getMaxSpellSlots(characterSheet);
+  const hitDice = getHitDiceState(characterSheet, worldState);
   return {
     ...worldState,
     active_effects: [],
@@ -531,21 +606,58 @@ function completeLongRest(worldState, characterSheet = {}) {
       conditions: [],
       spell_slots: maxSlots,
       reset_spell_uses: true,
+      hit_dice: {
+        die: hitDice.die,
+        remaining: hitDice.max,
+        max: hitDice.max,
+      },
+      hit_dice_remaining: hitDice.max,
     },
   };
 }
 
-function completeShortRest(worldState, characterSheet = {}) {
+function completeShortRest(worldState, characterSheet = {}, rollDie = defaultRollDie) {
   const classId = characterSheet?.identity?.class;
   const nextSlots = classId === 'warlock'
     ? getMaxSpellSlots(characterSheet)
     : worldState.player_stats?.spell_slots;
+  const hitDice = getHitDiceState(characterSheet, worldState);
+  const maxHp = Number(characterSheet?.derived_stats?.max_hp ?? worldState.player_stats?.max_hp ?? worldState.player_stats?.hp ?? 1);
+  let hp = Number(worldState.player_stats?.hp ?? characterSheet?.derived_stats?.hp ?? maxHp);
+  let remainingHitDice = hitDice.remaining;
+  const conMod = Number(characterSheet?.abilities?.modifiers?.con || 0);
+  const rolls = [];
+  while (hp < maxHp && remainingHitDice > 0) {
+    const roll = rollDie(hitDice.die);
+    const heal = Math.max(1, roll + conMod);
+    rolls.push({ roll, heal });
+    hp = Math.min(maxHp, hp + heal);
+    remainingHitDice -= 1;
+  }
+
+  const note = rolls.length
+    ? `Spent ${rolls.length} Hit ${rolls.length === 1 ? 'Die' : 'Dice'} (d${hitDice.die}${formatSigned(conMod)}): ${rolls.map((item) => item.heal).join(', ')} healing. HP is now ${hp}/${maxHp}.`
+    : hp >= maxHp
+      ? `No Hit Dice spent because HP is already full (${hp}/${maxHp}).`
+      : 'No Hit Dice remain to spend for healing.';
+
   return {
-    ...worldState,
-    player_stats: {
-      ...(worldState.player_stats || {}),
-      spell_slots: nextSlots,
+    worldState: {
+      ...worldState,
+      player_stats: {
+        ...(worldState.player_stats || {}),
+        hp,
+        max_hp: maxHp,
+        spell_slots: nextSlots,
+        hit_dice: {
+          die: hitDice.die,
+          remaining: remainingHitDice,
+          max: hitDice.max,
+        },
+        hit_dice_remaining: remainingHitDice,
+      },
     },
+    note,
   };
 }
 
@@ -554,6 +666,36 @@ function getMaxSpellSlots(characterSheet = {}) {
   const content = getContentBundle();
   const classData = content.classes.find((item) => item.id === classId);
   return classData?.spellcasting?.slots || characterSheet?.spellcasting?.slots || {};
+}
+
+function getHitDiceState(characterSheet = {}, worldState = {}) {
+  const classId = characterSheet?.identity?.class;
+  const content = getContentBundle();
+  const classData = content.classes.find((item) => item.id === classId);
+  const die = Number(
+    worldState.player_stats?.hit_dice?.die
+      ?? characterSheet.resources?.hit_dice?.die
+      ?? classData?.hit_die
+      ?? 8,
+  );
+  const max = Number(
+    worldState.player_stats?.hit_dice?.max
+      ?? characterSheet.resources?.hit_dice?.max
+      ?? characterSheet?.identity?.level
+      ?? characterSheet?.derived_stats?.level
+      ?? 1,
+  );
+  const remaining = Number(
+    worldState.player_stats?.hit_dice?.remaining
+      ?? worldState.player_stats?.hit_dice_remaining
+      ?? characterSheet.resources?.hit_dice?.remaining
+      ?? max,
+  );
+  return {
+    die,
+    max: Math.max(1, max),
+    remaining: Math.max(0, Math.min(Math.max(1, max), remaining)),
+  };
 }
 
 function promptInitiative({ message, worldState, characterSheet, currentTurn = 0 }) {
@@ -576,7 +718,7 @@ function promptInitiative({ message, worldState, characterSheet, currentTurn = 0
       ...worldState,
       pending_roll: pendingRoll,
     },
-    reply: `Combat begins. Roll initiative. [ROLL: 1d20${formatSigned(initiative)}]`,
+    reply: `Combat begins. Roll initiative. ${rollTagForPending(pendingRoll)}`,
   };
 }
 
@@ -719,8 +861,18 @@ function resolvePlayerAttack({ worldState, characterSheet, rollDie }) {
     return endCombat(worldState, 'There is no active enemy left to attack. Combat ends before the initiative tracker has to file a complaint.');
   }
 
+  const blocked = getTurnBlockReason(player);
+  if (blocked) {
+    return {
+      handled: true,
+      logType: 'referee_player_condition_blocked',
+      worldState: spent.worldState,
+      reply: `You cannot attack right now: ${blocked}.`,
+    };
+  }
+
   const attack = getPrimaryAttack(characterSheet);
-  const advantageMode = getAttackAdvantageMode(target);
+  const advantageMode = getAttackAdvantageMode(player, target);
   const attackRoll = rollD20WithMode(rollDie, advantageMode);
   const natural = attackRoll.natural;
   const attackBonusDice = rollBonusDice(getActiveBonusDice(spent.worldState, 'attack'), rollDie);
@@ -734,12 +886,12 @@ function resolvePlayerAttack({ worldState, characterSheet, rollDie }) {
   const lines = [
     `You attack ${target.name} with ${attack.name}. Attack roll: ${attackRoll.text}${formatSigned(attack.attackBonus)}${bonusText} = ${attackTotal} vs AC ${target.ac}.`,
   ];
-  if (advantageMode) lines.push(`Attack roll has ${advantageMode} from ${formatList(getAttackAdvantageSources(target))}.`);
+  if (advantageMode) lines.push(`Attack roll has ${advantageMode} from ${formatList(getAttackAdvantageSources(player, target))}.`);
 
   const consumeEffectIds = [];
   if (hit) {
     const damage = rollDamage(attack.damageFormula, rollDie, isCrit);
-    const bonusDamage = rollBonusDice(getActiveDamageDice(spent.worldState), rollDie);
+    const bonusDamage = rollBonusDice(getActiveDamageDice(spent.worldState, target), rollDie);
     const totalDamage = damage.total + bonusDamage.total;
     const before = Number(target.hp || 0);
     target.hp = Math.max(0, before - totalDamage);
@@ -920,14 +1072,15 @@ function getConcentrationEffects(worldState = {}) {
 }
 
 function rollTagForPending(pending = {}) {
+  const idPart = pending.id ? `id=${pending.id} ` : '';
   if (pending.kind === 'initiative' || pending.kind === 'death_save') {
-    return `[ROLL: ${pending.formula || '1d20'}]`;
+    return `[ROLL: ${idPart}${pending.formula || '1d20'}]`;
   }
   if (pending.kind === 'saving_throw' || pending.kind === 'concentration_save') {
-    return `[SAVE: ability=${pending.ability || 'con'} modifier=${Number(pending.modifier || 0)}${pending.modifier_breakdown ? ` breakdown="${sanitizeTagValue(pending.modifier_breakdown)}"` : ''}${pending.bonus_die ? ` bonus_die=${pending.bonus_die} bonus_source="${sanitizeTagValue(pending.bonus_source || 'bonus')}"` : ''}]`;
+    return `[SAVE: ${idPart}ability=${pending.ability || 'con'} modifier=${Number(pending.modifier || 0)}${pending.modifier_breakdown ? ` breakdown="${sanitizeTagValue(pending.modifier_breakdown)}"` : ''}${pending.bonus_die ? ` bonus_die=${pending.bonus_die} bonus_source="${sanitizeTagValue(pending.bonus_source || 'bonus')}"` : ''}]`;
   }
   if (pending.kind === 'skill_check' || pending.kind === 'ability_check') {
-    return `[CHECK:${pending.skill ? ` skill=${pending.skill}` : ''} ability=${pending.ability} modifier=${Number(pending.modifier || 0)}${pending.modifier_breakdown ? ` breakdown="${sanitizeTagValue(pending.modifier_breakdown)}"` : ''}${pending.bonus_die ? ` bonus_die=${pending.bonus_die} bonus_source="${sanitizeTagValue(pending.bonus_source || 'bonus')}"` : ''}]`;
+    return `[CHECK: ${idPart}${pending.skill ? `skill=${pending.skill} ` : ''}ability=${pending.ability} modifier=${Number(pending.modifier || 0)}${pending.modifier_breakdown ? ` breakdown="${sanitizeTagValue(pending.modifier_breakdown)}"` : ''}${pending.bonus_die ? ` bonus_die=${pending.bonus_die} bonus_source="${sanitizeTagValue(pending.bonus_source || 'bonus')}"` : ''}]`;
   }
   return '';
 }
@@ -1125,11 +1278,22 @@ function getPrimaryAttack(characterSheet) {
   };
 }
 
-function getAttackAdvantageMode(target = {}) {
-  return getAttackAdvantageSources(target).length > 0 ? 'advantage' : null;
+function getAttackAdvantageMode(attacker = {}, target = {}) {
+  const conditionMode = getAttackMode({ attacker, target });
+  const spellAdvantage = getSpellAttackAdvantageSources(target).length > 0;
+  if (conditionMode === 'disadvantage' && spellAdvantage) return null;
+  if (conditionMode) return conditionMode;
+  return spellAdvantage ? 'advantage' : null;
 }
 
-function getAttackAdvantageSources(target = {}) {
+function getAttackAdvantageSources(attacker = {}, target = {}) {
+  return [
+    ...getAttackModeSources({ attacker, target }),
+    ...getSpellAttackAdvantageSources(target),
+  ];
+}
+
+function getSpellAttackAdvantageSources(target = {}) {
   const conditions = target.conditions || [];
   const sources = [];
   if (conditions.includes('faerie_fire')) sources.push('Faerie Fire');
@@ -1204,6 +1368,53 @@ function isMovementIntent(message) {
   return /\b(?:go|walk|head|travel|move|return|enter|leave|approach|step|run|ride|follow|continue|flee|escape)\b/i.test(message);
 }
 
+function advanceNarrativeTime({ message = '', dmReply = '', worldState = {}, characterSheet = {}, defaultElapsed = null } = {}) {
+  if (worldState.combat_state?.active || worldState.pending_roll) {
+    return { worldState, replySuffix: '' };
+  }
+
+  const elapsed = defaultElapsed || estimateNarrativeElapsed(message, dmReply);
+  const rounds = Number(elapsed.rounds || 0);
+  const minutes = Number(elapsed.minutes || 0);
+  if (rounds <= 0 && minutes <= 0) {
+    return { worldState, replySuffix: '' };
+  }
+
+  const ticked = tickActiveEffects(worldState, { rounds, minutes });
+  const nextWorldState = {
+    ...ticked.worldState,
+    time_state: {
+      ...(ticked.worldState.time_state || {}),
+      elapsed_rounds: Number(ticked.worldState.time_state?.elapsed_rounds || 0) + rounds,
+      elapsed_minutes: Number(ticked.worldState.time_state?.elapsed_minutes || 0) + minutes,
+      scene_time: elapsed.label || (minutes > 0 ? `${minutes} minute${minutes === 1 ? '' : 's'} later` : 'moments later'),
+    },
+  };
+  const expired = ticked.expiredEffects.length
+    ? `\n\n**Rules clock:** ${ticked.expiredEffects.map((effect) => effect.name || effect.id).join(', ')} ${ticked.expiredEffects.length === 1 ? 'expires' : 'expire'}.`
+    : '';
+
+  return {
+    worldState: nextWorldState,
+    characterSheet,
+    replySuffix: expired,
+  };
+}
+
+function estimateNarrativeElapsed(message = '', dmReply = '') {
+  const text = `${message}\n${dmReply}`.toLowerCase();
+  if (/\b(?:travel|walk|head|go|return|move|ride|follow)\b.*\b(?:road|town|inn|gate|forest|woods|square|temple|shop|hall|cellar|house)\b/.test(text)) {
+    return { minutes: 5, label: 'about 5 minutes later' };
+  }
+  if (/\b(?:search|investigate|examine|inspect|look around|check the area|look for tracks|follow tracks)\b/.test(text)) {
+    return { minutes: 1, label: 'about 1 minute later' };
+  }
+  if (/\b(?:conversation|talk|ask|answer|reply|speak|read|study|watch|listen)\b/.test(text)) {
+    return { rounds: 1, label: 'moments later' };
+  }
+  return { rounds: 1, label: 'moments later' };
+}
+
 function formatSigned(value) {
   const number = Number(value || 0);
   return number >= 0 ? `+${number}` : String(number);
@@ -1217,6 +1428,7 @@ module.exports = {
   adjudicate,
   resolveRefereeAction: adjudicate,
   advanceEnemyTurns,
+  advanceNarrativeTime,
   parseRollResult,
   promptCheck,
   chooseDc,

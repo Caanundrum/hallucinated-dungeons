@@ -1,3 +1,10 @@
+const crypto = require('crypto');
+const {
+  getAttackMode,
+  getAttackModeSources,
+  getTurnBlockReason,
+} = require('./conditionEngine');
+
 function resolveCreatureTurns({
   worldState = {},
   characterSheet = {},
@@ -55,7 +62,7 @@ function resolveCreatureTurns({
 }
 
 function resolveCreatureAction({ actor, player, characterSheet, worldState, rollDie, playerDodging }) {
-  const skipReason = getTurnSkipReason(actor);
+  const skipReason = getTurnBlockReason(actor);
   if (skipReason) {
     return {
       actor: {
@@ -76,15 +83,17 @@ function resolveCreatureAction({ actor, player, characterSheet, worldState, roll
   }
 
   const attack = actor.attack || { name: 'attack', attack_bonus: 3, damage_formula: '1d6+1' };
-  const first = rollDie(20);
-  const second = playerDodging ? rollDie(20) : null;
-  const natural = playerDodging ? Math.min(first, second) : first;
+  const attackMode = getAttackMode({ attacker: actor, target: player, defenderDodging: playerDodging });
+  const attackRoll = rollD20WithMode(rollDie, attackMode);
+  const natural = attackRoll.natural;
   const attackBonus = Number(attack.attack_bonus || 0);
   const attackTotal = natural + attackBonus;
   const ac = Number(player.ac || getArmorClass(characterSheet, worldState));
   const rollText = playerDodging
-    ? `${first}/${second} with disadvantage, using ${natural}${formatSigned(attackBonus)} = ${attackTotal}`
-    : `${natural}${formatSigned(attackBonus)} = ${attackTotal}`;
+    ? `${attackRoll.text}${formatSigned(attackBonus)} = ${attackTotal}`
+    : `${attackRoll.text}${formatSigned(attackBonus)} = ${attackTotal}`;
+  const conditionSources = getAttackModeSources({ attacker: actor, target: player, defenderDodging: playerDodging });
+  const modeText = attackMode ? ` (${attackMode}: ${conditionSources.join(', ')})` : '';
   const criticalHit = natural === 20;
   const criticalMiss = natural === 1;
 
@@ -102,7 +111,7 @@ function resolveCreatureAction({ actor, player, characterSheet, worldState, roll
     return {
       actor: nextActor,
       player: applied.player,
-      lines: [`${actor.name} uses ${attack.name}: rolls ${rollText} vs AC ${ac}. ${criticalHit ? '**Critical hit.** ' : ''}Hit for ${damage.total} damage${applied.absorbed ? ` (${applied.absorbed} absorbed by temporary HP)` : ''}. ${player.name}: (${before} -> ${applied.player.hp} HP).${retaliationLine}`],
+      lines: [`${actor.name} uses ${attack.name}: rolls ${rollText} vs AC ${ac}${modeText}. ${criticalHit ? '**Critical hit.** ' : ''}Hit for ${damage.total} damage${applied.absorbed ? ` (${applied.absorbed} absorbed by temporary HP)` : ''}. ${player.name}: (${before} -> ${applied.player.hp} HP).${retaliationLine}`],
       damageEvents: [{
         target: 'player',
         source: actor.name,
@@ -115,14 +124,14 @@ function resolveCreatureAction({ actor, player, characterSheet, worldState, roll
     return {
       actor,
       player,
-      lines: [`${actor.name} uses ${attack.name}: rolls ${rollText} vs AC ${ac}. **Critical miss.** Even the initiative tracker winces.`],
+      lines: [`${actor.name} uses ${attack.name}: rolls ${rollText} vs AC ${ac}${modeText}. **Critical miss.** Even the initiative tracker winces.`],
     };
   }
 
   return {
     actor,
     player,
-    lines: [`${actor.name} uses ${attack.name}: rolls ${rollText} vs AC ${ac}. Miss.`],
+    lines: [`${actor.name} uses ${attack.name}: rolls ${rollText} vs AC ${ac}${modeText}. Miss.`],
   };
 }
 
@@ -145,20 +154,6 @@ function getActingIndexes(combatants, turnIndex, playerIndex, advanceRound) {
     index = (index + 1) % combatants.length;
   }
   return indexes;
-}
-
-function getTurnSkipReason(actor = {}) {
-  const conditions = (actor.conditions || []).map((condition) => String(condition).toLowerCase());
-  if (conditions.some((condition) => ['incapacitated', 'unconscious', 'sleep', 'asleep', 'stunned', 'paralyzed'].includes(condition))) {
-    return 'it is unable to act';
-  }
-  if (conditions.includes('command')) {
-    return 'Command overrides its action for this round';
-  }
-  if (conditions.includes('charm_person') || conditions.includes('charmed')) {
-    return 'it is charmed and cannot attack you right now';
-  }
-  return null;
 }
 
 function clearPlayerTurnConditions(conditions = []) {
@@ -220,6 +215,20 @@ function getMeleeRetaliation(worldState = {}, beforeTempHp = 0) {
   return null;
 }
 
+function rollD20WithMode(rollDie, mode = null) {
+  if (mode === 'advantage' || mode === 'disadvantage') {
+    const first = rollDie(20);
+    const second = rollDie(20);
+    const natural = mode === 'advantage' ? Math.max(first, second) : Math.min(first, second);
+    return {
+      natural,
+      text: `${first}/${second} with ${mode}, using ${natural}`,
+    };
+  }
+  const natural = rollDie(20);
+  return { natural, text: String(natural) };
+}
+
 function rollDamage(formula, rollDie, crit = false) {
   const parsed = String(formula || '1d6').match(/(\d+)d(\d+)([+-]\d+)?/i);
   if (!parsed) return { total: 1, rolls: [1] };
@@ -247,7 +256,7 @@ function getArmorClass(characterSheet, worldState) {
 }
 
 function defaultRollDie(sides) {
-  return Math.floor(Math.random() * Number(sides)) + 1;
+  return crypto.randomInt(1, Number(sides) + 1);
 }
 
 function formatSigned(value) {
@@ -258,5 +267,5 @@ function formatSigned(value) {
 module.exports = {
   resolveCreatureTurns,
   getActingIndexes,
-  getTurnSkipReason,
+  getTurnSkipReason: getTurnBlockReason,
 };

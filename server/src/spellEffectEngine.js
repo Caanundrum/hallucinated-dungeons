@@ -1,4 +1,10 @@
+const crypto = require('crypto');
 const { getSpellActionResource } = require('./actionEconomy');
+const {
+  getAttackMode,
+  getAttackModeSources,
+  resolveSavingThrow,
+} = require('./conditionEngine');
 
 const CONCENTRATION_DURATIONS = {
   bless: 'Concentration, up to 1 minute',
@@ -81,7 +87,7 @@ function resolveSpellCast({ message, content, characterSheet, worldState = {} })
       ? worldState.active_effects
       : nextSheet.derived_stats?.active_spell_effects || [],
   );
-  const spellEffect = buildSpellEffect(nextSheet, spell, known);
+  const spellEffect = buildSpellEffect(nextSheet, spell, known, message, worldState);
   if (spellEffect) {
     const retainedEffects = spellEffect.concentration
       ? currentEffects.filter((effect) => !effect.concentration)
@@ -97,6 +103,7 @@ function resolveSpellCast({ message, content, characterSheet, worldState = {} })
   return {
     matched: true,
     blocked: false,
+    message,
     spell,
     characterSheet: nextSheet,
     worldState: nextWorldState,
@@ -109,31 +116,32 @@ function resolveSpellOutcome({ spellCast, characterSheet, worldState = {}, rollD
   if (!spell) return null;
 
   const rule = SPELL_OUTCOMES[spell.id];
-  const combatActive = Boolean(worldState.combat_state?.active);
+  const stateWithMessage = {
+    ...worldState,
+    __spell_message: spellCast.message || '',
+  };
 
-  if (!combatActive && rule?.type !== 'healing') return null;
-  if (!rule && combatActive) {
-    return resolveCombatUtilitySpell({ spell, worldState });
+  if (!rule) {
+    return resolveUtilitySpell({ spell, worldState: stateWithMessage });
   }
-  if (!rule) return null;
 
   if (rule.type === 'spell_attack') {
-    return resolveSpellAttack({ spell, rule, characterSheet, worldState, rollDie });
+    return resolveSpellAttack({ spell, rule, characterSheet, worldState: stateWithMessage, rollDie });
   }
   if (rule.type === 'automatic_damage') {
-    return resolveAutomaticDamageSpell({ spell, rule, worldState, rollDie });
+    return resolveAutomaticDamageSpell({ spell, rule, worldState: stateWithMessage, rollDie });
   }
   if (rule.type === 'saving_throw') {
-    return resolveSavingThrowSpell({ spell, rule, characterSheet, worldState, rollDie });
+    return resolveSavingThrowSpell({ spell, rule, characterSheet, worldState: stateWithMessage, rollDie });
   }
   if (rule.type === 'save_effect') {
-    return resolveSaveEffectSpell({ spell, rule, characterSheet, worldState, rollDie });
+    return resolveSaveEffectSpell({ spell, rule, characterSheet, worldState: stateWithMessage, rollDie });
   }
   if (rule.type === 'healing') {
-    return resolveHealingSpell({ spell, rule, characterSheet, worldState, rollDie });
+    return resolveHealingSpell({ spell, rule, characterSheet, worldState: stateWithMessage, rollDie });
   }
   if (rule.type === 'sleep_pool') {
-    return resolveSleepSpell({ spell, rule, worldState, rollDie });
+    return resolveSleepSpell({ spell, rule, worldState: stateWithMessage, rollDie });
   }
 
   return null;
@@ -156,19 +164,25 @@ function validateSpellTiming({ spell, message, worldState = {}, characterSheet =
 }
 
 function resolveSpellAttack({ spell, rule, characterSheet, worldState, rollDie }) {
-  const combat = cloneCombatState(worldState.combat_state);
-  const target = firstEnemy(combat);
-  if (!target) return noSpellTarget(worldState, spell);
+  const context = getSpellTargetContext({ spell, spellCastMessage: worldState.__spell_message, worldState, characterSheet });
+  if (!context?.target) return noSpellTarget(worldState, spell);
+  const { combat, target, activeCombat } = context;
 
   const attackBonus = Number(characterSheet?.derived_stats?.spell_attack_bonus || 0);
-  const natural = rollDie(20);
+  const attacker = getPlayerCombatant(combat, characterSheet, worldState);
+  const attackMode = getAttackMode({ attacker, target });
+  const attackRoll = rollD20WithMode(rollDie, attackMode);
+  const natural = attackRoll.natural;
   const total = natural + attackBonus;
   const criticalHit = natural === 20;
   const criticalMiss = natural === 1;
   const hit = !criticalMiss && (criticalHit || total >= Number(target.ac || 10));
   const lines = [
-    `You cast **${spell.name}** at ${target.name}. Spell attack: ${natural}${formatSigned(attackBonus)} = ${total} vs AC ${target.ac}.`,
+    `You cast **${spell.name}** at ${target.name}. Spell attack: ${attackRoll.text}${formatSigned(attackBonus)} = ${total} vs AC ${target.ac}.`,
   ];
+  if (attackMode) {
+    lines.push(`Spell attack has ${attackMode} from ${formatList(getAttackModeSources({ attacker, target }))}.`);
+  }
 
   if (hit) {
     const damage = rollFormula(rule.damage, rollDie, { crit: criticalHit });
@@ -185,13 +199,13 @@ function resolveSpellAttack({ spell, rule, characterSheet, worldState, rollDie }
     lines.push('Miss.');
   }
 
-  return finishSpellCombatAction({ spell, worldState, combat, lines });
+  return finishSpellAction({ spell, worldState, combat, lines, activeCombat });
 }
 
 function resolveAutomaticDamageSpell({ spell, rule, worldState, rollDie }) {
-  const combat = cloneCombatState(worldState.combat_state);
-  const target = firstEnemy(combat);
-  if (!target) return noSpellTarget(worldState, spell);
+  const context = getSpellTargetContext({ spell, spellCastMessage: worldState.__spell_message, worldState });
+  if (!context?.target) return noSpellTarget(worldState, spell);
+  const { combat, target, activeCombat } = context;
 
   const rolls = Array.from({ length: Number(rule.darts || 1) }, () => rollFormula(rule.damage, rollDie));
   const total = rolls.reduce((sum, roll) => sum + roll.total, 0);
@@ -201,46 +215,44 @@ function resolveAutomaticDamageSpell({ spell, rule, worldState, rollDie }) {
     `You cast **${spell.name}** at ${target.name}. The spell hits automatically for ${total} ${rule.damage_type} damage. ${target.name}: (${before} -> ${target.hp} HP).`,
   ];
 
-  return finishSpellCombatAction({ spell, worldState, combat, lines });
+  return finishSpellAction({ spell, worldState, combat, lines, activeCombat });
 }
 
 function resolveSavingThrowSpell({ spell, rule, characterSheet, worldState, rollDie }) {
-  const combat = cloneCombatState(worldState.combat_state);
-  const target = firstEnemy(combat);
-  if (!target) return noSpellTarget(worldState, spell);
+  const context = getSpellTargetContext({ spell, spellCastMessage: worldState.__spell_message, worldState });
+  if (!context?.target) return noSpellTarget(worldState, spell);
+  const { combat, target, activeCombat } = context;
 
   const dc = Number(characterSheet?.derived_stats?.spell_save_dc || 10);
   const saveBonus = getTargetSaveBonus(target, rule.save);
-  const natural = rollDie(20);
-  const total = natural + saveBonus;
-  const success = total >= dc;
+  const save = resolveSavingThrow({ target, ability: rule.save, dc, rollDie, bonus: saveBonus });
+  const success = save.success;
   const damage = rollFormula(rule.damage, rollDie);
   const appliedDamage = success && rule.half_on_success ? Math.floor(damage.total / 2) : success ? 0 : damage.total;
   const before = Number(target.hp || 0);
   target.hp = Math.max(0, before - appliedDamage);
 
   const lines = [
-    `You cast **${spell.name}** at ${target.name}. ${target.name} rolls a ${rule.save.toUpperCase()} save: ${natural}${formatSigned(saveBonus)} = ${total} vs DC ${dc}.`,
+    `You cast **${spell.name}** at ${target.name}. ${target.name} rolls a ${rule.save.toUpperCase()} save: ${save.automaticFailure ? save.text : `${save.text} vs DC ${dc}`}.`,
     success
       ? `Save succeeds.${appliedDamage ? ` ${target.name} still takes ${appliedDamage} ${rule.damage_type} damage. ${target.name}: (${before} -> ${target.hp} HP).` : ' No damage is applied.'}`
       : `Save fails. ${target.name} takes ${appliedDamage} ${rule.damage_type} damage. ${target.name}: (${before} -> ${target.hp} HP).`,
   ];
 
-  return finishSpellCombatAction({ spell, worldState, combat, lines });
+  return finishSpellAction({ spell, worldState, combat, lines, activeCombat });
 }
 
 function resolveSaveEffectSpell({ spell, rule, characterSheet, worldState, rollDie }) {
-  const combat = cloneCombatState(worldState.combat_state);
-  const target = firstEnemy(combat);
-  if (!target) return noSpellTarget(worldState, spell);
+  const context = getSpellTargetContext({ spell, spellCastMessage: worldState.__spell_message, worldState });
+  if (!context?.target) return noSpellTarget(worldState, spell);
+  const { combat, target, activeCombat } = context;
 
   const dc = Number(characterSheet?.derived_stats?.spell_save_dc || 10);
   const saveBonus = getTargetSaveBonus(target, rule.save);
-  const natural = rollDie(20);
-  const total = natural + saveBonus;
-  const success = total >= dc;
+  const save = resolveSavingThrow({ target, ability: rule.save, dc, rollDie, bonus: saveBonus });
+  const success = save.success;
   const lines = [
-    `You cast **${spell.name}** at ${target.name}. ${target.name} rolls a ${rule.save.toUpperCase()} save: ${natural}${formatSigned(saveBonus)} = ${total} vs DC ${dc}.`,
+    `You cast **${spell.name}** at ${target.name}. ${target.name} rolls a ${rule.save.toUpperCase()} save: ${save.automaticFailure ? save.text : `${save.text} vs DC ${dc}`}.`,
     success ? 'Save succeeds. The spell does not take hold.' : `Save fails. ${rule.effect}`,
   ];
   if (!success) {
@@ -255,6 +267,7 @@ function resolveSaveEffectSpell({ spell, rule, characterSheet, worldState, rollD
           name: spell.name,
           source_type: 'spell',
           target: target.name,
+          target_combatant_id: target.id || null,
           duration: normalizeSpellDuration(spell),
           concentration: isConcentrationDuration(normalizeSpellDuration(spell)),
           mechanical_effect: rule.effect,
@@ -264,33 +277,48 @@ function resolveSaveEffectSpell({ spell, rule, characterSheet, worldState, rollD
       })
     : { ...worldState, combat_state: combat };
 
-  return finishSpellCombatAction({ spell, worldState: effectState, combat: effectState.combat_state, lines });
+  return finishSpellAction({ spell, worldState: effectState, combat: effectState.combat_state, lines, activeCombat });
 }
 
 function resolveSleepSpell({ spell, rule, worldState, rollDie }) {
-  const combat = cloneCombatState(worldState.combat_state);
-  const target = firstEnemy(combat);
-  if (!target) return noSpellTarget(worldState, spell);
+  const context = getSpellTargetContext({ spell, spellCastMessage: worldState.__spell_message, worldState, allowMultiple: true });
+  if (!context?.target) return noSpellTarget(worldState, spell);
+  const { combat, activeCombat } = context;
 
   const pool = rollFormula(rule.dice, rollDie);
+  let remainingPool = pool.total;
+  const eligibleTargets = (combat.combatants || [])
+    .filter((combatant) => !combatant.is_player && Number(combatant.hp) > 0)
+    .sort((a, b) => Number(a.hp || 0) - Number(b.hp || 0));
+  const affected = [];
   const lines = [
     `You cast **${spell.name}**. Sleep pool: ${pool.rolls.join(' + ')} = ${pool.total} HP.`,
   ];
-  if (Number(target.hp || 0) <= pool.total) {
+
+  for (const target of eligibleTargets) {
+    const hp = Number(target.hp || 0);
+    if (hp > remainingPool) continue;
     target.conditions = addCondition(target.conditions, 'sleep');
-    lines.push(`${target.name} has ${target.hp} HP, so it falls **unconscious** until damaged, shaken awake, or the spell ends.`);
-  } else {
-    lines.push(`${target.name} has ${target.hp} HP, which is too much for the spell pool. Sleep does not take hold.`);
+    affected.push(target);
+    remainingPool -= hp;
   }
 
-  const effectState = (target.conditions || []).includes('sleep')
+  if (affected.length > 0) {
+    const targetText = affected.map((target) => `${target.name} (${target.hp} HP)`).join(', ');
+    lines.push(`${targetText} ${affected.length === 1 ? 'falls' : 'fall'} **unconscious** until damaged, shaken awake, or the spell ends.`);
+  } else {
+    lines.push('No eligible creature has low enough current HP for the spell pool. Sleep does not take hold.');
+  }
+
+  const effectState = affected.length > 0
     ? addSpellEffectToWorldState({
         worldState: { ...worldState, combat_state: combat },
         effect: {
           id: 'sleep',
           name: 'Sleep',
           source_type: 'spell',
-          target: target.name,
+          target: affected.map((target) => target.name).join(', '),
+          targets: affected.map((target) => ({ name: target.name, id: target.id || null })),
           duration: spell.duration || '1 minute',
           concentration: false,
           mechanical_effect: 'The target is asleep until damaged, awakened, or the spell ends.',
@@ -300,7 +328,7 @@ function resolveSleepSpell({ spell, rule, worldState, rollDie }) {
       })
     : { ...worldState, combat_state: combat };
 
-  return finishSpellCombatAction({ spell, worldState: effectState, combat: effectState.combat_state, lines });
+  return finishSpellAction({ spell, worldState: effectState, combat: effectState.combat_state, lines, activeCombat });
 }
 
 function resolveHealingSpell({ spell, rule, characterSheet, worldState, rollDie }) {
@@ -315,7 +343,7 @@ function resolveHealingSpell({ spell, rule, characterSheet, worldState, rollDie 
   if (player) player.hp = after;
 
   const nextState = {
-    ...worldState,
+    ...stripInternalState(worldState),
     combat_state: combat.active ? combat : worldState.combat_state,
     player_stats: {
       ...stats,
@@ -337,21 +365,32 @@ function resolveHealingSpell({ spell, rule, characterSheet, worldState, rollDie 
   };
 }
 
-function resolveCombatUtilitySpell({ spell, worldState }) {
+function resolveUtilitySpell({ spell, worldState }) {
   return {
     handled: true,
     logType: 'spell_utility',
     spell,
-    worldState,
+    worldState: stripInternalState(worldState),
     reply: `You cast **${spell.name}**. Its effect is now active in the scene: ${spell.description}`,
     consumesTurn: consumesCombatTurn(spell),
   };
 }
 
-function finishSpellCombatAction({ spell, worldState, combat, lines }) {
+function finishSpellAction({ spell, worldState, combat, lines, activeCombat }) {
+  if (!activeCombat) {
+    return {
+      handled: true,
+      logType: 'spell_scene',
+      spell,
+      worldState: stripInternalState(persistSceneTargetStates({ ...worldState, combat_state: worldState.combat_state || null }, combat)),
+      reply: lines.join('\n\n'),
+      consumesTurn: false,
+    };
+  }
+
   const enemiesAlive = combat.combatants.some((combatant) => !combatant.is_player && Number(combatant.hp) > 0);
   const nextState = {
-    ...worldState,
+    ...stripInternalState(worldState),
     combat_state: enemiesAlive ? combat : null,
   };
   const reply = enemiesAlive
@@ -380,13 +419,159 @@ function addCondition(conditions = [], condition) {
   return [...new Set([...(conditions || []), condition].filter(Boolean))];
 }
 
+function getSpellTargetContext({ spell, spellCastMessage = '', worldState = {}, characterSheet = {}, allowMultiple = false } = {}) {
+  if (worldState.combat_state?.active) {
+    const combat = cloneCombatState(worldState.combat_state);
+    const target = firstEnemy(combat);
+    return target ? { combat, target, activeCombat: true } : null;
+  }
+
+  const explicitTarget = inferSpellTargetName(spellCastMessage, worldState, spell);
+  const targetNames = getSceneSpellTargets({ explicitTarget, worldState, allowMultiple });
+  if (targetNames.length === 0) return null;
+
+  const combatants = targetNames.map((name) => buildSceneTargetCombatant(name, worldState));
+  return {
+    combat: {
+      active: false,
+      round: 0,
+      turn_index: 0,
+      combatants,
+    },
+    target: combatants[0],
+    activeCombat: false,
+  };
+}
+
+function getSceneSpellTargets({ explicitTarget, worldState = {}, allowMultiple = false }) {
+  const presentNpcs = (worldState.scene_presence?.present_npcs || []).filter(Boolean);
+  const trackedTargets = (worldState.scene_target_states || []).map((target) => target.name).filter(Boolean);
+  const candidates = [...new Set([...presentNpcs, ...trackedTargets])];
+
+  if (explicitTarget) {
+    const matched = candidates.find((candidate) => targetNamesMatch(candidate, explicitTarget));
+    if (matched) return [matched];
+    if (presentNpcs.length === 0 && trackedTargets.length === 0) return [explicitTarget];
+    return [];
+  }
+
+  if (allowMultiple && candidates.length > 0) return candidates;
+  if (candidates.length === 1) return [candidates[0]];
+  return [];
+}
+
+function buildSceneTargetCombatant(name, worldState = {}) {
+  const existing = (worldState.scene_target_states || []).find((target) => targetNamesMatch(target.name, name)) || {};
+  return {
+    id: existing.id || normalizeName(name),
+    name,
+    hp: Number(existing.hp ?? existing.max_hp ?? 8),
+    max_hp: Number(existing.max_hp ?? existing.hp ?? 8),
+    ac: Number(existing.ac ?? 10),
+    conditions: Array.isArray(existing.conditions) ? existing.conditions : [],
+    saves: existing.saves || { dex: 1, con: 1, wis: 0, str: 1, int: 0, cha: 0 },
+    is_player: false,
+    scene_target: true,
+  };
+}
+
+function getPlayerCombatant(combat, characterSheet = {}, worldState = {}) {
+  return (combat.combatants || []).find((combatant) => combatant.is_player) || {
+    name: characterSheet?.identity?.name || worldState.player_stats?.name || 'You',
+    conditions: worldState.player_stats?.conditions || characterSheet?.derived_stats?.conditions || [],
+    is_player: true,
+  };
+}
+
+function persistSceneTargetStates(worldState = {}, combat = {}) {
+  const sceneTargets = (combat.combatants || []).filter((combatant) => !combatant.is_player && combatant.scene_target);
+  if (sceneTargets.length === 0) return worldState;
+
+  const existing = Array.isArray(worldState.scene_target_states) ? worldState.scene_target_states : [];
+  const byName = new Map(existing.map((target) => [normalizeName(target.name), target]));
+  for (const target of sceneTargets) {
+    byName.set(normalizeName(target.name), {
+      ...(byName.get(normalizeName(target.name)) || {}),
+      id: target.id || normalizeName(target.name),
+      name: target.name,
+      hp: Number(target.hp || 0),
+      max_hp: Number(target.max_hp || target.hp || 0),
+      ac: Number(target.ac || 10),
+      conditions: target.conditions || [],
+      saves: target.saves || {},
+    });
+  }
+
+  return {
+    ...worldState,
+    scene_target_states: [...byName.values()],
+  };
+}
+
+function inferSpellTargetName(message = '', worldState = {}, spell = {}) {
+  if (/self/i.test(spell.range || '') || /\b(?:myself|self|me)\b/i.test(message || '')) {
+    return null;
+  }
+
+  const targetMatch = String(message || '').match(/\b(?:at|on|toward|towards|to)\s+(?:the\s+|a\s+|an\s+)?([a-z][a-z' -]{1,40}?)(?:\s+(?:with|while|because|before|after|and|then|using|for)\b|[.!?]|$)/i);
+  const rawTarget = targetMatch?.[1] ? cleanTargetName(targetMatch[1]) : '';
+  if (rawTarget) return rawTarget;
+
+  const present = worldState.scene_presence?.present_npcs || [];
+  if (present.length === 1) return present[0];
+  return '';
+}
+
+function cleanTargetName(value) {
+  return String(value || '')
+    .replace(/\b(myself|self|me)\b/i, '')
+    .replace(/\b(the|a|an)\b/gi, '')
+    .trim();
+}
+
+function targetNamesMatch(a, b) {
+  const left = normalizeName(a);
+  const right = normalizeName(b);
+  return left === right || left.includes(right) || right.includes(left);
+}
+
+function normalizeName(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function rollD20WithMode(rollDie, mode = null) {
+  if (mode === 'advantage' || mode === 'disadvantage') {
+    const first = rollDie(20);
+    const second = rollDie(20);
+    const natural = mode === 'advantage' ? Math.max(first, second) : Math.min(first, second);
+    return {
+      natural,
+      text: `${first}/${second} with ${mode}, using ${natural}`,
+    };
+  }
+  const natural = rollDie(20);
+  return { natural, text: String(natural) };
+}
+
+function stripInternalState(worldState = {}) {
+  const { __spell_message: ignored, ...clean } = worldState;
+  return clean;
+}
+
+function formatList(items = []) {
+  const list = (items || []).filter(Boolean);
+  if (list.length === 0) return 'the rules';
+  if (list.length === 1) return list[0];
+  return `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
+}
+
 function noSpellTarget(worldState, spell) {
   return {
     handled: true,
     logType: 'spell_no_target',
     spell,
-    worldState,
-    reply: `${spell.name} needs a valid target, but there is no active enemy in the combat tracker. The spell fizzles at the edge of bookkeeping instead of rewriting reality.`,
+    worldState: stripInternalState(worldState),
+    reply: `${spell.name} needs a valid target in the current scene. Name who or what you are targeting before the magic gets ideas above its station.`,
     consumesTurn: false,
   };
 }
@@ -515,19 +700,22 @@ function spendLimitedSpellUse(characterSheet, spell, known) {
   };
 }
 
-function buildSpellEffect(characterSheet, spell, known) {
+function buildSpellEffect(characterSheet, spell, known, message = '', worldState = {}) {
   if (!spellHasDuration(spell)) return null;
   const outcomeRule = SPELL_OUTCOMES[spell.id];
   if (outcomeRule?.type === 'save_effect' || outcomeRule?.type === 'sleep_pool') return null;
   const actor = characterSheet.identity?.name || 'active character';
   const duration = normalizeSpellDuration(spell);
+  const targetName = spell.range === 'Self'
+    ? actor
+    : inferSpellTargetName(message, worldState, spell) || firstEnemy(worldState.combat_state || {})?.name || 'current scene target';
   return {
     id: spell.id,
     name: spell.name,
     source: actor,
     source_type: 'spell',
     spell_source: known.label,
-    target: spell.range === 'Self' ? actor : 'current scene target',
+    target: targetName,
     duration,
     concentration: isConcentrationDuration(duration),
     spellcasting_modifier: getSpellcastingModifier(characterSheet),
@@ -589,10 +777,10 @@ function getRulesEffectsForSpell(spell) {
       { target: 'temp_hp_each_turn', value: 'spell_mod_min_1', label: 'Heroism' },
     ],
     hex: [
-      { target: 'weapon_damage_bonus_die', die: '1d6', damage_type: 'necrotic', label: 'Hex' },
+      { target: 'weapon_damage_bonus_die', die: '1d6', damage_type: 'necrotic', label: 'Hex', target_bound: true },
     ],
     hunter_mark: [
-      { target: 'weapon_damage_bonus_die', die: '1d6', damage_type: 'force', label: "Hunter's Mark" },
+      { target: 'weapon_damage_bonus_die', die: '1d6', damage_type: 'force', label: "Hunter's Mark", target_bound: true },
     ],
     mage_armor: [
       { target: 'armor_formula', base: 13, dex_cap: null, label: 'Mage Armor' },
@@ -726,7 +914,7 @@ function rollFormula(formula, rollDie, { crit = false, spellMod = 0 } = {}) {
 }
 
 function defaultRollDie(sides) {
-  return Math.floor(Math.random() * Number(sides)) + 1;
+  return crypto.randomInt(1, Number(sides) + 1);
 }
 
 function formatSigned(value) {
@@ -883,10 +1071,17 @@ function getActiveBonusDice(worldState = {}, bonusType) {
     }));
 }
 
-function getActiveDamageDice(worldState = {}) {
+function getActiveDamageDice(worldState = {}, target = null) {
+  const targetName = normalizeName(typeof target === 'string' ? target : target?.name);
   return normalizeEffects(worldState.active_effects || [])
     .flatMap((effect) => (effect.rules_effects || []).map((rule) => ({ effect, rule })))
     .filter(({ rule }) => rule.target === 'weapon_damage_bonus_die' && rule.die)
+    .filter(({ effect, rule }) => {
+      if (!rule.target_bound && !effect.target_bound) return true;
+      if (!targetName) return false;
+      return normalizeName(effect.target) === targetName
+        || (effect.targets || []).some((item) => normalizeName(item.name || item) === targetName);
+    })
     .map(({ effect, rule }) => ({
       effectId: effect.id,
       die: rule.die,

@@ -6,15 +6,16 @@ import CharacterSelect from './CharacterSelect';
 import './App.css';
 
 // ── ROLL sentinel parser ──────────────────────────────────────────────────
-// Parses [ROLL: XdY+Z] or [ROLL: XdY-Z] from DM1 response text.
-// Returns { diceCount, dieSides, modifier, raw } or null if not found.
+// Parses [ROLL: id=abc XdY+Z] from DM1 response text.
+// Returns { id, diceCount, dieSides, modifier, raw } or null if not found.
 function parseRollTag(text) {
-  const match = text.match(/\[ROLL:\s*(\d+)d(\d+)([+-]\d+)?\]/i);
+  const match = text.match(/\[ROLL:\s*(?:id=([a-zA-Z0-9_-]+)\s+)?(\d+)d(\d+)([+-]\d+)?\]/i);
   if (!match) return null;
   return {
-    diceCount: parseInt(match[1], 10),
-    dieSides:  parseInt(match[2], 10),
-    modifier:  match[3] ? parseInt(match[3], 10) : 0,
+    id:         match[1] || null,
+    diceCount: parseInt(match[2], 10),
+    dieSides:  parseInt(match[3], 10),
+    modifier:  match[4] ? parseInt(match[4], 10) : 0,
     raw:       match[0],
   };
 }
@@ -33,7 +34,8 @@ function parseStructuredRollTag(text) {
 // Strip [ROLL: ...] tags from text shown to the player
 function stripRollTag(text) {
   return stripRollResultPrefix(text)
-    .replace(/\s*\[ROLL:\s*\d+d\d+[+-]?\d*\]/gi, '')
+    .replace(/^\s*\[ROLL REQUEST:\s*[a-zA-Z0-9_-]+\]\s*/gi, 'Roll requested.')
+    .replace(/\s*\[ROLL:\s*(?:id=[a-zA-Z0-9_-]+\s+)?\d+d\d+[+-]?\d*\]/gi, '')
     .replace(/\s*\[(?:CHECK|SAVE):\s*[^\]]+\]/gi, '')
     .trim();
 }
@@ -83,6 +85,7 @@ function getStructuredRoll(character, tag) {
     if (!save && taggedModifier === null) return null;
     const total = taggedModifier !== null ? taggedModifier : Number(save.total || 0);
     return {
+      id: attrs.id || null,
       diceCount: 1,
       dieSides: 20,
       modifier: total,
@@ -98,6 +101,7 @@ function getStructuredRoll(character, tag) {
     if (skillData || taggedModifier !== null) {
       const total = taggedModifier !== null ? taggedModifier : Number(skillData.total || 0);
       return {
+        id: attrs.id || null,
         diceCount: 1,
         dieSides: 20,
         modifier: total,
@@ -111,6 +115,7 @@ function getStructuredRoll(character, tag) {
   if (ability && (Number.isFinite(Number(modifiers[ability])) || taggedModifier !== null)) {
     const total = taggedModifier !== null ? taggedModifier : Number(modifiers[ability] || 0);
     return {
+      id: attrs.id || null,
       diceCount: 1,
       dieSides: 20,
       modifier: total,
@@ -366,9 +371,10 @@ function App() {
         setPendingRoll(structuredRoll);
         setFallbackRoll(null);
         setFallbackModInput('0');
-      } else if (rollTag) {
+      } else if (rollTag?.id) {
         // Primary path: sentinel tag parsed successfully — activate the dice roller
         setPendingRoll({
+          id:        rollTag.id,
           diceCount: rollTag.diceCount,
           dieSides:  rollTag.dieSides,
           modifier:  rollTag.modifier,
@@ -377,6 +383,10 @@ function App() {
         // Clear any stale fallback state
         setFallbackRoll(null);
         setFallbackModInput('0');
+      } else if (rollTag) {
+        setPendingRoll(null);
+        setFallbackRoll({ dieSides: rollTag.dieSides, modifier: rollTag.modifier });
+        setFallbackModInput(String(rollTag.modifier || 0));
       } else {
         // BUG-021 fallback: no parseable sentinel — scan natural language for roll request
         const fallback = detectFallbackRoll(message);
@@ -465,20 +475,15 @@ function App() {
   // ── Dice roller handlers ─────────────────────────────────────────────────
   const handleRoll = useCallback(() => {
     if (!pendingRoll) return;
-    const { diceCount, dieSides, modifier, label, breakdown, bonusDice } = pendingRoll;
-    const rolls = rollDiceResults(diceCount, dieSides);
-    const bonusRolls = bonusDice ? rollDiceResults(bonusDice.diceCount, bonusDice.dieSides) : [];
-    const rolled = rolls.reduce((sum, roll) => sum + roll, 0);
-    const bonusTotal = bonusRolls.reduce((sum, roll) => sum + roll, 0);
-    const total  = rolled + modifier + bonusTotal;
-    const modStr = modifier > 0 ? ` + ${modifier}` : modifier < 0 ? ` - ${Math.abs(modifier)}` : '';
-    const bonusStr = bonusDice ? ` + ${bonusDice.diceCount}d${bonusDice.dieSides} (${bonusRolls.join(', ')})` : '';
-    const rollLabel = label ? `${label}: ` : '';
-    const rollBreakdown = breakdown ? `; ${breakdown}` : '';
-    const bonusBreakdown = bonusDice ? `; ${bonusDice.source} bonus ${bonusDice.diceCount}d${bonusDice.dieSides}=${bonusTotal}` : '';
-    const naturalDetails = formatNaturalRollDetails(rolls, dieSides);
-    const rollMsg = `[ROLL RESULT: ${total}] I rolled a ${total} (${rollLabel}${naturalDetails}${diceCount}d${dieSides}${modStr}${bonusStr} = ${total}${rollBreakdown}${bonusBreakdown})`;
-    const displayRollMsg = stripRollResultPrefix(rollMsg);
+    const { id, diceCount, dieSides, modifier, label, bonusDice } = pendingRoll;
+    if (!id) {
+      setNarrative((prev) => [...prev, { type: 'error', text: 'This roll was missing its server roll id. Ask the DM to request the roll again.', id: Date.now() }]);
+      setPendingRoll(null);
+      return;
+    }
+    const bonusText = bonusDice ? ` + ${bonusDice.diceCount}d${bonusDice.dieSides}` : '';
+    const displayRollMsg = `${label || 'Roll'} requested (${diceCount}d${dieSides}${fmtMod(modifier)}${bonusText}).`;
+    const rollMsg = `[ROLL REQUEST: ${id}]`;
     setNarrative((prev) => [...prev, { type: 'player', text: displayRollMsg, id: Date.now() }]);
     socket.emit('story_input', { message: rollMsg });
     setPendingRoll(null);

@@ -20,7 +20,7 @@ const { getContentBundle } = require('./contentData');
 const { validateCharacter } = require('./characterValidator');
 const { checkSpatialAction } = require('./spatialGuard');
 const { resolvePreNarration } = require('./mechanicsResolver');
-const { resolveRefereeAction, advanceEnemyTurns } = require('./refereeCore');
+const { resolveRefereeAction, advanceEnemyTurns, advanceNarrativeTime } = require('./refereeCore');
 const {
   resolveSpellCast,
   resolveSpellOutcome,
@@ -164,6 +164,7 @@ function characterSheetToWorldStats(characterSheet) {
     origin_magic: characterSheet.origin?.magic_initiate || {},
     conditions: stats.conditions || [],
     spell_slots: characterSheet.spellcasting?.slots || {},
+    hit_dice: characterSheet.resources?.hit_dice || null,
     weapon_name: primaryAttack?.name || '',
     ability_scores: modifiers,
   };
@@ -456,6 +457,20 @@ async function syncCharacterFromWorldState(socket, sessionId) {
       resources: {
         ...(nextSheet.resources || {}),
         spell_uses: spellUses,
+      },
+    };
+    changed = true;
+  }
+
+  if (stats.hit_dice && typeof stats.hit_dice === 'object' && !Array.isArray(stats.hit_dice)) {
+    nextSheet = {
+      ...nextSheet,
+      resources: {
+        ...(nextSheet.resources || {}),
+        hit_dice: {
+          ...(nextSheet.resources?.hit_dice || {}),
+          ...stats.hit_dice,
+        },
       },
     };
     changed = true;
@@ -1107,6 +1122,17 @@ io.on('connection', (socket) => {
         dm1Reply,
         'The Dungeon Master lowers the screen and stares at you over it. That idea has been denied entry to the campaign, the tavern, and polite society. Try something else.'
       );
+
+      const narrativeClock = advanceNarrativeTime({
+        message,
+        dmReply: dm1Reply,
+        worldState: effectiveWorldState || worldStateRow?.state || db.DEFAULT_WORLD_STATE,
+        characterSheet: activeCharacter?.character_sheet || null,
+      });
+      if (narrativeClock.replySuffix) {
+        dm1Reply += narrativeClock.replySuffix;
+      }
+      await db.updateWorldState(sessionId, narrativeClock.worldState);
 
       // Save DM1 response with the SAME pre-increment turn_number (spec §3.2)
       await db.saveMessage(sessionId, 'dm1', dm1Reply, currentTurn);
