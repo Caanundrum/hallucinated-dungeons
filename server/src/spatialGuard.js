@@ -36,6 +36,11 @@ const MOVEMENT_VERBS = /\b(go|walk|head|travel|move|return|enter|leave|approach|
 const LOCATION_PREPOSITIONS = /\b(?:in|inside|at|within|on)\s+(?:the\s+|a\s+|an\s+)?([a-z][a-z' -]{2,40})\b/i;
 const DEFINITE_TARGET = /\b(?:the|that)\s+([a-z][a-z' -]{2,40})\b/i;
 const ASK_FOR_INFORMATION = /\b(?:ask|asks|asking|inquire|inquires|request|requests)\s+(?:about|after|for)\b/i;
+const TARGETED_INTERACTIONS = [
+  /\b(?:attack|hit|strike|stab|swing at|shoot)\s+(?:the\s+|a\s+|an\s+)?([a-z][a-z' -]{2,60}?)(?:\s+(?:with|using|because|if|when)\b|[.!?]|$)/i,
+  /\b(?:ask|question|press|approach|watch|study|read|inspect|examine|search|check|open|unlock|take|grab|pick|touch|use|climb|pet)\s+(?:the\s+|that\s+|a\s+|an\s+)?([a-z][a-z' -]{2,60}?)(?:\s+(?:about|for|to|with|carefully|closely|again|before|after|because|if|when)\b|[.!?]|$)/i,
+  /\b(?:talk|speak)\s+to\s+(?:the\s+|that\s+|a\s+|an\s+)?([a-z][a-z' -]{2,60}?)(?:\s+(?:about|for|with|carefully|closely|again|before|after|because|if|when)\b|[.!?]|$)/i,
+];
 const VAGUE_TARGETS = new Set([
   'guy',
   'person',
@@ -62,6 +67,11 @@ const VAGUE_TARGETS = new Set([
   'air',
   'rain',
   'dark',
+  'risk',
+  'risk is too high',
+  'decision',
+  'reason',
+  'fear',
 ]);
 
 function normalize(value) {
@@ -83,8 +93,31 @@ function listIncludesTerm(list = [], term) {
     const normalizedItem = singularize(compact(item));
     return normalizedItem === normalizedTerm
       || normalizedItem.includes(normalizedTerm)
-      || normalizedTerm.includes(normalizedItem);
+      || normalizedTerm.includes(normalizedItem)
+      || hasMeaningfulTokenOverlap(normalizedItem, normalizedTerm);
   });
+}
+
+function hasMeaningfulTokenOverlap(left, right) {
+  const leftTokens = new Set(left.split(' ').filter(isMeaningfulToken));
+  const rightTokens = right.split(' ').filter(isMeaningfulToken);
+  return rightTokens.some((token) => leftTokens.has(token));
+}
+
+function isMeaningfulToken(token) {
+  return token.length >= 4 && ![
+    'with',
+    'that',
+    'this',
+    'from',
+    'into',
+    'under',
+    'over',
+    'near',
+    'carefully',
+    'nearest',
+    'specific',
+  ].includes(token);
 }
 
 function npcAppearsPresent(worldState, target) {
@@ -109,6 +142,7 @@ function locationSummary(worldState) {
   return [
     currentLocation(worldState),
     scene.location_type,
+    ...(scene.present_npcs || []),
     ...(scene.present_objects || []),
     ...(scene.available_exits || []),
   ].join(' ');
@@ -126,10 +160,22 @@ function isKnownPresentOrReachable(worldState, term) {
 
 function cleanCandidate(value) {
   const cleaned = compact(value)
-    .replace(/\b(to|from|with|about|for|in|inside|at|on|within|before|after|while|and|or|but|as|so|because)\b.*$/i, '')
+    .replace(/\b(to|from|with|about|for|in|inside|at|on|within|before|after|while|and|or|but|as|so|because|if|when|using)\b.*$/i, '')
+    .replace(/\b(carefully|closely|again|quietly|discreetly|slowly|nearest|nearby)\b/g, '')
     .trim();
   if (!cleaned || cleaned.length < 3 || VAGUE_TARGETS.has(cleaned)) return '';
   return cleaned;
+}
+
+function extractInteractionTarget(input) {
+  for (const pattern of TARGETED_INTERACTIONS) {
+    const match = input.match(pattern);
+    const target = cleanCandidate(match?.[1]);
+    if (target) return target;
+  }
+
+  const targetMatch = input.match(DEFINITE_TARGET);
+  return cleanCandidate(targetMatch?.[1]);
 }
 
 function findGenericSpatialIssue(input, worldState) {
@@ -149,15 +195,12 @@ function findGenericSpatialIssue(input, worldState) {
     }
   }
 
-  const targetMatch = input.match(DEFINITE_TARGET);
-  if (targetMatch) {
-    const target = cleanCandidate(targetMatch[1]);
-    if (target && !isKnownPresentOrReachable(worldState, target)) {
-      return {
-        target,
-        message: `You are currently at ${currentLocation(worldState)}, and ${target} is not here. Do you look around for it, or clarify where you mean?`,
-      };
-    }
+  const target = extractInteractionTarget(input);
+  if (target && !isKnownPresentOrReachable(worldState, target)) {
+    return {
+      target,
+      message: `You are currently at ${currentLocation(worldState)}, and ${target} is not here. Do you look around for it, or clarify where you mean?`,
+    };
   }
 
   return null;

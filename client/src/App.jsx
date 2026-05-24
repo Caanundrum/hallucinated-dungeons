@@ -808,10 +808,8 @@ function CharacterSheetModal({ character, content, onClose }) {
   const identity = character.identity || {};
   const abilities = character.abilities || {};
   const derived = character.derived_stats || {};
-  const activeEffects = [
-    ...(character.active_effects || []),
-    ...(derived.active_spell_effects || []),
-  ];
+  const passiveBonuses = character.active_effects || [];
+  const activeEffects = derived.active_spell_effects || [];
   const attacks = derived.attack_breakdowns || [];
   const skills = derived.skill_modifiers || {};
   const saves = derived.saving_throw_modifiers || {};
@@ -876,6 +874,18 @@ function CharacterSheetModal({ character, content, onClose }) {
               </div>
             )) : <p className="muted-text">No active effects.</p>}
           </section>
+
+          {passiveBonuses.length > 0 && (
+            <section className="sheet-section">
+              <h3>Passive Bonuses</h3>
+              {passiveBonuses.map((effect) => (
+                <div key={`${effect.id || effect.name}-${effect.target || 'self'}`} className="sheet-line">
+                  <strong>{effect.name || effect.id}</strong>
+                  <span>{formatEffectSummary(effect)}</span>
+                </div>
+              ))}
+            </section>
+          )}
 
           <section className="sheet-section">
             <h3>Attacks</h3>

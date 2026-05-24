@@ -433,6 +433,96 @@ async function handleDeterministicSpellAction(socket, sessionId, message) {
   return false;
 }
 
+function parseAuthenticatedRollTotal(message) {
+  const match = String(message || '').match(/^\s*\[ROLL RESULT:\s*(-?\d+)\]/i);
+  return match ? Number(match[1]) : null;
+}
+
+async function handleDeterministicInitiativeRoll(socket, sessionId, message, worldStateRow, currentTurn) {
+  const playerInitiative = parseAuthenticatedRollTotal(message);
+  if (playerInitiative == null) return false;
+
+  const recentMessages = await db.getRollingWindow(sessionId, 6);
+  const lastDm1 = [...recentMessages].reverse().find((row) => row.role === 'dm1')?.content || '';
+  if (!/\binitiative\b/i.test(lastDm1) || !/\bcombat begins\b/i.test(lastDm1)) return false;
+
+  const activeCharacter = await db.getCharacterForSession(sessionId).catch(() => null);
+  const sheet = activeCharacter?.character_sheet || {};
+  const identity = sheet.identity || {};
+  const derived = sheet.derived_stats || {};
+  const playerName = identity.name || activeCharacter?.name || 'You';
+  const playerHp = Number(derived.hp ?? derived.max_hp ?? 10);
+  const scene = worldStateRow?.state?.scene_presence || {};
+  const enemyName = inferOpponentName(scene, lastDm1);
+  const enemyInitiative = crypto.randomInt(1, 21) + 1;
+  const combatants = [
+    {
+      name: playerName,
+      initiative: playerInitiative,
+      hp: playerHp,
+      max_hp: Number(derived.max_hp ?? playerHp),
+      ac: Number(derived.armor_class ?? 10),
+      conditions: [],
+      is_player: true,
+    },
+    {
+      name: enemyName,
+      initiative: enemyInitiative,
+      initiative_group: enemyName,
+      hp: 8,
+      max_hp: 8,
+      ac: 12,
+      conditions: [],
+      is_player: false,
+    },
+  ].sort((a, b) => b.initiative - a.initiative);
+
+  const playerIndex = combatants.findIndex((combatant) => combatant.is_player);
+  const combatState = {
+    active: true,
+    round: 1,
+    turn_index: playerIndex,
+    combatants,
+  };
+
+  const currentState = worldStateRow?.state || db.DEFAULT_WORLD_STATE;
+  await db.updateWorldState(sessionId, { ...currentState, combat_state: combatState });
+
+  const orderText = combatants.map((combatant) => `${combatant.name} (${combatant.initiative})`).join(', ');
+  const reply = playerIndex === 0
+    ? `Initiative order: ${orderText}. **Round 1 begins. It is your turn.**`
+    : `Initiative order: ${orderText}. **Round 1 begins.** ${enemyName} moves first, but hesitates in the rain instead of closing recklessly. **It is your turn.**`;
+
+  await db.saveMessage(sessionId, 'player_dm1', message, currentTurn);
+  await db.saveMessage(sessionId, 'dm1', reply, currentTurn);
+  await db.incrementSessionTurn(sessionId);
+  socket.emit('dm1_response', { message: reply });
+  await db.logDmCall({
+    sessionId,
+    dm:           'initiative_resolver',
+    model:        'deterministic',
+    playerInput:  message,
+    fullPrompt:   JSON.stringify({ lastDm1, combatState }),
+    dmResponse:   reply,
+    inputTokens:  null,
+    outputTokens: null,
+  }).catch(console.error);
+  return true;
+}
+
+function inferOpponentName(scene = {}, lastDm1 = '') {
+  const sceneNpcs = Array.isArray(scene.present_npcs) ? scene.present_npcs : [];
+  const likelyNpc = sceneNpcs.find((name) => /\b(stranger|figure|enemy|guard|creature|bandit|cultist)\b/i.test(String(name)))
+    || sceneNpcs.find(Boolean);
+  if (likelyNpc) return String(likelyNpc);
+  const textMatch = String(lastDm1).match(/\b(?:stranger|figure|guard|creature|bandit|cultist)\b/i);
+  return textMatch ? titleCase(textMatch[0]) : 'Opponent';
+}
+
+function titleCase(value) {
+  return String(value || '').replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
 async function syncCharacterFromWorldState(socket, sessionId) {
   const [character, worldStateRow] = await Promise.all([
     db.getCharacterForSession(sessionId),
@@ -993,6 +1083,10 @@ io.on('connection', (socket) => {
       const currentTurn   = worldStateRow?.state?.session_turn ?? 0;
 
       if (await handleDeterministicSpellAction(socket, sessionId, message)) {
+        return;
+      }
+
+      if (await handleDeterministicInitiativeRoll(socket, sessionId, message, worldStateRow, currentTurn)) {
         return;
       }
 

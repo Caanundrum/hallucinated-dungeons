@@ -98,6 +98,43 @@ test('does not confuse other keeper NPCs with innkeepers', () => {
   );
 });
 
+test('allows recently established objects, doors, and NPC aliases in the scene summary', () => {
+  const state = {
+    current_location: 'Brackenford town proper darker-heart lane',
+    scene_presence: {
+      exact_location: 'Brackenford town proper deeper-in lane toward the darker heart (rain-slick narrow lane between shuttered houses; lantern-light under a crooked awning where the stranger stands)',
+      location_type: 'street',
+      present_npcs: ['Unknown lantern-figure'],
+      present_objects: ['notice board', 'missing-person notice', 'charcoal bell scrap', 'nearest lit door', 'crooked awning'],
+      available_exits: ['deeper lane', 'gate road'],
+      nearby_locations: [],
+    },
+    npcs_encountered: [],
+  };
+
+  assert.equal(guardMessage('I read the missing-person notice and the charcoal bell scrap carefully.', state), null);
+  assert.equal(guardMessage('I knock on the nearest lit door and call out.', state), null);
+  assert.equal(guardMessage('I approach the lantern-lit figure carefully.', state), null);
+  assert.equal(guardMessage('I attack the hooded stranger with my longsword.', state), null);
+});
+
+test('extracts the real target instead of intent or reason phrases', () => {
+  const state = {
+    current_location: 'Brackenford lane',
+    scene_presence: {
+      exact_location: 'Brackenford lane where the stranger stands under the awning',
+      location_type: 'street',
+      present_npcs: ['stranger'],
+      present_objects: ['awning'],
+      available_exits: ['deeper lane'],
+      nearby_locations: [],
+    },
+    npcs_encountered: [],
+  };
+
+  assert.equal(guardMessage('I decide the risk is too high and attack the hooded stranger with my longsword.', state), null);
+});
+
 test('merges scene presence as a full normalized scene snapshot', () => {
   const merged = mergeWorldState(db.DEFAULT_WORLD_STATE, {
     current_location: 'Brackenford town gate',

@@ -38,6 +38,10 @@ This is the spatial source of truth for the next player action.
   "nearby_locations": ["<known nearby places not currently occupied, e.g. inn, smithy, temple, market>"]
 }
 Do not list NPCs, objects, or rooms merely because the player mentioned them. Only include what the DM response actually establishes as present or reachable.
+If the DM response introduces a visible thing with a descriptive phrase, preserve useful aliases in the visible scene. Examples:
+- "a notice board with missing-person notices and a charcoal bell scrap" means present_objects should include "notice board", "missing-person notice", and "charcoal bell scrap".
+- "a lantern-figure", "hooded stranger", or "stranger under the awning" should be present_npcs with a stable usable name such as "hooded stranger" or "lantern-figure".
+- If a DM response says houses, doors, a lit doorway, or a figure are directly reachable in the current lane, include those in present_objects or present_npcs for the next player action.
 
 PLAYER STATS (player_stats):
 Extract only the fields that changed. Use the HP narration standard "(before → after HP)" as your primary signal for hp changes.
