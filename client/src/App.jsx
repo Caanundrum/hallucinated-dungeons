@@ -32,7 +32,7 @@ function parseStructuredRollTag(text) {
 
 // Strip [ROLL: ...] tags from text shown to the player
 function stripRollTag(text) {
-  return text
+  return stripRollResultPrefix(text)
     .replace(/\s*\[ROLL:\s*\d+d\d+[+-]?\d*\]/gi, '')
     .replace(/\s*\[(?:CHECK|SAVE):\s*[^\]]+\]/gi, '')
     .trim();
