@@ -21,8 +21,25 @@ function adjudicate({ message, worldState = {}, characterSheet = null, currentTu
     return resolvePendingRoll({ message: text, worldState: state, characterSheet: sheet, rollDie });
   }
 
+  if (state.combat_state?.active && getCurrentHp(sheet, state) <= 0) {
+    const deathStatus = getDeathSaveStatus(state);
+    if (deathStatus === 'dying') return promptDeathSave({ worldState: state, currentTurn });
+    return {
+      handled: true,
+      logType: 'referee_incapacitated',
+      worldState: state,
+      reply: deathStatus === 'dead'
+        ? 'Your character is dead. The rules are not taking action requests from that side of the veil.'
+        : 'You are stable but unconscious at 0 HP. You cannot act until healing or another effect brings you back into the fight.',
+    };
+  }
+
   if (!state.combat_state?.active && isCombatStarter(text)) {
     return promptInitiative({ message: text, worldState: state, characterSheet: sheet, currentTurn });
+  }
+
+  if (intent.save) {
+    return promptSavingThrow({ intent, worldState: state, characterSheet: sheet, currentTurn, inCombat: Boolean(state.combat_state?.active) });
   }
 
   if (state.combat_state?.active) {
@@ -82,7 +99,7 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
   const dc = chooseDc(intent.raw, check, worldState, inCombat);
   const pendingRoll = {
     id: `roll_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    kind: 'skill_check',
+    kind: check.skill ? 'skill_check' : 'ability_check',
     skill: check.skill,
     ability: check.ability,
     label: check.label,
@@ -106,7 +123,75 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
       ...nextWorldState,
       pending_roll: pendingRoll,
     },
-    reply: `Make a DC ${dc} ${check.label} check.${inCombat ? ' This uses your Action.' : ''} [CHECK: skill=${check.skill} ability=${check.ability}]`,
+    reply: `Make a DC ${dc} ${check.label}.${inCombat ? ' This uses your Action.' : ''} [CHECK:${check.skill ? ` skill=${check.skill}` : ''} ability=${check.ability}]`,
+  };
+}
+
+function promptSavingThrow({ intent, worldState, characterSheet, currentTurn = 0, inCombat }) {
+  const save = intent.save;
+  const modifier = getSavingThrowModifier(characterSheet, save.ability);
+  const dc = chooseDc(intent.raw, save, worldState, inCombat);
+  const pendingRoll = {
+    id: `roll_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    kind: 'saving_throw',
+    ability: save.ability,
+    label: save.label,
+    formula: `1d20${formatSigned(modifier.total)}`,
+    modifier: modifier.total,
+    modifier_breakdown: modifier.breakdown,
+    dc,
+    dc_source: buildDcSource(dc, intent.raw, inCombat),
+    intent: intent.raw,
+    consumes: 'forced_save',
+    combat: Boolean(inCombat),
+    ends_turn: false,
+    created_turn: currentTurn,
+    success_result: `${save.label} succeeds. You resist the immediate danger or reduce its impact as the scene allows.`,
+    failure_result: `${save.label} fails. The danger lands cleanly enough to matter.`,
+  };
+
+  return {
+    handled: true,
+    logType: 'referee_pending_save',
+    worldState: {
+      ...worldState,
+      pending_roll: pendingRoll,
+    },
+    reply: `Make a DC ${dc} ${save.label}. [SAVE: ability=${save.ability}]`,
+  };
+}
+
+function promptDeathSave({ worldState, currentTurn = 0 }) {
+  if (worldState.pending_roll?.kind === 'death_save') {
+    return {
+      handled: true,
+      logType: 'referee_death_save_pending',
+      worldState,
+      reply: 'You are still at 0 HP. Resolve the pending death saving throw before doing anything else. The afterlife paperwork has a queue. [ROLL: 1d20]',
+    };
+  }
+
+  const pendingRoll = {
+    id: `roll_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    kind: 'death_save',
+    formula: '1d20',
+    modifier: 0,
+    dc: 10,
+    dc_source: 'death saving throw: 10 or higher succeeds; natural 1 counts as two failures; natural 20 restores 1 HP',
+    consumes: 'death_save',
+    combat: true,
+    ends_turn: true,
+    created_turn: currentTurn,
+  };
+
+  return {
+    handled: true,
+    logType: 'referee_death_save_prompt',
+    worldState: {
+      ...worldState,
+      pending_roll: pendingRoll,
+    },
+    reply: 'You are at 0 HP. Make a death saving throw. [ROLL: 1d20]',
   };
 }
 
@@ -125,21 +210,23 @@ function resolvePendingRoll({ message, worldState, characterSheet, rollDie }) {
     return resolveCheckRoll({ pending, result, worldState, characterSheet, rollDie });
   }
 
+  if (pending.kind === 'death_save') {
+    return resolveDeathSave({ pending, result, worldState, characterSheet, rollDie });
+  }
+
   return null;
 }
 
 function resolveCheckRoll({ pending, result, worldState, characterSheet, rollDie }) {
   const margin = result.total - Number(pending.dc || DEFAULT_CHECK_DC);
-  const succeeded = margin >= 0;
-  const nearMiss = !succeeded && margin >= -2;
-  const outcome = succeeded ? 'success' : nearMiss ? 'near_miss' : 'failure';
+  const outcome = getRollOutcome({ pending, margin });
   const nextState = {
     ...worldState,
     pending_roll: null,
   };
 
   let reply = buildCheckResolutionReply(pending, result, outcome);
-  if (pending.combat && worldState.combat_state?.active) {
+  if (pending.combat && pending.ends_turn !== false && worldState.combat_state?.active) {
     const combatResult = advanceEnemyTurns({
       worldState: nextState,
       characterSheet,
@@ -163,9 +250,86 @@ function resolveCheckRoll({ pending, result, worldState, characterSheet, rollDie
   };
 }
 
+function resolveDeathSave({ result, worldState, characterSheet, rollDie }) {
+  const current = worldState.player_stats?.death_saves || { successes: 0, failures: 0 };
+  const natural = Number(result.natural || result.total || 0);
+  let successes = Number(current.successes || 0);
+  let failures = Number(current.failures || 0);
+  let nextState = {
+    ...worldState,
+    pending_roll: null,
+  };
+  let reply;
+
+  if (natural === 20) {
+    nextState = updatePlayerHp({
+      worldState: nextState,
+      hp: 1,
+      deathSaves: { successes: 0, failures: 0 },
+    });
+    reply = '**Natural 20.** You regain 1 HP and consciousness. The grave will have to reschedule.';
+  } else {
+    if (natural === 1) failures += 2;
+    else if (result.total >= 10) successes += 1;
+    else failures += 1;
+
+    const deathSaves = { successes: Math.min(successes, 3), failures: Math.min(failures, 3) };
+    nextState = updatePlayerHp({ worldState: nextState, hp: 0, deathSaves });
+    if (deathSaves.failures >= 3) {
+      reply = `Death saving throw ${result.total}: **failure**. Death saves: ${deathSaves.successes} successes, ${deathSaves.failures} failures. **Your character dies.**`;
+    } else if (deathSaves.successes >= 3) {
+      reply = `Death saving throw ${result.total}: **success**. Death saves: 3 successes, ${deathSaves.failures} failures. You are stable at 0 HP.`;
+    } else {
+      const outcome = result.total >= 10 ? '**success**' : '**failure**';
+      const naturalText = natural === 1 ? ' Natural 1 counts as two failures.' : '';
+      reply = `Death saving throw ${result.total}: ${outcome}.${naturalText} Death saves: ${deathSaves.successes} successes, ${deathSaves.failures} failures.`;
+    }
+  }
+
+  if (worldState.combat_state?.active && getDeathSaveStatus(nextState) === 'dying') {
+    const combatResult = advanceEnemyTurns({
+      worldState: nextState,
+      characterSheet,
+      rollDie,
+      playerTurnNote: reply,
+      playerDodging: false,
+    });
+    return {
+      handled: true,
+      logType: 'referee_death_save_resolution_combat',
+      worldState: combatResult.worldState,
+      reply: combatResult.reply,
+    };
+  }
+
+  return {
+    handled: true,
+    logType: 'referee_death_save_resolution',
+    worldState: nextState,
+    reply,
+  };
+}
+
+function getRollOutcome({ pending, margin }) {
+  if (pending.kind === 'saving_throw') {
+    return margin >= 0 ? 'success' : 'failure';
+  }
+  if (margin >= 0) return 'success';
+  if (margin >= -2) return 'near_miss';
+  return 'failure';
+}
+
+function getDeathSaveStatus(worldState = {}) {
+  const saves = worldState.player_stats?.death_saves || { successes: 0, failures: 0 };
+  if (Number(saves.failures || 0) >= 3) return 'dead';
+  if (Number(saves.successes || 0) >= 3) return 'stable';
+  return 'dying';
+}
+
 function buildCheckResolutionReply(pending, result, outcome) {
   const dc = Number(pending.dc || DEFAULT_CHECK_DC);
-  const rollLine = `Roll ${result.total} vs DC ${dc}: ${outcome === 'success' ? '**success**' : outcome === 'near_miss' ? '**near miss**' : '**failure**'}.`;
+  const label = pending.kind === 'saving_throw' ? pending.label || 'Saving throw' : 'Roll';
+  const rollLine = `${label} ${result.total} vs DC ${dc}: ${outcome === 'success' ? '**success**' : outcome === 'near_miss' ? '**near miss**' : '**failure**'}.`;
   if (outcome === 'success') return `${rollLine}\n\n${pending.success_result || 'You accomplish what you set out to do.'}`;
   if (outcome === 'near_miss') {
     return `${rollLine}\n\nYou do not get the clean result you wanted, but you catch enough to keep moving: ${pending.failure_result || 'the attempt does not fully work.'}`;
@@ -456,7 +620,7 @@ function cloneCombatState(combatState) {
 }
 
 function getCheckModifier(characterSheet, check) {
-  const skillData = characterSheet?.derived_stats?.skill_modifiers?.[check.skill];
+  const skillData = check.skill ? characterSheet?.derived_stats?.skill_modifiers?.[check.skill] : null;
   if (skillData) {
     return {
       total: Number(skillData.total || 0),
@@ -471,16 +635,37 @@ function getCheckModifier(characterSheet, check) {
   };
 }
 
+function getSavingThrowModifier(characterSheet, ability) {
+  const saveData = characterSheet?.derived_stats?.saving_throw_modifiers?.[ability];
+  if (saveData) {
+    return {
+      total: Number(saveData.total || 0),
+      breakdown: `${ability.toUpperCase()} ${saveData.proficient ? '+ proficiency' : 'only'} = ${formatSigned(saveData.total)}`,
+    };
+  }
+
+  const abilityMod = Number(characterSheet?.abilities?.modifiers?.[ability] || 0);
+  return {
+    total: abilityMod,
+    breakdown: `${ability.toUpperCase()} modifier ${formatSigned(abilityMod)}`,
+  };
+}
+
 function chooseDc(text, check, worldState, inCombat) {
   const lower = String(text || '').toLowerCase();
+  const explicitDc = lower.match(/\bdc\s*(\d{1,2})\b/);
+  if (explicitDc) return Math.max(5, Math.min(30, Number(explicitDc[1])));
+
   let dc = DEFAULT_CHECK_DC;
   if (/\b(?:easy|simple|obvious|routine)\b/.test(lower)) dc -= 5;
   if (/\b(?:hard|difficult|alert|hostile|hidden|careful|guarded|suspicious)\b/.test(lower)) dc += 5;
+  if (/\b(?:very hard|extreme|nearly impossible|overwhelming|deadly)\b/.test(lower)) dc += 5;
   if (inCombat && ['stealth', 'sleight_of_hand', 'persuasion', 'deception', 'intimidation'].includes(check.skill)) dc += 2;
   return Math.max(5, Math.min(30, dc));
 }
 
 function buildDcSource(dc, text, inCombat) {
+  if (/\bdc\s*\d{1,2}\b/i.test(text || '')) return 'explicit DC declared by referee context';
   const parts = [`base adventuring DC ${DEFAULT_CHECK_DC}`];
   if (dc < DEFAULT_CHECK_DC) parts.push('reduced for simple circumstances');
   if (dc > DEFAULT_CHECK_DC) parts.push('increased for pressure, opposition, or difficult circumstances');
@@ -518,6 +703,27 @@ function failureTextFor(check) {
     performance: 'The performance does not shift the room in your favor.',
   };
   return map[check.skill] || 'The attempted check fails.';
+}
+
+function updatePlayerHp({ worldState, hp, deathSaves }) {
+  const combat = worldState.combat_state
+    ? {
+        ...worldState.combat_state,
+        combatants: (worldState.combat_state.combatants || []).map((combatant) => (
+          combatant.is_player ? { ...combatant, hp } : combatant
+        )),
+      }
+    : worldState.combat_state;
+
+  return {
+    ...worldState,
+    combat_state: combat,
+    player_stats: {
+      ...(worldState.player_stats || {}),
+      hp,
+      death_saves: deathSaves,
+    },
+  };
 }
 
 function buildPlayerCombatant(characterSheet, worldState) {
@@ -593,6 +799,10 @@ function rollDamage(formula, rollDie, crit = false) {
     total: rolls.reduce((sum, roll) => sum + roll, 0) + modifier,
     rolls,
   };
+}
+
+function getCurrentHp(characterSheet, worldState) {
+  return Number(worldState.player_stats?.hp ?? characterSheet?.derived_stats?.hp ?? characterSheet?.derived_stats?.max_hp ?? 10);
 }
 
 function isMovementIntent(message) {
