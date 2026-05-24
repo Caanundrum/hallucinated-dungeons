@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { resolveIntent } = require('./intentResolver');
+const { tickActiveEffects } = require('./spellEffectEngine');
 
 const DEFAULT_CHECK_DC = 15;
 
@@ -388,7 +389,7 @@ function advanceEnemyTurns({ worldState, characterSheet, rollDie, playerTurnNote
     combatant.is_player ? { ...combatant, hp: player.hp, conditions: clearTurnConditions(combatant.conditions) } : combatant
   ));
 
-  const nextState = {
+  let nextState = {
     ...worldState,
     pending_roll: null,
     combat_state: combat,
@@ -404,10 +405,15 @@ function advanceEnemyTurns({ worldState, characterSheet, rollDie, playerTurnNote
       scene_time: `round ${combat.round}`,
     },
   };
+  const ticked = tickActiveEffects(nextState, { rounds: advanceRound ? 1 : 0 });
+  nextState = ticked.worldState;
 
   const endLine = player.hp <= 0
     ? '**You drop to 0 HP.** Death saves are now the next thing on the table.'
     : `**Round ${combat.round} begins. It is your turn.**`;
+  if (ticked.expiredEffects.length > 0) {
+    lines.push(`Expired effects: ${ticked.expiredEffects.map((effect) => effect.name || effect.id).join(', ')}.`);
+  }
 
   return {
     worldState: nextState,

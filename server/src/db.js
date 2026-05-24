@@ -253,6 +253,7 @@ const DEFAULT_WORLD_STATE = {
     max_hp:         null,
     temp_hp:        0,
     armor_class:    10,
+    base_armor_class: 10,
     speed:          30,
     conditions:     [],
     spell_slots:    {},

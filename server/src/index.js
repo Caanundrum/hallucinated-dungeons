@@ -21,6 +21,10 @@ const { validateCharacter } = require('./characterValidator');
 const { checkSpatialAction } = require('./spatialGuard');
 const { resolvePreNarration } = require('./mechanicsResolver');
 const { resolveRefereeAction } = require('./refereeCore');
+const {
+  resolveSpellCast,
+  applyActiveEffectsToCharacterSheet,
+} = require('./spellEffectEngine');
 
 // ── Setup ──────────────────────────────────────────────────────────────────
 const app    = express();
@@ -140,6 +144,7 @@ function characterSheetToWorldStats(characterSheet) {
     max_hp: stats.max_hp ?? null,
     temp_hp: stats.temp_hp || 0,
     armor_class: stats.armor_class || 10,
+    base_armor_class: stats.base_armor_class ?? stats.armor_class ?? 10,
     speed: stats.speed || 30,
     alignment: details.alignment || '',
     appearance: details.appearance || '',
@@ -152,6 +157,7 @@ function characterSheetToWorldStats(characterSheet) {
     class_spells: characterSheet.spellcasting?.spells_prepared || characterSheet.spellcasting?.spells_known || [],
     origin_magic: characterSheet.origin?.magic_initiate || {},
     conditions: stats.conditions || [],
+    spell_slots: characterSheet.spellcasting?.slots || {},
     weapon_name: primaryAttack?.name || '',
     ability_scores: modifiers,
   };
@@ -271,7 +277,7 @@ function summarizeCharacterSheetForRules(characterSheet) {
   if (spellcasting.ability) {
     const cantrips = spellcasting.cantrips_known || [];
     const spells = spellcasting.spells_prepared || spellcasting.spells_known || [];
-    lines.push(`Spellcasting: ${spellcasting.ability.toUpperCase()}, attack ${fmtSigned(derived.spell_attack_bonus)}, DC ${derived.spell_save_dc ?? '--'}, cantrips ${formatList(cantrips)}, level 1 ${formatList(spells)}`);
+    lines.push(`Spellcasting: ${spellcasting.ability.toUpperCase()}, attack ${fmtSigned(derived.spell_attack_bonus)}, DC ${derived.spell_save_dc ?? '--'}, slots ${formatSpellSlots(spellcasting.slots)}, cantrips ${formatList(cantrips)}, level 1 ${formatList(spells)}`);
   }
   const languages = characterSheet.languages || characterSheet.proficiencies?.languages || [];
   if (languages.length) lines.push(`Languages: ${languages.join(', ')}`);
@@ -286,152 +292,46 @@ function fmtSigned(value) {
   return number >= 0 ? `+${number}` : String(number);
 }
 
-function normalizeSpellName(value) {
-  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-}
-
-function getCastSpellFromMessage(message, content) {
-  const match = String(message || '').match(/\bcast\s+(?:the\s+)?([a-z][a-z' -]{2,40})/i);
-  if (!match) return null;
-  const spoken = normalizeSpellName(match[1].replace(/\b(on|at|toward|towards|to|for|with|and)\b.*$/i, ''));
-  if (!spoken) return null;
-  const spell = content.spells.find((item) => normalizeSpellName(item.name) === spoken || normalizeSpellName(item.id) === spoken);
-  return spell || { id: spoken.replaceAll(' ', '_'), name: spoken.replace(/\b\w/g, (char) => char.toUpperCase()), unknown: true };
-}
-
-function getKnownSpellIds(characterSheet) {
-  const ids = new Set([
-    ...(characterSheet.spellcasting?.cantrips_known || []),
-    ...(characterSheet.spellcasting?.spells_prepared || characterSheet.spellcasting?.spells_known || []),
-    ...(characterSheet.species_spells || []).map((spell) => spell.id || spell),
-  ]);
-  for (const choice of Object.values(characterSheet.origin?.magic_initiate || {})) {
-    for (const cantrip of choice.cantrips || []) ids.add(cantrip);
-    if (choice.spell) ids.add(choice.spell);
-  }
-  return ids;
-}
-
-function summarizeKnownSpells(characterSheet, content) {
-  const ids = [...getKnownSpellIds(characterSheet)];
-  return ids.map((id) => content.spells.find((spell) => spell.id === id)?.name || id).join(', ') || 'no spells';
-}
-
-function spellHasDuration(spell) {
-  return spell?.duration && !/^instant$/i.test(spell.duration);
-}
-
-function isConcentrationDuration(duration = '') {
-  return /concentration/i.test(duration);
-}
-
-function durationToRemaining(duration = '') {
-  const minuteMatch = duration.match(/(\d+)\s*minute/i);
-  if (minuteMatch) {
-    const minutes = Number(minuteMatch[1]);
-    return { remaining_minutes: minutes, remaining_rounds: minutes * 10 };
-  }
-  const hourMatch = duration.match(/(\d+)\s*hour/i);
-  if (hourMatch) {
-    const hours = Number(hourMatch[1]);
-    return { remaining_minutes: hours * 60, remaining_rounds: hours * 600 };
-  }
-  if (/1 round/i.test(duration)) return { remaining_rounds: 1 };
-  return {};
-}
-
-function buildSpellEffect(characterSheet, spell) {
-  const actor = characterSheet.identity?.name || 'active character';
-  return {
-    id: spell.id,
-    name: spell.name,
-    source: actor,
-    target: spell.range === 'Self' ? actor : 'current scene target',
-    duration: spell.duration,
-    concentration: isConcentrationDuration(spell.duration),
-    mechanical_effect: spell.description,
-    ...durationToRemaining(spell.duration),
-  };
-}
-
-function addActiveSpellEffect(characterSheet, spell) {
-  if (!spellHasDuration(spell)) return characterSheet;
-  const derived = characterSheet.derived_stats || {};
-  const activeSpellEffects = derived.active_spell_effects || [];
-  if (activeSpellEffects.some((effect) => effect.id === spell.id)) return characterSheet;
-  return {
-    ...characterSheet,
-    derived_stats: {
-      ...derived,
-      active_spell_effects: [...activeSpellEffects, buildSpellEffect(characterSheet, spell)],
-    },
-  };
+function formatSpellSlots(slots = {}) {
+  const entries = Object.entries(slots || {});
+  if (entries.length === 0) return 'none';
+  return entries.map(([level, count]) => `L${level}:${count}`).join(', ');
 }
 
 async function handleDeterministicSpellAction(socket, sessionId, message) {
   const content = getContentBundle();
-  const spell = getCastSpellFromMessage(message, content);
-  if (!spell) return false;
 
   const character = await db.getCharacterForSession(sessionId);
   const sheet = character?.character_sheet;
-  if (!character || !sheet) return false;
+  if (!character || !sheet) return { matched: false };
 
-  const knownSpellIds = getKnownSpellIds(sheet);
-  if (spell.unknown || !knownSpellIds.has(spell.id)) {
-    const reply = `You reach for ${spell.name}, but it is not on your current character sheet. At level ${sheet.identity?.level || 1}, you can work with: ${summarizeKnownSpells(sheet, content)}. The magic shelves are not self-service.`;
-    const currentTurn = (await db.getWorldState(sessionId))?.state?.session_turn ?? 0;
+  const worldStateRow = await db.getWorldState(sessionId);
+  const currentWorldState = worldStateRow?.state || db.DEFAULT_WORLD_STATE;
+  const result = resolveSpellCast({
+    message,
+    content,
+    characterSheet: sheet,
+    worldState: currentWorldState,
+  });
+  if (!result?.matched) return { matched: false };
+
+  if (result.blocked) {
+    const currentTurn = currentWorldState.session_turn ?? 0;
     await db.saveMessage(sessionId, 'player_dm1', message, currentTurn);
-    await db.saveMessage(sessionId, 'dm1', reply, currentTurn);
+    await db.saveMessage(sessionId, 'dm1', result.reply, currentTurn);
     await db.incrementSessionTurn(sessionId);
-    socket.emit('dm1_response', { message: reply });
-    return true;
+    socket.emit('dm1_response', { message: result.reply });
+    return { matched: true, handled: true };
   }
 
-  if (spell.id === 'shield_of_faith') {
-    const derived = sheet.derived_stats || {};
-    const activeSpellEffects = derived.active_spell_effects || [];
-    if (!activeSpellEffects.some((effect) => effect.id === 'shield_of_faith')) {
-      const updatedSheet = {
-        ...sheet,
-        derived_stats: {
-          ...derived,
-          armor_class: Number(derived.armor_class || 10) + 2,
-          armor_class_breakdown: [
-            ...(derived.armor_class_breakdown || []),
-            { label: 'Shield of Faith', value: 2 },
-          ],
-          active_spell_effects: [
-            ...activeSpellEffects,
-            {
-              id: 'shield_of_faith',
-              name: 'Shield of Faith',
-              source: sheet.identity?.name || 'active character',
-              target: sheet.identity?.name || 'self',
-              value: 2,
-              duration: '1 minute',
-              remaining_rounds: 10,
-              remaining_minutes: 1,
-              concentration: true,
-              mechanical_effect: '+2 AC',
-            },
-          ],
-        },
-      };
-      const saved = await db.updateCharacterSheet(character.id, updatedSheet);
-      await syncCharacterToWorldState(sessionId, saved.character_sheet).catch(console.error);
-      socket.emit('character_ready', { characterId: saved.id, character: saved.character_sheet, shouldStartSession: false });
-    }
-  } else if (spellHasDuration(spell)) {
-    const updatedSheet = addActiveSpellEffect(sheet, spell);
-    if (updatedSheet !== sheet) {
-      const saved = await db.updateCharacterSheet(character.id, updatedSheet);
-      await syncCharacterToWorldState(sessionId, saved.character_sheet).catch(console.error);
-      socket.emit('character_ready', { characterId: saved.id, character: saved.character_sheet, shouldStartSession: false });
-    }
-  }
-
-  return false;
+  const saved = await db.updateCharacterSheet(character.id, result.characterSheet);
+  await db.updateWorldState(sessionId, result.worldState);
+  socket.emit('character_ready', {
+    characterId: saved.id,
+    character: saved.character_sheet,
+    shouldStartSession: false,
+  });
+  return { matched: true, handled: false, worldState: result.worldState };
 }
 
 async function syncCharacterFromWorldState(socket, sessionId) {
@@ -467,8 +367,9 @@ async function syncCharacterFromWorldState(socket, sessionId) {
   }
 
   const worldEffects = Array.isArray(worldState.active_effects) ? worldState.active_effects : [];
-  if (worldEffects.length > 0 && JSON.stringify(nextDerived.active_spell_effects || []) !== JSON.stringify(worldEffects)) {
-    nextDerived.active_spell_effects = worldEffects;
+  if (JSON.stringify(nextDerived.active_spell_effects || []) !== JSON.stringify(worldEffects)) {
+    const adjustedSheet = applyActiveEffectsToCharacterSheet({ ...sheet, derived_stats: nextDerived }, worldEffects);
+    Object.assign(nextDerived, adjustedSheet.derived_stats || {});
     changed = true;
   }
 
@@ -1027,11 +928,13 @@ io.on('connection', (socket) => {
         return;
       }
 
-      if (await handleDeterministicSpellAction(socket, sessionId, message)) {
+      const spellAction = await handleDeterministicSpellAction(socket, sessionId, message);
+      if (spellAction.handled) {
         return;
       }
+      const effectiveWorldState = spellAction.worldState || worldStateRow?.state;
 
-      const mechanics = resolvePreNarration({ message, worldState: worldStateRow?.state });
+      const mechanics = resolvePreNarration({ message, worldState: effectiveWorldState });
       if (mechanics.handled) {
         await db.saveMessage(sessionId, 'player_dm1', message, currentTurn);
         await db.saveMessage(sessionId, 'dm1', mechanics.response, currentTurn);
@@ -1042,7 +945,7 @@ io.on('connection', (socket) => {
           dm:           mechanics.logType || 'mechanics_resolver',
           model:        'deterministic',
           playerInput:  message,
-          fullPrompt:   JSON.stringify({ intent: mechanics.intent, worldState: worldStateRow?.state || {} }),
+          fullPrompt:   JSON.stringify({ intent: mechanics.intent, worldState: effectiveWorldState || {} }),
           dmResponse:   mechanics.response,
           inputTokens:  null,
           outputTokens: null,
@@ -1051,7 +954,7 @@ io.on('connection', (socket) => {
       }
 
       if (!mechanics.skipSpatialGuard) {
-        const spatialIssue = checkSpatialAction(message, worldStateRow?.state);
+        const spatialIssue = checkSpatialAction(message, effectiveWorldState);
         if (spatialIssue) {
           await db.saveMessage(sessionId, 'player_dm1', message, currentTurn);
           await db.saveMessage(sessionId, 'dm1', spatialIssue.message, currentTurn);
@@ -1062,7 +965,7 @@ io.on('connection', (socket) => {
             dm:           'spatial_guard',
             model:        'deterministic',
             playerInput:  message,
-            fullPrompt:   JSON.stringify({ intent: mechanics.intent, worldState: worldStateRow?.state || {} }),
+            fullPrompt:   JSON.stringify({ intent: mechanics.intent, worldState: effectiveWorldState || {} }),
             dmResponse:   spatialIssue.message,
             inputTokens:  null,
             outputTokens: null,

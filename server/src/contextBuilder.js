@@ -223,7 +223,7 @@ function buildActiveCharacterText(characterSheet) {
     const content = getContentBundle();
     const cantrips = spellcasting.cantrips_known || [];
     const spells = spellcasting.spells_prepared || spellcasting.spells_known || [];
-    lines.push(`Spellcasting: ${spellcasting.ability.toUpperCase()}, cantrips ${formatSpellList(cantrips, content)}, level 1 prepared ${formatSpellList(spells, content)}`);
+    lines.push(`Spellcasting: ${spellcasting.ability.toUpperCase()}, slots ${formatSpellSlots(spellcasting.slots)}, cantrips ${formatSpellList(cantrips, content)}, level 1 prepared ${formatSpellList(spells, content)}`);
     lines.push('Spell rule: only these listed cantrips and level 1 prepared/known spells are currently castable. Do not allow unlisted spells or spells above level 1.');
   }
   if (languages.length) lines.push(`Languages: ${languages.join(', ')}`);
@@ -237,6 +237,12 @@ function formatSpellList(ids, content) {
     const spell = byId(content.spells, id);
     return spell ? `${spell.name} (${spell.id}; level ${spell.level}; ${spell.description})` : id;
   }).join(', ');
+}
+
+function formatSpellSlots(slots = {}) {
+  const entries = Object.entries(slots || {});
+  if (entries.length === 0) return 'none';
+  return entries.map(([level, count]) => `L${level}:${count}`).join(', ');
 }
 
 function fmtSigned(value) {

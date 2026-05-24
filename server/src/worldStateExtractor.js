@@ -263,7 +263,13 @@ function mergeWorldState(current, patch) {
   }
 
   if (Array.isArray(patch.active_effects)) {
-    merged.active_effects = patch.active_effects;
+    const currentEffects = Array.isArray(merged.active_effects) ? merged.active_effects : [];
+    merged.active_effects = patch.active_effects.map((effect) => {
+      const existing = currentEffects.find((current) => current.id === effect.id);
+      return existing
+        ? { ...existing, ...effect, rules_effects: effect.rules_effects || existing.rules_effects }
+        : effect;
+    });
   }
 
   if (patch.player_stats && typeof patch.player_stats === 'object' && !Array.isArray(patch.player_stats)) {
@@ -273,7 +279,7 @@ function mergeWorldState(current, patch) {
     const newStats = { ...currentStats };
 
     // Scalar fields — replace if present
-    for (const scalar of ['name', 'class', 'level', 'hp', 'max_hp', 'temp_hp', 'armor_class', 'speed', 'weapon_name']) {
+    for (const scalar of ['name', 'class', 'level', 'hp', 'max_hp', 'temp_hp', 'armor_class', 'base_armor_class', 'speed', 'weapon_name']) {
       if (patchStats[scalar] !== undefined && patchStats[scalar] !== null) {
         newStats[scalar] = patchStats[scalar];
       }

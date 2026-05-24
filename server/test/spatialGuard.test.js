@@ -175,3 +175,24 @@ test('merges time state and replaces active effects without wiping other state',
   assert.deepEqual(merged.time_state, { elapsed_rounds: 2, elapsed_minutes: 0, scene_time: 'round 2' });
   assert.deepEqual(merged.active_effects.map((effect) => effect.id), ['shield_of_faith']);
 });
+
+test('preserves deterministic active effect rules when utility model updates duration text', () => {
+  const merged = mergeWorldState({
+    ...db.DEFAULT_WORLD_STATE,
+    active_effects: [{
+      id: 'shield_of_faith',
+      name: 'Shield of Faith',
+      remaining_rounds: 100,
+      rules_effects: [{ target: 'armor_class_bonus', value: 2, label: 'Shield of Faith' }],
+    }],
+  }, {
+    active_effects: [{
+      id: 'shield_of_faith',
+      name: 'Shield of Faith',
+      remaining_rounds: 99,
+    }],
+  });
+
+  assert.equal(merged.active_effects[0].remaining_rounds, 99);
+  assert.deepEqual(merged.active_effects[0].rules_effects, [{ target: 'armor_class_bonus', value: 2, label: 'Shield of Faith' }]);
+});
