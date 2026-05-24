@@ -70,7 +70,7 @@ test('creates a server-owned pending skill check with a DC', () => {
   assert.equal(result.worldState.pending_roll.dc, 15);
   assert.equal(result.worldState.pending_roll.created_turn, 4);
   assert.match(result.reply, /DC 15 Wisdom \(Insight\)/);
-  assert.match(result.reply, /\[CHECK: skill=insight ability=wis\]/);
+  assert.match(result.reply, /\[CHECK: skill=insight ability=wis/);
 });
 
 test('resolves an authenticated skill roll against the stored DC', () => {
@@ -114,7 +114,7 @@ test('blocks new actions until a pending roll is resolved', () => {
   assert.equal(result.handled, true);
   assert.equal(result.worldState.pending_roll.kind, 'skill_check');
   assert.match(result.reply, /Resolve the pending Wisdom \(Insight\)/);
-  assert.match(result.reply, /\[CHECK: skill=insight ability=wis\]/);
+  assert.match(result.reply, /\[CHECK: skill=insight ability=wis/);
 });
 
 test('maps declared rule actions to the required check instead of asking the DM to improvise', () => {
@@ -155,7 +155,7 @@ test('prompts deterministic saving throws with character save modifiers', () => 
   assert.equal(result.worldState.pending_roll.ability, 'dex');
   assert.equal(result.worldState.pending_roll.modifier, 3);
   assert.match(result.reply, /DC 15 Dexterity Saving Throw/);
-  assert.match(result.reply, /\[SAVE: ability=dex\]/);
+  assert.match(result.reply, /\[SAVE: ability=dex/);
 });
 
 test('prompts a social check for speeches meant to change minds', () => {
@@ -525,4 +525,87 @@ test('successful concentration save keeps the active effect', () => {
   assert.deepEqual(result.worldState.active_effects.map((effect) => effect.id), ['shield_of_faith']);
   assert.equal(result.worldState.combat_state.combatants[0].ac, 20);
   assert.match(result.reply, /maintain concentration/);
+});
+
+test('Guidance adds a bonus die to the next check and expires after the roll', () => {
+  const guidance = {
+    id: 'guidance',
+    name: 'Guidance',
+    concentration: true,
+    remaining_rounds: 10,
+    rules_effects: [{ target: 'ability_check_bonus_die', die: '1d4', label: 'Guidance', expires_on_use: true }],
+  };
+  const prompt = adjudicate({
+    message: "I study the clerk's face.",
+    worldState: worldState({ active_effects: [guidance] }),
+    characterSheet,
+  });
+  const result = adjudicate({
+    message: '[ROLL RESULT: 18] I rolled an 18 (Insight Check: natural 12; 1d20 + 4 + 1d4 (2) = 18)',
+    worldState: prompt.worldState,
+    characterSheet,
+  });
+
+  assert.equal(prompt.worldState.pending_roll.bonus_die, '1d4');
+  assert.match(prompt.reply, /bonus_die=1d4/);
+  assert.deepEqual(result.worldState.active_effects, []);
+});
+
+test('Bless adds a bonus die to weapon attacks', () => {
+  const bless = {
+    id: 'bless',
+    name: 'Bless',
+    concentration: true,
+    remaining_rounds: 10,
+    rules_effects: [{ target: 'attack_roll_bonus_die', die: '1d4', label: 'Bless' }],
+  };
+  const result = adjudicate({
+    message: 'I attack the goblin.',
+    worldState: worldState({
+      active_effects: [bless],
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', hp: 12, max_hp: 12, ac: 16, is_player: true },
+          { name: 'Goblin', hp: 8, max_hp: 8, ac: 18, is_player: false, attack: { name: 'scimitar', attack_bonus: 3, damage_formula: '1d6+1' } },
+        ],
+      },
+    }),
+    characterSheet,
+    rollDie: sequenceRolls([10, 4, 2, 5]),
+  });
+  const goblin = result.worldState.combat_state.combatants.find((combatant) => combatant.name === 'Goblin');
+
+  assert.equal(goblin.hp, 3);
+  assert.match(result.reply, /Bless 1d4=4/);
+});
+
+test('long rest resets HP, death saves, spell slots, and active effects', () => {
+  const result = adjudicate({
+    message: 'We take a long rest.',
+    worldState: worldState({
+      active_effects: [{ id: 'shield_of_faith', name: 'Shield of Faith', rules_effects: [{ target: 'armor_class_bonus', value: 2 }] }],
+      player_stats: {
+        hp: 4,
+        max_hp: 12,
+        armor_class: 18,
+        spell_slots: { 1: 0 },
+        death_saves: { successes: 1, failures: 1 },
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      identity: { ...characterSheet.identity, class: 'paladin', class_name: 'Paladin' },
+      spellcasting: { ability: 'cha', slots: { 1: 0 } },
+    },
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.player_stats.hp, 12);
+  assert.deepEqual(result.worldState.player_stats.death_saves, { successes: 0, failures: 0 });
+  assert.deepEqual(result.worldState.player_stats.spell_slots, { 1: 2 });
+  assert.deepEqual(result.worldState.active_effects, []);
+  assert.match(result.reply, /long rest/);
 });

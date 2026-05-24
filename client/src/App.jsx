@@ -74,44 +74,63 @@ function getStructuredRoll(character, tag) {
   const derived = character.derived_stats || {};
   const modifiers = character.abilities?.modifiers || {};
   const ability = String(attrs.ability || '').toLowerCase();
+  const taggedModifier = attrs.modifier !== undefined ? Number(attrs.modifier) : null;
+  const taggedBreakdown = attrs.breakdown ? String(attrs.breakdown) : null;
+  const bonusDice = parseBonusDice(attrs.bonus_die, attrs.bonus_source);
 
   if (tag.kind === 'save') {
     const save = derived.saving_throw_modifiers?.[ability];
-    if (!save) return null;
+    if (!save && taggedModifier === null) return null;
+    const total = taggedModifier !== null ? taggedModifier : Number(save.total || 0);
     return {
       diceCount: 1,
       dieSides: 20,
-      modifier: Number(save.total || 0),
+      modifier: total,
       label: `${ability.toUpperCase()} Save`,
-      breakdown: `${ability.toUpperCase()} ${save.proficient ? '+ proficiency' : 'only'} = ${fmtMod(save.total)}`,
+      breakdown: taggedBreakdown || `${ability.toUpperCase()} ${save?.proficient ? '+ proficiency' : 'only'} = ${fmtMod(total)}`,
+      bonusDice,
     };
   }
 
   const skill = String(attrs.skill || '').toLowerCase();
   if (skill) {
     const skillData = derived.skill_modifiers?.[skill];
-    if (skillData) {
+    if (skillData || taggedModifier !== null) {
+      const total = taggedModifier !== null ? taggedModifier : Number(skillData.total || 0);
       return {
         diceCount: 1,
         dieSides: 20,
-        modifier: Number(skillData.total || 0),
+        modifier: total,
         label: `${titleCase(skill)} Check`,
-        breakdown: `${skillData.ability?.toUpperCase() || ability.toUpperCase()} ${skillData.proficient ? '+ proficiency' : 'only'} = ${fmtMod(skillData.total)}`,
+        breakdown: taggedBreakdown || `${skillData?.ability?.toUpperCase() || ability.toUpperCase()} ${skillData?.proficient ? '+ proficiency' : 'only'} = ${fmtMod(total)}`,
+        bonusDice,
       };
     }
   }
 
-  if (ability && Number.isFinite(Number(modifiers[ability]))) {
+  if (ability && (Number.isFinite(Number(modifiers[ability])) || taggedModifier !== null)) {
+    const total = taggedModifier !== null ? taggedModifier : Number(modifiers[ability] || 0);
     return {
       diceCount: 1,
       dieSides: 20,
-      modifier: Number(modifiers[ability] || 0),
+      modifier: total,
       label: `${ability.toUpperCase()} Check`,
-      breakdown: `${ability.toUpperCase()} modifier ${fmtMod(modifiers[ability])}`,
+      breakdown: taggedBreakdown || `${ability.toUpperCase()} modifier ${fmtMod(total)}`,
+      bonusDice,
     };
   }
 
   return null;
+}
+
+function parseBonusDice(value, source) {
+  const match = String(value || '').match(/^(\d+)d(\d+)$/i);
+  if (!match) return null;
+  return {
+    diceCount: Number(match[1]),
+    dieSides: Number(match[2]),
+    source: source ? String(source).replaceAll('_', ' ') : 'bonus',
+  };
 }
 
 function summarizeCharacterOption(characterId, character) {
@@ -446,15 +465,19 @@ function App() {
   // ── Dice roller handlers ─────────────────────────────────────────────────
   const handleRoll = useCallback(() => {
     if (!pendingRoll) return;
-    const { diceCount, dieSides, modifier, label, breakdown } = pendingRoll;
+    const { diceCount, dieSides, modifier, label, breakdown, bonusDice } = pendingRoll;
     const rolls = rollDiceResults(diceCount, dieSides);
+    const bonusRolls = bonusDice ? rollDiceResults(bonusDice.diceCount, bonusDice.dieSides) : [];
     const rolled = rolls.reduce((sum, roll) => sum + roll, 0);
-    const total  = rolled + modifier;
+    const bonusTotal = bonusRolls.reduce((sum, roll) => sum + roll, 0);
+    const total  = rolled + modifier + bonusTotal;
     const modStr = modifier > 0 ? ` + ${modifier}` : modifier < 0 ? ` - ${Math.abs(modifier)}` : '';
+    const bonusStr = bonusDice ? ` + ${bonusDice.diceCount}d${bonusDice.dieSides} (${bonusRolls.join(', ')})` : '';
     const rollLabel = label ? `${label}: ` : '';
     const rollBreakdown = breakdown ? `; ${breakdown}` : '';
+    const bonusBreakdown = bonusDice ? `; ${bonusDice.source} bonus ${bonusDice.diceCount}d${bonusDice.dieSides}=${bonusTotal}` : '';
     const naturalDetails = formatNaturalRollDetails(rolls, dieSides);
-    const rollMsg = `[ROLL RESULT: ${total}] I rolled a ${total} (${rollLabel}${naturalDetails}${diceCount}d${dieSides}${modStr} = ${total}${rollBreakdown})`;
+    const rollMsg = `[ROLL RESULT: ${total}] I rolled a ${total} (${rollLabel}${naturalDetails}${diceCount}d${dieSides}${modStr}${bonusStr} = ${total}${rollBreakdown}${bonusBreakdown})`;
     const displayRollMsg = stripRollResultPrefix(rollMsg);
     setNarrative((prev) => [...prev, { type: 'player', text: displayRollMsg, id: Date.now() }]);
     socket.emit('story_input', { message: rollMsg });
@@ -659,6 +682,7 @@ function App() {
                     {pendingRoll.diceCount}d{pendingRoll.dieSides}
                     {pendingRoll.modifier > 0 && ` + ${pendingRoll.modifier}`}
                     {pendingRoll.modifier < 0 && ` − ${Math.abs(pendingRoll.modifier)}`}
+                    {pendingRoll.bonusDice && ` + ${pendingRoll.bonusDice.diceCount}d${pendingRoll.bonusDice.dieSides}`}
                   </span>
                 </div>
 
@@ -671,6 +695,11 @@ function App() {
                   {pendingRoll.modifier !== 0 && (
                     <span className="roll-btn-mod">
                       {pendingRoll.modifier > 0 ? ` +${pendingRoll.modifier}` : ` ${pendingRoll.modifier}`}
+                    </span>
+                  )}
+                  {pendingRoll.bonusDice && (
+                    <span className="roll-btn-mod">
+                      {` +${pendingRoll.bonusDice.diceCount}d${pendingRoll.bonusDice.dieSides}`}
                     </span>
                   )}
                 </button>

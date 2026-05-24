@@ -16,7 +16,7 @@ const CONCENTRATION_DURATIONS = {
 const SPELL_OUTCOMES = {
   chill_touch: { type: 'spell_attack', damage: '1d10', damage_type: 'necrotic' },
   fire_bolt: { type: 'spell_attack', damage: '1d10', damage_type: 'fire' },
-  guiding_bolt: { type: 'spell_attack', damage: '4d6', damage_type: 'radiant', rider: 'The next attack against the target has advantage before the end of your next turn.' },
+  guiding_bolt: { type: 'spell_attack', damage: '4d6', damage_type: 'radiant', condition_on_hit: 'guiding_bolt_advantage', rider: 'The next attack against the target has advantage before the end of your next turn.' },
   produce_flame: { type: 'spell_attack', damage: '1d8', damage_type: 'fire' },
   magic_missile: { type: 'automatic_damage', darts: 3, damage: '1d4+1', damage_type: 'force' },
   cure_wounds: { type: 'healing', healing: '2d8+spell_mod' },
@@ -27,6 +27,13 @@ const SPELL_OUTCOMES = {
   command: { type: 'save_effect', save: 'wis', effect: 'The target obeys a one-word command on its next turn if the command is valid and not directly harmful.' },
   charm_person: { type: 'save_effect', save: 'wis', effect: 'The humanoid is charmed by you if it fails the save.' },
   faerie_fire: { type: 'save_effect', save: 'dex', effect: 'Failed targets are outlined, cannot benefit from invisibility, and attacks against them have advantage.' },
+  sleep: { type: 'sleep_pool', dice: '5d8' },
+};
+
+const BONUS_DIE_RULES = {
+  attack_roll_bonus_die: 'attack',
+  saving_throw_bonus_die: 'save',
+  ability_check_bonus_die: 'check',
 };
 
 function resolveSpellCast({ message, content, characterSheet, worldState = {} }) {
@@ -42,7 +49,7 @@ function resolveSpellCast({ message, content, characterSheet, worldState = {} })
     };
   }
 
-  const timingBlock = validateSpellTiming({ spell, message, worldState });
+  const timingBlock = validateSpellTiming({ spell, message, worldState, characterSheet });
   if (timingBlock) {
     return {
       matched: true,
@@ -125,11 +132,18 @@ function resolveSpellOutcome({ spellCast, characterSheet, worldState = {}, rollD
   if (rule.type === 'healing') {
     return resolveHealingSpell({ spell, rule, characterSheet, worldState, rollDie });
   }
+  if (rule.type === 'sleep_pool') {
+    return resolveSleepSpell({ spell, rule, worldState, rollDie });
+  }
 
   return null;
 }
 
-function validateSpellTiming({ spell, message, worldState = {} }) {
+function validateSpellTiming({ spell, message, worldState = {}, characterSheet = {} }) {
+  if (spell.id === 'mage_armor' && characterSheet?.equipped?.armor) {
+    return 'Mage Armor only works on a creature that is not wearing armor. Your current armor is already doing the job, and it is not interested in being replaced by sparkle math.';
+  }
+
   if (worldState.combat_state?.active && /^\s*\d+\s*minute/i.test(spell.casting_time || '')) {
     return `${spell.name} takes ${spell.casting_time} to cast. That is not a single combat action; you would need to spend the required rounds maintaining the casting. The initiative tracker has opinions about paperwork.`;
   }
@@ -161,6 +175,9 @@ function resolveSpellAttack({ spell, rule, characterSheet, worldState, rollDie }
     const before = Number(target.hp || 0);
     target.hp = Math.max(0, before - damage.total);
     lines.push(`${criticalHit ? '**Critical hit.** ' : ''}Hit for ${damage.total} ${rule.damage_type} damage. ${target.name}: (${before} -> ${target.hp} HP).`);
+    if (rule.condition_on_hit && Number(target.hp) > 0) {
+      target.conditions = addCondition(target.conditions, rule.condition_on_hit);
+    }
     if (rule.rider) lines.push(rule.rider);
   } else if (criticalMiss) {
     lines.push('**Critical miss.** The spell goes wide, and magic pretends it meant to do that.');
@@ -227,10 +244,63 @@ function resolveSaveEffectSpell({ spell, rule, characterSheet, worldState, rollD
     success ? 'Save succeeds. The spell does not take hold.' : `Save fails. ${rule.effect}`,
   ];
   if (!success) {
-    target.conditions = [...new Set([...(target.conditions || []), spell.id])];
+    target.conditions = addCondition(target.conditions, spell.id);
+  }
+  const effectState = !success && spellHasDuration(spell)
+    ? addSpellEffectToWorldState({
+        worldState: { ...worldState, combat_state: combat },
+        spell,
+        effect: {
+          id: spell.id,
+          name: spell.name,
+          source_type: 'spell',
+          target: target.name,
+          duration: normalizeSpellDuration(spell),
+          concentration: isConcentrationDuration(normalizeSpellDuration(spell)),
+          mechanical_effect: rule.effect,
+          rules_effects: [],
+          ...durationToRemaining(normalizeSpellDuration(spell)),
+        },
+      })
+    : { ...worldState, combat_state: combat };
+
+  return finishSpellCombatAction({ spell, worldState: effectState, combat: effectState.combat_state, lines });
+}
+
+function resolveSleepSpell({ spell, rule, worldState, rollDie }) {
+  const combat = cloneCombatState(worldState.combat_state);
+  const target = firstEnemy(combat);
+  if (!target) return noSpellTarget(worldState, spell);
+
+  const pool = rollFormula(rule.dice, rollDie);
+  const lines = [
+    `You cast **${spell.name}**. Sleep pool: ${pool.rolls.join(' + ')} = ${pool.total} HP.`,
+  ];
+  if (Number(target.hp || 0) <= pool.total) {
+    target.conditions = addCondition(target.conditions, 'sleep');
+    lines.push(`${target.name} has ${target.hp} HP, so it falls **unconscious** until damaged, shaken awake, or the spell ends.`);
+  } else {
+    lines.push(`${target.name} has ${target.hp} HP, which is too much for the spell pool. Sleep does not take hold.`);
   }
 
-  return finishSpellCombatAction({ spell, worldState, combat, lines });
+  const effectState = (target.conditions || []).includes('sleep')
+    ? addSpellEffectToWorldState({
+        worldState: { ...worldState, combat_state: combat },
+        effect: {
+          id: 'sleep',
+          name: 'Sleep',
+          source_type: 'spell',
+          target: target.name,
+          duration: spell.duration || '1 minute',
+          concentration: false,
+          mechanical_effect: 'The target is asleep until damaged, awakened, or the spell ends.',
+          rules_effects: [],
+          ...durationToRemaining(spell.duration || '1 minute'),
+        },
+      })
+    : { ...worldState, combat_state: combat };
+
+  return finishSpellCombatAction({ spell, worldState: effectState, combat: effectState.combat_state, lines });
 }
 
 function resolveHealingSpell({ spell, rule, characterSheet, worldState, rollDie }) {
@@ -296,6 +366,18 @@ function finishSpellCombatAction({ spell, worldState, combat, lines }) {
     reply,
     consumesTurn: enemiesAlive && consumesCombatTurn(spell),
   };
+}
+
+function addSpellEffectToWorldState({ worldState, effect }) {
+  const currentEffects = normalizeEffects(worldState.active_effects || []);
+  const retainedEffects = effect.concentration
+    ? currentEffects.filter((item) => !item.concentration)
+    : currentEffects.filter((item) => item.id !== effect.id);
+  return applyActiveEffectsToWorldState(worldState, [...retainedEffects, effect]);
+}
+
+function addCondition(conditions = [], condition) {
+  return [...new Set([...(conditions || []), condition].filter(Boolean))];
 }
 
 function noSpellTarget(worldState, spell) {
@@ -435,6 +517,8 @@ function spendLimitedSpellUse(characterSheet, spell, known) {
 
 function buildSpellEffect(characterSheet, spell, known) {
   if (!spellHasDuration(spell)) return null;
+  const outcomeRule = SPELL_OUTCOMES[spell.id];
+  if (outcomeRule?.type === 'save_effect' || outcomeRule?.type === 'sleep_pool') return null;
   const actor = characterSheet.identity?.name || 'active character';
   const duration = normalizeSpellDuration(spell);
   return {
@@ -446,6 +530,7 @@ function buildSpellEffect(characterSheet, spell, known) {
     target: spell.range === 'Self' ? actor : 'current scene target',
     duration,
     concentration: isConcentrationDuration(duration),
+    spellcasting_modifier: getSpellcastingModifier(characterSheet),
     mechanical_effect: spell.description,
     rules_effects: getRulesEffectsForSpell(spell),
     ...durationToRemaining(duration),
@@ -484,8 +569,47 @@ function durationToRemaining(duration = '') {
 }
 
 function getRulesEffectsForSpell(spell) {
-  if (spell.id === 'shield_of_faith') {
-    return [{ target: 'armor_class_bonus', value: 2, label: 'Shield of Faith' }];
+  const effectsBySpell = {
+    armor_of_agathys: [
+      { target: 'temp_hp', value: 5, label: 'Armor of Agathys' },
+      { target: 'melee_retaliation_damage', value: 5, damage_type: 'cold', label: 'Armor of Agathys' },
+    ],
+    bless: [
+      { target: 'attack_roll_bonus_die', die: '1d4', label: 'Bless' },
+      { target: 'saving_throw_bonus_die', die: '1d4', label: 'Bless' },
+    ],
+    divine_favor: [
+      { target: 'weapon_damage_bonus_die', die: '1d4', damage_type: 'radiant', label: 'Divine Favor' },
+    ],
+    guidance: [
+      { target: 'ability_check_bonus_die', die: '1d4', label: 'Guidance', expires_on_use: true },
+    ],
+    heroism: [
+      { target: 'fear_immunity', label: 'Heroism' },
+      { target: 'temp_hp_each_turn', value: 'spell_mod_min_1', label: 'Heroism' },
+    ],
+    hex: [
+      { target: 'weapon_damage_bonus_die', die: '1d6', damage_type: 'necrotic', label: 'Hex' },
+    ],
+    hunter_mark: [
+      { target: 'weapon_damage_bonus_die', die: '1d6', damage_type: 'force', label: "Hunter's Mark" },
+    ],
+    mage_armor: [
+      { target: 'armor_formula', base: 13, dex_cap: null, label: 'Mage Armor' },
+    ],
+    searing_smite: [
+      { target: 'weapon_damage_bonus_die', die: '1d6', damage_type: 'fire', label: 'Searing Smite', expires_on_hit: true },
+    ],
+    shield: [
+      { target: 'armor_class_bonus', value: 5, label: 'Shield' },
+    ],
+    shield_of_faith: [
+      { target: 'armor_class_bonus', value: 2, label: 'Shield of Faith' },
+    ],
+  };
+
+  if (effectsBySpell[spell.id]) {
+    return effectsBySpell[spell.id];
   }
   return [];
 }
@@ -516,9 +640,43 @@ function tickActiveEffects(worldState = {}, { rounds = 0, minutes = 0 } = {}) {
     }
   }
 
+  let nextWorldState = applyActiveEffectsToWorldState(worldState, nextEffects);
+  if (expiredEffects.length > 0) {
+    nextWorldState = clearExpiredEffectState(nextWorldState, expiredEffects);
+  }
+
   return {
-    worldState: applyActiveEffectsToWorldState(worldState, nextEffects),
+    worldState: nextWorldState,
     expiredEffects,
+  };
+}
+
+function clearExpiredEffectState(worldState, expiredEffects = []) {
+  const expiredIds = new Set(expiredEffects.map((effect) => effect.id).filter(Boolean));
+  const expiredTempHp = expiredEffects.some((effect) => (
+    normalizeEffects([effect]).flatMap((item) => item.rules_effects || [])
+      .some((rule) => rule.target === 'temp_hp' || rule.target === 'temp_hp_each_turn')
+  ));
+  const clearConditions = (conditions = []) => (conditions || []).filter((condition) => !expiredIds.has(String(condition)));
+  const combat = worldState.combat_state?.active
+    ? {
+        ...worldState.combat_state,
+        combatants: (worldState.combat_state.combatants || []).map((combatant) => ({
+          ...combatant,
+          conditions: clearConditions(combatant.conditions),
+          temp_hp: combatant.is_player && expiredTempHp ? 0 : combatant.temp_hp,
+        })),
+      }
+    : worldState.combat_state;
+
+  return {
+    ...worldState,
+    combat_state: combat,
+    player_stats: {
+      ...(worldState.player_stats || {}),
+      conditions: clearConditions(worldState.player_stats?.conditions || []),
+      temp_hp: expiredTempHp ? 0 : worldState.player_stats?.temp_hp,
+    },
   };
 }
 
@@ -581,15 +739,18 @@ function applyActiveEffectsToCharacterSheet(characterSheet = {}, effects = []) {
   const derived = characterSheet.derived_stats || {};
   const currentBreakdown = derived.armor_class_breakdown || [];
   const currentSpellArmorBonus = sumSpellArmorBreakdown(currentBreakdown);
-  const baseArmorClass = Number(
-    derived.base_armor_class
+  const naturalBaseArmorClass = Number(
+    derived.natural_base_armor_class
+      ?? derived.base_armor_class
       ?? (Number(derived.armor_class || 10) - currentSpellArmorBonus),
   );
+  const baseArmorClass = Math.max(naturalBaseArmorClass, getArmorFormulaBase(normalizedEffects, characterSheet));
   const spellArmorBonus = sumArmorBonusEffects(normalizedEffects);
   return {
     ...characterSheet,
     derived_stats: {
       ...derived,
+      natural_base_armor_class: naturalBaseArmorClass,
       base_armor_class: baseArmorClass,
       armor_class: baseArmorClass + spellArmorBonus,
       armor_class_breakdown: [
@@ -606,18 +767,27 @@ function applyActiveEffectsToWorldState(worldState = {}, effects = [], character
   const stats = worldState.player_stats || {};
   const currentSpellArmorBonus = sumArmorBonusEffects(worldState.active_effects || []);
   const sheetArmor = characterSheet?.derived_stats?.armor_class;
-  const baseArmorClass = Number(
-    stats.base_armor_class
+  const naturalBaseArmorClass = Number(
+    stats.natural_base_armor_class
+      ?? characterSheet?.derived_stats?.natural_base_armor_class
+      ?? stats.base_armor_class
       ?? characterSheet?.derived_stats?.base_armor_class
       ?? ((stats.armor_class ?? sheetArmor ?? 10) - currentSpellArmorBonus),
   );
+  const baseArmorClass = Math.max(naturalBaseArmorClass, getArmorFormulaBase(normalizedEffects, characterSheet));
   const spellArmorBonus = sumArmorBonusEffects(normalizedEffects);
   const nextArmorClass = baseArmorClass + spellArmorBonus;
+  const previousEffectIds = new Set((worldState.active_effects || []).map((effect) => effect.id).filter(Boolean));
+  const newlyAppliedEffects = normalizedEffects.filter((effect) => !previousEffectIds.has(effect.id));
+  const tempHpEffect = getTempHpFromEffects(newlyAppliedEffects);
+  const nextTempHp = tempHpEffect > 0
+    ? Math.max(Number(stats.temp_hp || 0), tempHpEffect)
+    : stats.temp_hp;
   const nextCombatState = worldState.combat_state?.active
     ? {
         ...worldState.combat_state,
         combatants: (worldState.combat_state.combatants || []).map((combatant) => (
-          combatant.is_player ? { ...combatant, ac: nextArmorClass } : combatant
+          combatant.is_player ? { ...combatant, ac: nextArmorClass, temp_hp: nextTempHp } : combatant
         )),
       }
     : worldState.combat_state;
@@ -628,8 +798,10 @@ function applyActiveEffectsToWorldState(worldState = {}, effects = [], character
     combat_state: nextCombatState,
     player_stats: {
       ...stats,
+      natural_base_armor_class: naturalBaseArmorClass,
       base_armor_class: baseArmorClass,
       armor_class: nextArmorClass,
+      temp_hp: nextTempHp,
       spell_slots: characterSheet?.spellcasting?.slots || stats.spell_slots || {},
     },
   };
@@ -647,6 +819,32 @@ function sumArmorBonusEffects(effects = []) {
     .flatMap((effect) => effect.rules_effects || [])
     .filter((effect) => effect.target === 'armor_class_bonus')
     .reduce((sum, effect) => sum + Number(effect.value || 0), 0);
+}
+
+function getArmorFormulaBase(effects = [], characterSheet = {}) {
+  const formulas = normalizeEffects(effects)
+    .flatMap((effect) => effect.rules_effects || [])
+    .filter((effect) => effect.target === 'armor_formula');
+  if (formulas.length === 0) return 0;
+
+  const dexMod = Number(characterSheet?.abilities?.modifiers?.dex || 0);
+  return formulas.reduce((best, formula) => {
+    const dexCap = formula.dex_cap;
+    const dexApplied = dexCap === null || dexCap === undefined ? dexMod : Math.min(dexMod, Number(dexCap));
+    return Math.max(best, Number(formula.base || 10) + dexApplied);
+  }, 0);
+}
+
+function getTempHpFromEffects(effects = []) {
+  return normalizeEffects(effects)
+    .flatMap((effect) => (effect.rules_effects || []).map((rule) => ({ effect, rule })))
+    .filter(({ rule }) => rule.target === 'temp_hp')
+    .reduce((best, { rule, effect }) => Math.max(best, resolveRuleValue(rule.value, effect)), 0);
+}
+
+function resolveRuleValue(value, effect = {}) {
+  if (value === 'spell_mod_min_1') return Math.max(1, Number(effect.spellcasting_modifier || 0));
+  return Number(value || 0);
 }
 
 function buildSpellArmorBreakdown(effects = []) {
@@ -673,6 +871,75 @@ function isSpellArmorBreakdown(part = {}) {
     || part.label === 'Shield of Faith';
 }
 
+function getActiveBonusDice(worldState = {}, bonusType) {
+  return normalizeEffects(worldState.active_effects || [])
+    .flatMap((effect) => (effect.rules_effects || []).map((rule) => ({ effect, rule })))
+    .filter(({ rule }) => BONUS_DIE_RULES[rule.target] === bonusType && rule.die)
+    .map(({ effect, rule }) => ({
+      effectId: effect.id,
+      die: rule.die,
+      label: rule.label || effect.name || 'Active effect',
+      expiresOnUse: Boolean(rule.expires_on_use),
+    }));
+}
+
+function getActiveDamageDice(worldState = {}) {
+  return normalizeEffects(worldState.active_effects || [])
+    .flatMap((effect) => (effect.rules_effects || []).map((rule) => ({ effect, rule })))
+    .filter(({ rule }) => rule.target === 'weapon_damage_bonus_die' && rule.die)
+    .map(({ effect, rule }) => ({
+      effectId: effect.id,
+      die: rule.die,
+      damageType: rule.damage_type || 'damage',
+      label: rule.label || effect.name || 'Active effect',
+      expiresOnHit: Boolean(rule.expires_on_hit),
+    }));
+}
+
+function consumeActiveEffects(worldState = {}, effectIds = [], characterSheet = null) {
+  const consumeIds = new Set(effectIds.filter(Boolean));
+  if (consumeIds.size === 0) return worldState;
+  const activeEffects = normalizeEffects(worldState.active_effects || []);
+  return applyActiveEffectsToWorldState(
+    worldState,
+    activeEffects.filter((effect) => !consumeIds.has(effect.id)),
+    characterSheet,
+  );
+}
+
+function applyStartOfTurnEffects(worldState = {}, characterSheet = null) {
+  const activeEffects = normalizeEffects(worldState.active_effects || []);
+  const tempHp = activeEffects
+    .flatMap((effect) => (effect.rules_effects || []).map((rule) => ({ effect, rule })))
+    .filter(({ rule }) => rule.target === 'temp_hp_each_turn')
+    .reduce((best, { rule, effect }) => Math.max(best, resolveRuleValue(rule.value, effect)), 0);
+  if (tempHp <= 0) return worldState;
+
+  const stats = worldState.player_stats || {};
+  const nextTempHp = Math.max(Number(stats.temp_hp || 0), tempHp);
+  const combat = worldState.combat_state?.active
+    ? {
+        ...worldState.combat_state,
+        combatants: (worldState.combat_state.combatants || []).map((combatant) => (
+          combatant.is_player ? { ...combatant, temp_hp: nextTempHp } : combatant
+        )),
+      }
+    : worldState.combat_state;
+  return {
+    ...worldState,
+    combat_state: combat,
+    player_stats: {
+      ...stats,
+      temp_hp: nextTempHp,
+    },
+  };
+}
+
+function formatBonusDieTag(bonus = null) {
+  if (!bonus?.die) return '';
+  return ` bonus_die=${bonus.die} bonus_source="${String(bonus.label || 'bonus').replaceAll('"', '')}"`;
+}
+
 module.exports = {
   resolveSpellCast,
   resolveSpellOutcome,
@@ -682,5 +949,10 @@ module.exports = {
   tickActiveEffects,
   applyActiveEffectsToCharacterSheet,
   applyActiveEffectsToWorldState,
+  applyStartOfTurnEffects,
+  consumeActiveEffects,
   durationToRemaining,
+  getActiveBonusDice,
+  getActiveDamageDice,
+  formatBonusDieTag,
 };

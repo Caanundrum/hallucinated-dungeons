@@ -382,3 +382,97 @@ test('blocks one-minute casting during active combat', () => {
   assert.equal(result.blocked, true);
   assert.match(result.reply, /not a single combat action/);
 });
+
+test('Mage Armor raises unarmored AC using the spell formula', () => {
+  const sheet = casterSheet({
+    abilities: { modifiers: { dex: 2, int: 3 } },
+    derived_stats: {
+      armor_class: 12,
+      base_armor_class: 12,
+    },
+    spellcasting: {
+      cantrips_known: [],
+      spells_prepared: ['mage_armor'],
+      slots: { 1: 1 },
+    },
+  });
+  const cast = resolveSpellCast({
+    message: 'I cast Mage Armor.',
+    content,
+    characterSheet: sheet,
+    worldState: worldState({
+      player_stats: { armor_class: 12, base_armor_class: 12, spell_slots: { 1: 1 } },
+    }),
+  });
+  const ticked = tickActiveEffects(cast.worldState, { minutes: 8 * 60 });
+
+  assert.equal(cast.blocked, false);
+  assert.equal(cast.worldState.player_stats.armor_class, 15);
+  assert.equal(ticked.worldState.player_stats.armor_class, 12);
+});
+
+test('Sleep applies the asleep condition when the HP pool covers the target', () => {
+  const sheet = casterSheet({
+    spellcasting: {
+      cantrips_known: [],
+      spells_prepared: ['sleep'],
+      slots: { 1: 1 },
+    },
+  });
+  const cast = resolveSpellCast({
+    message: 'I cast Sleep.',
+    content,
+    characterSheet: sheet,
+    worldState: combatWorld(),
+  });
+  const outcome = resolveSpellOutcome({
+    spellCast: cast,
+    characterSheet: cast.characterSheet,
+    worldState: cast.worldState,
+    rollDie: sequenceRolls([4, 4, 4, 4, 4]),
+  });
+  const target = outcome.worldState.combat_state.combatants.find((combatant) => combatant.name === 'Skeleton');
+  const expired = tickActiveEffects(outcome.worldState, { rounds: 10 });
+  const expiredTarget = expired.worldState.combat_state.combatants.find((combatant) => combatant.name === 'Skeleton');
+
+  assert.equal(target.conditions.includes('sleep'), true);
+  assert.equal(outcome.worldState.active_effects.some((effect) => effect.id === 'sleep'), true);
+  assert.equal(expiredTarget.conditions.includes('sleep'), false);
+  assert.match(outcome.reply, /falls \*\*unconscious\*\*/);
+});
+
+test('Armor of Agathys grants temporary HP and retaliates when hit', () => {
+  const sheet = casterSheet({
+    identity: { name: 'Mira', level: 1, class: 'warlock', class_name: 'Warlock' },
+    spellcasting: {
+      ability: 'cha',
+      cantrips_known: [],
+      spells_prepared: ['armor_of_agathys'],
+      slots: { 1: 1 },
+    },
+  });
+  const cast = resolveSpellCast({
+    message: 'I cast Armor of Agathys.',
+    content,
+    characterSheet: sheet,
+    worldState: combatWorld(),
+  });
+  const outcome = resolveSpellOutcome({
+    spellCast: cast,
+    characterSheet: cast.characterSheet,
+    worldState: cast.worldState,
+  });
+  const advanced = advanceEnemyTurns({
+    worldState: outcome.worldState,
+    characterSheet: cast.characterSheet,
+    playerTurnNote: outcome.reply,
+    rollDie: sequenceRolls([18, 4]),
+  });
+  const skeleton = advanced.worldState.combat_state.combatants.find((combatant) => combatant.name === 'Skeleton');
+
+  assert.equal(cast.worldState.player_stats.temp_hp, 5);
+  assert.equal(advanced.worldState.player_stats.hp, 8);
+  assert.equal(advanced.worldState.player_stats.temp_hp, 0);
+  assert.equal(skeleton.hp, 5);
+  assert.match(advanced.reply, /lashes back for 5 cold damage/);
+});

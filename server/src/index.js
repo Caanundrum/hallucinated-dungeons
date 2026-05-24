@@ -446,6 +446,21 @@ async function syncCharacterFromWorldState(socket, sessionId) {
     }
   }
 
+  if (stats.reset_spell_uses && nextSheet.resources?.spell_uses) {
+    const spellUses = Object.fromEntries(Object.entries(nextSheet.resources.spell_uses).map(([key, use]) => [
+      key,
+      { ...use, remaining: Number(use.max ?? 1) },
+    ]));
+    nextSheet = {
+      ...nextSheet,
+      resources: {
+        ...(nextSheet.resources || {}),
+        spell_uses: spellUses,
+      },
+    };
+    changed = true;
+  }
+
   if (!changed) return;
   const saved = await db.updateCharacterSheet(character.id, nextSheet);
   socket.emit('character_ready', {

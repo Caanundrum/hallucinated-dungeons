@@ -41,7 +41,7 @@ function resolveCreatureTurns({
   combat.turn_index = playerIndex;
   combat.combatants = combatants.map((combatant, index) => (
     index === playerIndex
-      ? { ...combatant, hp: player.hp, conditions: clearPlayerTurnConditions(combatant.conditions) }
+      ? { ...combatant, hp: player.hp, temp_hp: player.temp_hp, conditions: clearPlayerTurnConditions(combatant.conditions) }
       : combatant
   ));
 
@@ -91,15 +91,22 @@ function resolveCreatureAction({ actor, player, characterSheet, worldState, roll
   if (!criticalMiss && (criticalHit || attackTotal >= ac)) {
     const damage = rollDamage(attack.damage_formula || '1d6+1', rollDie, criticalHit);
     const before = Number(player.hp ?? getCurrentHp(characterSheet, worldState));
-    const nextHp = Math.max(0, before - damage.total);
+    const applied = applyDamageToPlayer({ player, characterSheet, worldState, damage: damage.total });
+    const retaliation = getMeleeRetaliation(worldState, applied.beforeTempHp);
+    const nextActor = retaliation
+      ? { ...actor, hp: Math.max(0, Number(actor.hp || 0) - retaliation.damage) }
+      : actor;
+    const retaliationLine = retaliation
+      ? ` ${retaliation.label} lashes back for ${retaliation.damage} ${retaliation.damageType} damage. ${actor.name}: (${actor.hp} -> ${nextActor.hp} HP).`
+      : '';
     return {
-      actor,
-      player: { ...player, hp: nextHp },
-      lines: [`${actor.name} uses ${attack.name}: rolls ${rollText} vs AC ${ac}. ${criticalHit ? '**Critical hit.** ' : ''}Hit for ${damage.total} damage. ${player.name}: (${before} -> ${nextHp} HP).`],
+      actor: nextActor,
+      player: applied.player,
+      lines: [`${actor.name} uses ${attack.name}: rolls ${rollText} vs AC ${ac}. ${criticalHit ? '**Critical hit.** ' : ''}Hit for ${damage.total} damage${applied.absorbed ? ` (${applied.absorbed} absorbed by temporary HP)` : ''}. ${player.name}: (${before} -> ${applied.player.hp} HP).${retaliationLine}`],
       damageEvents: [{
         target: 'player',
         source: actor.name,
-        amount: damage.total,
+        amount: applied.hpDamage,
       }],
     };
   }
@@ -172,10 +179,45 @@ function buildPlayerCombatant(characterSheet, worldState) {
     initiative: Number(derived.initiative || 0),
     hp,
     max_hp: Number(stats.max_hp ?? derived.max_hp ?? hp),
+    temp_hp: Number(stats.temp_hp ?? derived.temp_hp ?? 0),
     ac: Number(stats.armor_class ?? derived.armor_class ?? 10),
     conditions: derived.conditions || stats.conditions || [],
     is_player: true,
   };
+}
+
+function applyDamageToPlayer({ player, characterSheet, worldState, damage }) {
+  const beforeTempHp = Number(player.temp_hp ?? worldState.player_stats?.temp_hp ?? characterSheet.derived_stats?.temp_hp ?? 0);
+  const absorbed = Math.min(beforeTempHp, Number(damage || 0));
+  const hpDamage = Math.max(0, Number(damage || 0) - absorbed);
+  const beforeHp = Number(player.hp ?? getCurrentHp(characterSheet, worldState));
+  return {
+    beforeTempHp,
+    absorbed,
+    hpDamage,
+    player: {
+      ...player,
+      temp_hp: Math.max(0, beforeTempHp - absorbed),
+      hp: Math.max(0, beforeHp - hpDamage),
+    },
+  };
+}
+
+function getMeleeRetaliation(worldState = {}, beforeTempHp = 0) {
+  if (Number(beforeTempHp || 0) <= 0) return null;
+  const activeEffects = Array.isArray(worldState.active_effects) ? worldState.active_effects : [];
+  for (const effect of activeEffects) {
+    for (const rule of effect.rules_effects || []) {
+      if (rule.target === 'melee_retaliation_damage') {
+        return {
+          damage: Number(rule.value || 0),
+          damageType: rule.damage_type || 'damage',
+          label: rule.label || effect.name || 'Retaliation',
+        };
+      }
+    }
+  }
+  return null;
 }
 
 function rollDamage(formula, rollDie, crit = false) {
