@@ -14,7 +14,7 @@ const db                   = require('./db');
 const { UTILITY_MODEL }    = require('./models');
 const { retryWithBackoff } = require('./retryUtils');
 
-const SYSTEM_PROMPT = `You are a campaign archivist for a D&D 5e adventure game.
+const SYSTEM_PROMPT = `You are a campaign archivist for a D&D 5.5e (2024) adventure game.
 Given a sequence of player actions and DM responses from one chapter of gameplay, write a concise paragraph-length narrative summary capturing the key events, decisions, and story developments.
 
 Write in past tense, third person. Focus on story beats, character moments, and meaningful choices. Do not list every individual action — synthesize into a readable narrative arc.

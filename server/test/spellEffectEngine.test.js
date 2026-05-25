@@ -10,6 +10,7 @@ const {
   resolveSpellCast,
   resolveSpellOutcome,
   tickActiveEffects,
+  getActiveBonusDice,
   getActiveDamageDice,
 } = require('../src/spellEffectEngine');
 const { advanceEnemyTurns } = require('../src/refereeCore');
@@ -207,6 +208,76 @@ test('new concentration spell replaces prior concentration and removes its AC bo
   assert.deepEqual(bless.worldState.active_effects.map((effect) => effect.id), ['bless']);
   assert.equal(bless.characterSheet.derived_stats.armor_class, 18);
   assert.equal(bless.worldState.player_stats.armor_class, 18);
+});
+
+test('Divine Favor is a 2024 non-concentration one-minute spell effect', () => {
+  const shield = resolveSpellCast({
+    message: 'I cast Shield of Faith.',
+    content,
+    characterSheet: paladinSheet({ spellcasting: { spells_prepared: ['shield_of_faith', 'divine_favor'], slots: { 1: 2 } } }),
+    worldState: worldState(),
+  });
+  const divineFavor = resolveSpellCast({
+    message: 'I cast Divine Favor.',
+    content,
+    characterSheet: shield.characterSheet,
+    worldState: shield.worldState,
+  });
+
+  assert.deepEqual(divineFavor.worldState.active_effects.map((effect) => effect.id).sort(), ['divine_favor', 'shield_of_faith']);
+  assert.equal(divineFavor.worldState.active_effects.find((effect) => effect.id === 'divine_favor').concentration, false);
+  assert.equal(divineFavor.worldState.active_effects.find((effect) => effect.id === 'divine_favor').remaining_rounds, 10);
+});
+
+test('Guidance requires a 2024 skill choice and applies only to that skill', () => {
+  const sheet = casterSheet({
+    spellcasting: {
+      ability: 'wis',
+      cantrips_known: ['guidance'],
+      spells_prepared: [],
+      slots: { 1: 0 },
+    },
+  });
+  const blocked = resolveSpellCast({
+    message: 'I cast Guidance.',
+    content,
+    characterSheet: sheet,
+    worldState: worldState(),
+  });
+  const cast = resolveSpellCast({
+    message: 'I cast Guidance for Stealth.',
+    content,
+    characterSheet: sheet,
+    worldState: worldState(),
+  });
+
+  assert.equal(blocked.blocked, true);
+  assert.match(blocked.reply, /specific skill/);
+  assert.equal(cast.blocked, false);
+  assert.equal(cast.worldState.active_effects[0].rules_effects[0].skill, 'stealth');
+  assert.equal(getActiveBonusDice(cast.worldState, 'check', { skill: 'stealth' })[0].die, '1d4');
+  assert.equal(getActiveBonusDice(cast.worldState, 'check', { skill: 'perception' }).length, 0);
+});
+
+test('Armor of Agathys uses the 2024 Bonus Action casting time', () => {
+  const spell = content.spells.find((item) => item.id === 'armor_of_agathys');
+  const cast = resolveSpellCast({
+    message: 'I cast Armor of Agathys.',
+    content,
+    characterSheet: casterSheet({
+      identity: { name: 'Mira', level: 1, class: 'warlock', class_name: 'Warlock' },
+      spellcasting: {
+        ability: 'cha',
+        cantrips_known: [],
+        spells_prepared: ['armor_of_agathys'],
+        slots: { 1: 1 },
+      },
+    }),
+    worldState: worldState(),
+  });
+
+  assert.equal(spell.casting_time, 'Bonus Action');
+  assert.equal(cast.worldState.active_effects[0].id, 'armor_of_agathys');
 });
 
 test('blocks class spell when no matching slot remains', () => {

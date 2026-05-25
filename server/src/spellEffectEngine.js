@@ -10,7 +10,6 @@ const CONCENTRATION_DURATIONS = {
   bless: 'Concentration, up to 1 minute',
   dancing_lights: 'Concentration, up to 1 minute',
   detect_magic: 'Concentration, up to 10 minutes',
-  divine_favor: 'Concentration, up to 1 minute',
   faerie_fire: 'Concentration, up to 1 minute',
   guidance: 'Concentration, up to 1 minute',
   hex: 'Concentration, up to 1 hour',
@@ -41,6 +40,27 @@ const BONUS_DIE_RULES = {
   saving_throw_bonus_die: 'save',
   ability_check_bonus_die: 'check',
 };
+
+const GUIDANCE_SKILLS = [
+  ['animal_handling', /\banimal\s+handling\b/i],
+  ['sleight_of_hand', /\bsleight\s+of\s+hand\b/i],
+  ['acrobatics', /\bacrobatics?\b/i],
+  ['arcana', /\barcana\b/i],
+  ['athletics', /\bathletics?\b/i],
+  ['deception', /\bdeception\b/i],
+  ['history', /\bhistory\b/i],
+  ['insight', /\binsight\b/i],
+  ['intimidation', /\bintimidation\b/i],
+  ['investigation', /\binvestigation\b/i],
+  ['medicine', /\bmedicine\b/i],
+  ['nature', /\bnature\b/i],
+  ['perception', /\bperception\b/i],
+  ['performance', /\bperformance\b/i],
+  ['persuasion', /\bpersuasion\b/i],
+  ['religion', /\breligion\b/i],
+  ['stealth', /\bstealth\b/i],
+  ['survival', /\bsurvival\b/i],
+];
 
 function resolveSpellCast({ message, content, characterSheet, worldState = {} }) {
   const castWorldState = clearResolvedCombatState(worldState);
@@ -151,6 +171,10 @@ function resolveSpellOutcome({ spellCast, characterSheet, worldState = {}, rollD
 function validateSpellTiming({ spell, message, worldState = {}, characterSheet = {} }) {
   if (spell.id === 'mage_armor' && characterSheet?.equipped?.armor) {
     return 'Mage Armor only works on a creature that is not wearing armor. Your current armor is already doing the job, and it is not interested in being replaced by sparkle math.';
+  }
+
+  if (spell.id === 'guidance' && !inferGuidanceSkill(message)) {
+    return 'Guidance needs a specific skill in 2024 rules. Try something like "I cast Guidance for Stealth" or "Guidance for Persuasion." The gods are helpful, but they do enjoy a form field.';
   }
 
   if (worldState.combat_state?.active && /^\s*\d+\s*minute/i.test(spell.casting_time || '')) {
@@ -632,7 +656,7 @@ function normalizeSpellName(value) {
 function getKnownSpellInfo(characterSheet = {}, spell = {}) {
   if (!spell || spell.unknown) return { known: false };
   const cantrips = new Set(characterSheet.spellcasting?.cantrips_known || []);
-  const classSpells = new Set(characterSheet.spellcasting?.spells_prepared || characterSheet.spellcasting?.spells_known || []);
+  const classSpells = new Set(characterSheet.spellcasting?.spells_prepared || []);
   const speciesSpell = (characterSheet.species_spells || []).find((entry) => (entry.id || entry) === spell.id);
   const originEntry = Object.entries(characterSheet.origin?.magic_initiate || {})
     .find(([, choice]) => (choice.cantrips || []).includes(spell.id) || choice.spell === spell.id);
@@ -656,7 +680,7 @@ function getKnownSpellInfo(characterSheet = {}, spell = {}) {
 function getKnownSpellIds(characterSheet = {}) {
   const ids = new Set([
     ...(characterSheet.spellcasting?.cantrips_known || []),
-    ...(characterSheet.spellcasting?.spells_prepared || characterSheet.spellcasting?.spells_known || []),
+    ...(characterSheet.spellcasting?.spells_prepared || []),
     ...(characterSheet.species_spells || []).map((spell) => spell.id || spell),
   ]);
   for (const choice of Object.values(characterSheet.origin?.magic_initiate || {})) {
@@ -746,6 +770,7 @@ function buildSpellEffect(characterSheet, spell, known, message = '', worldState
   if (outcomeRule?.type === 'save_effect' || outcomeRule?.type === 'sleep_pool') return null;
   const actor = characterSheet.identity?.name || 'active character';
   const duration = normalizeSpellDuration(spell);
+  const guidanceSkill = spell.id === 'guidance' ? inferGuidanceSkill(message) : null;
   const targetName = spell.range === 'Self' || isSelfTargetedSpellMessage(message)
     ? actor
     : inferSpellTargetName(message, worldState, spell) || firstEnemy(worldState.combat_state || {})?.name || 'current scene target';
@@ -758,15 +783,27 @@ function buildSpellEffect(characterSheet, spell, known, message = '', worldState
     target: targetName,
     duration,
     concentration: isConcentrationDuration(duration),
+    guidance_skill: guidanceSkill,
     spellcasting_modifier: getSpellcastingModifier(characterSheet),
     mechanical_effect: spell.description,
-    rules_effects: getRulesEffectsForSpell(spell),
+    rules_effects: getRulesEffectsForSpell(spell, { message }),
     ...durationToRemaining(duration),
   };
 }
 
 function isSelfTargetedSpellMessage(message = '') {
   return /\b(?:myself|self|me)\b/i.test(message || '');
+}
+
+function inferGuidanceSkill(message = '') {
+  const text = String(message || '');
+  const match = GUIDANCE_SKILLS.find(([, pattern]) => pattern.test(text));
+  return match?.[0] || null;
+}
+
+function formatGuidanceLabel(skill = null) {
+  if (!skill) return 'Guidance';
+  return `Guidance (${skill.replaceAll('_', ' ')})`;
 }
 
 function spellHasDuration(spell) {
@@ -800,7 +837,10 @@ function durationToRemaining(duration = '') {
   return {};
 }
 
-function getRulesEffectsForSpell(spell) {
+function getRulesEffectsForSpell(spell, { message = '' } = {}) {
+  const guidanceSkill = spell.id === 'guidance'
+    ? spell.guidance_skill || spell.skill || inferGuidanceSkill(message)
+    : null;
   const effectsBySpell = {
     armor_of_agathys: [
       { target: 'temp_hp', value: 5, label: 'Armor of Agathys' },
@@ -814,7 +854,7 @@ function getRulesEffectsForSpell(spell) {
       { target: 'weapon_damage_bonus_die', die: '1d4', damage_type: 'radiant', label: 'Divine Favor' },
     ],
     guidance: [
-      { target: 'ability_check_bonus_die', die: '1d4', label: 'Guidance', expires_on_use: true },
+      { target: 'ability_check_bonus_die', die: '1d4', label: formatGuidanceLabel(guidanceSkill), skill: guidanceSkill },
     ],
     heroism: [
       { target: 'fear_immunity', label: 'Heroism' },
@@ -1110,10 +1150,11 @@ function isSpellArmorBreakdown(part = {}) {
     || part.label === 'Shield of Faith';
 }
 
-function getActiveBonusDice(worldState = {}, bonusType) {
+function getActiveBonusDice(worldState = {}, bonusType, context = {}) {
   return normalizeEffects(worldState.active_effects || [])
     .flatMap((effect) => (effect.rules_effects || []).map((rule) => ({ effect, rule })))
     .filter(({ rule }) => BONUS_DIE_RULES[rule.target] === bonusType && rule.die)
+    .filter(({ rule }) => !rule.skill || (context.skill && rule.skill === context.skill))
     .map(({ effect, rule }) => ({
       effectId: effect.id,
       die: rule.die,

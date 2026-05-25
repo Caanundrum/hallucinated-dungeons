@@ -775,17 +775,28 @@ test('successful concentration save keeps the active effect', () => {
   assert.match(result.reply, /maintain concentration/);
 });
 
-test('Guidance adds a bonus die to the next check and expires after the roll', () => {
+test('Guidance adds a bonus die only to its chosen skill and persists for the duration', () => {
   const guidance = {
     id: 'guidance',
     name: 'Guidance',
     concentration: true,
     remaining_rounds: 10,
-    rules_effects: [{ target: 'ability_check_bonus_die', die: '1d4', label: 'Guidance', expires_on_use: true }],
+    rules_effects: [{ target: 'ability_check_bonus_die', die: '1d4', label: 'Guidance (stealth)', skill: 'stealth' }],
   };
   const prompt = adjudicate({
-    message: "I study the clerk's face.",
-    worldState: worldState({ active_effects: [guidance] }),
+    message: 'I hide behind the overturned table.',
+    worldState: worldState({
+      active_effects: [guidance],
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', hp: 12, max_hp: 12, ac: 16, is_player: true },
+          { name: 'Goblin', hp: 8, max_hp: 8, ac: 12, is_player: false },
+        ],
+      },
+    }),
     characterSheet,
   });
   const result = adjudicate({
@@ -797,7 +808,14 @@ test('Guidance adds a bonus die to the next check and expires after the roll', (
 
   assert.equal(prompt.worldState.pending_roll.bonus_die, '1d4');
   assert.match(prompt.reply, /bonus_die=1d4/);
-  assert.deepEqual(result.worldState.active_effects, []);
+  assert.deepEqual(result.worldState.active_effects.map((effect) => effect.id), ['guidance']);
+
+  const otherSkillPrompt = adjudicate({
+    message: "I study the clerk's face.",
+    worldState: worldState({ active_effects: [guidance] }),
+    characterSheet,
+  });
+  assert.equal(otherSkillPrompt.worldState.pending_roll.bonus_die, null);
 });
 
 test('Bless adds a bonus die to weapon attacks', () => {

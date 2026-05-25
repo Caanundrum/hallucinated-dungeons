@@ -9,7 +9,7 @@ const db                   = require('./db');
 const { UTILITY_MODEL }    = require('./models');
 const { retryWithBackoff } = require('./retryUtils');
 
-const SYSTEM_PROMPT = `You are a world state extractor for a D&D 5e adventure game.
+const SYSTEM_PROMPT = `You are a world state extractor for a D&D 5.5e (2024) adventure game.
 Given a player action and the DM's narrative response, extract any changes to the world state as a JSON patch.
 
 Return ONLY the fields that changed. Do not include unchanged fields.

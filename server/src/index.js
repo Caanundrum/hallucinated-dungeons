@@ -171,7 +171,7 @@ function characterSheetToWorldStats(characterSheet, characterId = null) {
     resistances: characterSheet.resistances || [],
     species_spells: (characterSheet.species_spells || []).map((spell) => spell.id || spell),
     class_cantrips: characterSheet.spellcasting?.cantrips_known || [],
-    class_spells: characterSheet.spellcasting?.spells_prepared || characterSheet.spellcasting?.spells_known || [],
+    class_spells: characterSheet.spellcasting?.spells_prepared || [],
     origin_magic: characterSheet.origin?.magic_initiate || {},
     conditions: stats.conditions || [],
     spell_slots: characterSheet.spellcasting?.slots || {},
@@ -297,7 +297,7 @@ function summarizeCharacterSheetForRules(characterSheet) {
   }
   if (spellcasting.ability) {
     const cantrips = spellcasting.cantrips_known || [];
-    const spells = spellcasting.spells_prepared || spellcasting.spells_known || [];
+    const spells = spellcasting.spells_prepared || [];
     lines.push(`Spellcasting: ${spellcasting.ability.toUpperCase()}, attack ${fmtSigned(derived.spell_attack_bonus)}, DC ${derived.spell_save_dc ?? '--'}, slots ${formatSpellSlots(spellcasting.slots)}, cantrips ${formatList(cantrips)}, level 1 ${formatList(spells)}`);
   }
   const languages = characterSheet.languages || characterSheet.proficiencies?.languages || [];

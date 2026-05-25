@@ -276,7 +276,7 @@ test('caster spell lists cover the largest level 1 creation choices', () => {
     if (!spellcasting) continue;
     const cantripOptions = content.spells.filter((spell) => spell.level === 0 && spell.classes.includes(characterClass.id));
     const levelOneOptions = content.spells.filter((spell) => spell.level === 1 && spell.classes.includes(characterClass.id));
-    const requiredLevelOne = spellcasting.prepared_spells || spellcasting.spells_known || (spellcasting.prepared_formula ? 6 : 0);
+    const requiredLevelOne = spellcasting.prepared_spells || 0;
 
     assert.ok(
       cantripOptions.length >= (spellcasting.cantrips || 0),

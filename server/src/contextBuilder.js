@@ -222,7 +222,7 @@ function buildActiveCharacterText(characterSheet) {
   if (spellcasting.ability) {
     const content = getContentBundle();
     const cantrips = spellcasting.cantrips_known || [];
-    const spells = spellcasting.spells_prepared || spellcasting.spells_known || [];
+    const spells = spellcasting.spells_prepared || [];
     lines.push(`Spellcasting: ${spellcasting.ability.toUpperCase()}, slots ${formatSpellSlots(spellcasting.slots)}, cantrips ${formatSpellList(cantrips, content)}, level 1 prepared ${formatSpellList(spells, content)}`);
     lines.push('Spell rule: only these listed cantrips and level 1 prepared/known spells are currently castable. Do not allow unlisted spells or spells above level 1.');
   }

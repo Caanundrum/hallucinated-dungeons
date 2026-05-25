@@ -1006,10 +1006,10 @@ function CharacterSheetModal({ character, content, onClose }) {
                       <span>{spellcasting.cantrips_known.map(spellSummary).join(' | ')}</span>
                     </div>
                   )}
-                  {(spellcasting.spells_prepared || spellcasting.spells_known || []).length > 0 && (
+                  {(spellcasting.spells_prepared || []).length > 0 && (
                     <div className="sheet-line">
-                      <strong>Level 1</strong>
-                      <span>{(spellcasting.spells_prepared || spellcasting.spells_known || []).map(spellSummary).join(' | ')}</span>
+                      <strong>Prepared Level 1</strong>
+                      <span>{(spellcasting.spells_prepared || []).map(spellSummary).join(' | ')}</span>
                     </div>
                   )}
                 </>

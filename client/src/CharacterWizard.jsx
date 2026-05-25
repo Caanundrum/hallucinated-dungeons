@@ -1198,8 +1198,6 @@ function requiredSpellCount(selectedClass, abilityMods) {
   const config = selectedClass?.spellcasting;
   if (!config) return 0;
   if (config.prepared_spells) return config.prepared_spells;
-  if (config.spells_known) return config.spells_known;
-  if (config.prepared_formula === 'ability_mod_plus_1') return Math.max(1, (abilityMods[config.ability] || 0) + 1);
   return 0;
 }
 
@@ -1302,11 +1300,7 @@ function getGuidanceNotes({
     const spellAbilityName = ABILITY_LABELS[spellAbility] || spellAbility.toUpperCase();
     const countText = spellcasting.prepared_spells
       ? `You prepare ${spellcasting.prepared_spells} level 1 spells from your class list.`
-      : spellcasting.prepared_formula
-        ? `Prepared spells scale from ${spellAbilityName}${showAbilityMath ? ` ${fmtMod(spellMod || 0)}` : ''}.`
-        : spellcasting.spells_known
-          ? `You choose ${spellcasting.spells_known} known level 1 spells.`
-          : 'Your spell choices are tied to class rules.';
+      : 'Your spell choices are tied to class rules.';
     notes.push({
       id: 'spellcasting',
       title: 'Spellcasting',

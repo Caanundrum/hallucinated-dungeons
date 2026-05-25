@@ -143,7 +143,7 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
   }
 
   const modifier = getCheckModifier(characterSheet, check);
-  const bonus = getActiveBonusDice(worldState, 'check')[0] || null;
+  const bonus = getActiveBonusDice(worldState, 'check', { skill: check.skill })[0] || null;
   const dc = chooseDc(intent.raw, check, worldState, inCombat);
   const pendingRoll = {
     id: `roll_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
