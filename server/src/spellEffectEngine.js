@@ -367,14 +367,41 @@ function resolveHealingSpell({ spell, rule, characterSheet, worldState, rollDie 
 }
 
 function resolveUtilitySpell({ spell, worldState }) {
+  const effectSummary = formatUtilitySpellEffectSummary(spell, worldState);
   return {
     handled: true,
     logType: 'spell_utility',
     spell,
     worldState: stripInternalState(worldState),
-    reply: `You cast **${spell.name}**. Its effect is now active in the scene: ${spell.description}`,
+    reply: `You cast **${spell.name}**.${effectSummary ? ` ${effectSummary}` : ''} Its effect is now active in the scene: ${spell.description}`,
     consumesTurn: consumesCombatTurn(spell),
   };
+}
+
+function formatUtilitySpellEffectSummary(spell = {}, worldState = {}) {
+  const effect = normalizeEffects(worldState.active_effects || []).find((item) => item.id === spell.id);
+  if (!effect) return '';
+
+  const rules = effect.rules_effects || [];
+  const targetText = effect.target ? ` on ${effect.target}` : '';
+  const armorBonus = rules.find((rule) => rule.target === 'armor_class_bonus');
+  if (armorBonus) {
+    const ac = worldState.player_stats?.armor_class;
+    return `A defensive effect settles${targetText}; AC is now ${ac ?? `increased by ${formatSigned(Number(armorBonus.value || 0))}`} while it lasts.`;
+  }
+
+  const tempHp = rules.find((rule) => rule.target === 'temp_hp');
+  if (tempHp) {
+    const temp = worldState.player_stats?.temp_hp;
+    return `Protective force gathers${targetText}; temporary HP is now ${temp ?? tempHp.value}.`;
+  }
+
+  const bonusDice = rules
+    .filter((rule) => rule.die)
+    .map((rule) => `${rule.die} ${String(rule.target || 'bonus').replaceAll('_', ' ')}`);
+  if (bonusDice.length) return `The active benefit is ${bonusDice.join(', ')}${targetText}.`;
+
+  return targetText ? `It is now affecting${targetText}.` : '';
 }
 
 function finishSpellAction({ spell, worldState, combat, lines, activeCombat }) {
@@ -719,7 +746,7 @@ function buildSpellEffect(characterSheet, spell, known, message = '', worldState
   if (outcomeRule?.type === 'save_effect' || outcomeRule?.type === 'sleep_pool') return null;
   const actor = characterSheet.identity?.name || 'active character';
   const duration = normalizeSpellDuration(spell);
-  const targetName = spell.range === 'Self'
+  const targetName = spell.range === 'Self' || isSelfTargetedSpellMessage(message)
     ? actor
     : inferSpellTargetName(message, worldState, spell) || firstEnemy(worldState.combat_state || {})?.name || 'current scene target';
   return {
@@ -736,6 +763,10 @@ function buildSpellEffect(characterSheet, spell, known, message = '', worldState
     rules_effects: getRulesEffectsForSpell(spell),
     ...durationToRemaining(duration),
   };
+}
+
+function isSelfTargetedSpellMessage(message = '') {
+  return /\b(?:myself|self|me)\b/i.test(message || '');
 }
 
 function spellHasDuration(spell) {

@@ -1039,27 +1039,28 @@ function buildConcentrationPrompt({ worldState, characterSheet = {}, damageEvent
   const dc = Math.max(10, Math.floor(highestDamage / 2));
   const source = playerDamage.map((event) => event.source).filter(Boolean).join(', ') || 'damage';
   const effectNames = concentrationEffects.map((effect) => effect.name || effect.id);
+  const pendingRoll = {
+    id: `roll_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    kind: 'concentration_save',
+    ability: 'con',
+    label: 'Constitution Saving Throw (Concentration)',
+    formula: `1d20${formatSigned(modifier.total)}`,
+    modifier: modifier.total,
+    modifier_breakdown: modifier.breakdown,
+    bonus_die: bonus?.die || null,
+    bonus_source: bonus?.label || null,
+    bonus_effect_ids: bonus?.expiresOnUse ? [bonus.effectId] : [],
+    dc,
+    dc_source: `Concentration save after damage from ${source}; DC is max(10, half damage)`,
+    effect_ids: concentrationEffects.map((effect) => effect.id),
+    effect_names: effectNames,
+    consumes: 'forced_save',
+    combat: true,
+    ends_turn: false,
+  };
   return {
-    pendingRoll: {
-      id: `roll_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      kind: 'concentration_save',
-      ability: 'con',
-      label: 'Constitution Saving Throw (Concentration)',
-      formula: `1d20${formatSigned(modifier.total)}`,
-      modifier: modifier.total,
-      modifier_breakdown: modifier.breakdown,
-      bonus_die: bonus?.die || null,
-      bonus_source: bonus?.label || null,
-      bonus_effect_ids: bonus?.expiresOnUse ? [bonus.effectId] : [],
-      dc,
-      dc_source: `Concentration save after damage from ${source}; DC is max(10, half damage)`,
-      effect_ids: concentrationEffects.map((effect) => effect.id),
-      effect_names: effectNames,
-      consumes: 'forced_save',
-      combat: true,
-      ends_turn: false,
-    },
-    reply: `Concentration is at risk from ${source}. Make a DC ${dc} Constitution Saving Throw to maintain ${formatList(effectNames)}.${bonus ? ` Add ${bonus.die} from ${bonus.label}.` : ''} [SAVE: ability=con modifier=${modifier.total} breakdown="${sanitizeTagValue(modifier.breakdown)}"${formatBonusDieTag(bonus)}]`,
+    pendingRoll,
+    reply: `Concentration is at risk from ${source}. Make a DC ${dc} Constitution Saving Throw to maintain ${formatList(effectNames)}.${bonus ? ` Add ${bonus.die} from ${bonus.label}.` : ''} ${rollTagForPending(pendingRoll)}`,
   };
 }
 

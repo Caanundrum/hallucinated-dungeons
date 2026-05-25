@@ -20,6 +20,16 @@ function parseRollTag(text) {
   };
 }
 
+function inferBasicRollLabel(text) {
+  const value = String(text || '');
+  if (/initiative/i.test(value)) return 'Initiative';
+  if (/death save|death saving throw/i.test(value)) return 'Death Save';
+  if (/saving throw|save/i.test(value)) return 'Saving Throw';
+  if (/attack/i.test(value)) return 'Attack Roll';
+  if (/check/i.test(value)) return 'Check';
+  return 'Roll';
+}
+
 function parseStructuredRollTag(text) {
   const match = String(text || '').match(/\[(CHECK|SAVE):\s*([^\]]+)\]/i);
   if (!match) return null;
@@ -378,7 +388,7 @@ function App() {
           diceCount: rollTag.diceCount,
           dieSides:  rollTag.dieSides,
           modifier:  rollTag.modifier,
-          label: 'Requested Roll',
+          label: inferBasicRollLabel(message),
         });
         // Clear any stale fallback state
         setFallbackRoll(null);

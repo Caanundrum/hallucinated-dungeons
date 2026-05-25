@@ -526,6 +526,7 @@ test('damage while concentrating prompts a concentration save and failure ends t
   assert.equal(damaged.worldState.pending_roll.kind, 'concentration_save');
   assert.equal(damaged.worldState.pending_roll.dc, 10);
   assert.match(damaged.reply, /Concentration is at risk/);
+  assert.match(damaged.reply, new RegExp(`\\[SAVE: id=${damaged.worldState.pending_roll.id} ability=con`));
   assert.deepEqual(failed.worldState.active_effects, []);
   assert.equal(failed.worldState.player_stats.armor_class, 18);
   assert.equal(failed.worldState.combat_state.combatants[0].ac, 18);

@@ -138,6 +138,24 @@ test('allows reachable container contents from recent narration when extractor i
   assert.equal(checkSpatialAction('Examine the silver token.', state, { recentNarration }), null);
 });
 
+test('allows visible details of recently described present objects', () => {
+  const state = {
+    current_location: 'Bellwatch Hollow',
+    scene_presence: {
+      exact_location: 'Bellwatch Hollow, village square',
+      location_type: 'village square',
+      present_npcs: ['elderly woman'],
+      present_objects: ['notice board', 'missing people parchment'],
+      available_exits: ['chapel steps', 'woods path'],
+      nearby_locations: [],
+    },
+    npcs_encountered: [],
+  };
+  const recentNarration = 'A crease at the bottom suggests the paper was folded from a longer message, but the rest has been torn away.';
+
+  assert.equal(checkSpatialAction('I examine the crease at the bottom of the posting.', state, { recentNarration }), null);
+});
+
 test('does not treat prior spatial rejection text as object presence', () => {
   const state = {
     current_location: 'Bracken Hollow town gate',

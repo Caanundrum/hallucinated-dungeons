@@ -136,8 +136,26 @@ test('casts Shield of Faith by spending a slot and applying the AC effect', () =
   assert.equal(result.characterSheet.derived_stats.armor_class, 20);
   assert.equal(result.worldState.player_stats.armor_class, 20);
   assert.equal(result.worldState.active_effects[0].id, 'shield_of_faith');
+  assert.equal(result.worldState.active_effects[0].target, 'Ari');
   assert.equal(result.worldState.active_effects[0].remaining_rounds, 100);
   assert.equal(result.worldState.active_effects[0].concentration, true);
+});
+
+test('Shield of Faith utility reply names the AC change', () => {
+  const cast = resolveSpellCast({
+    message: 'I cast Shield of Faith on myself.',
+    content,
+    characterSheet: paladinSheet(),
+    worldState: worldState(),
+  });
+  const outcome = resolveSpellOutcome({
+    spellCast: cast,
+    characterSheet: cast.characterSheet,
+    worldState: cast.worldState,
+  });
+
+  assert.match(outcome.reply, /AC is now 20/);
+  assert.match(outcome.reply, /on Ari/);
 });
 
 test('Shield of Faith updates combat tracker AC while active and when expired', () => {

@@ -101,6 +101,33 @@ const PORTABLE_OBJECT_HINTS = new Set([
   'vial',
   'wax',
 ]);
+const VISIBLE_DETAIL_HINTS = new Set([
+  'ash',
+  'blood',
+  'bottom',
+  'corner',
+  'crease',
+  'edge',
+  'fold',
+  'glyph',
+  'handle',
+  'hinge',
+  'ink',
+  'latch',
+  'line',
+  'mark',
+  'notch',
+  'rune',
+  'scratch',
+  'script',
+  'seal',
+  'smear',
+  'stain',
+  'symbol',
+  'tear',
+  'wax',
+  'writing',
+]);
 
 function normalize(value) {
   return String(value || '').toLowerCase();
@@ -193,11 +220,27 @@ function recentNarrationEstablishesReachableObject(recentNarration, term) {
 
   const normalizedTerm = singularize(compact(term));
   if (!normalizedTerm || !listIncludesTerm([text], normalizedTerm)) return false;
-  if (!RECENT_REACHABLE_CUES.test(text)) return false;
 
   const termTokens = normalizedTerm.split(' ').filter(Boolean);
+  if (termTokens.some((token) => VISIBLE_DETAIL_HINTS.has(token)) && recentlyDescribesVisibleDetail(text, termTokens)) {
+    return true;
+  }
+
+  if (!RECENT_REACHABLE_CUES.test(text)) return false;
   return termTokens.some((token) => PORTABLE_OBJECT_HINTS.has(token))
     || /\b(?:satchel|bag|pack|pouch|chest|box|drawer|case|pocket|bundle|contents?)\b/i.test(text);
+}
+
+function recentlyDescribesVisibleDetail(text, termTokens = []) {
+  const detailCue = /\b(?:at the|on the|under the|over the|beneath the|along the|beside the|bottom|edge|corner|surface|written|drawn|carved|scratched|marked|folded|creased|torn|sealed|suggests?|reads?)\b/i;
+  const parentCue = /\b(?:posting|notice|parchment|paper|note|letter|board|door|wall|floor|stone|token|seal|symbol|mark|object|item|thing)\b/i;
+  return detailCue.test(text)
+    && parentCue.test(text)
+    && termTokens.some((token) => new RegExp(`\\b${escapeRegExp(token)}\\b`, 'i').test(text));
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function cleanCandidate(value) {

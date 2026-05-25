@@ -441,7 +441,7 @@ async function handleDeterministicSpellAction(socket, sessionId, message) {
       inputTokens:  null,
       outputTokens: null,
     }).catch(console.error);
-    await syncCharacterFromWorldState(socket, sessionId).catch(console.error);
+    await syncCharacterFromWorldState(socket, sessionId, { forceEmit: true }).catch(console.error);
     return { matched: true, handled: true };
   }
 
@@ -454,7 +454,7 @@ async function handleDeterministicSpellAction(socket, sessionId, message) {
   return { matched: true, handled: false, worldState: result.worldState };
 }
 
-async function syncCharacterFromWorldState(socket, sessionId) {
+async function syncCharacterFromWorldState(socket, sessionId, { forceEmit = false } = {}) {
   const [character, worldStateRow] = await Promise.all([
     db.getCharacterForSession(sessionId),
     db.getWorldState(sessionId),
@@ -536,7 +536,16 @@ async function syncCharacterFromWorldState(socket, sessionId) {
     changed = true;
   }
 
-  if (!changed) return;
+  if (!changed) {
+    if (forceEmit) {
+      socket.emit('character_ready', {
+        characterId: character.id,
+        character: sheet,
+        shouldStartSession: false,
+      });
+    }
+    return;
+  }
   const saved = await db.updateCharacterSheet(character.id, nextSheet);
   socket.emit('character_ready', {
     characterId: saved.id,
