@@ -276,6 +276,9 @@ function summarizeCharacterSheetForRules(characterSheet) {
   if (attacks.length) {
     lines.push(`Attacks: ${attacks.map((attack) => `${attack.name} hit ${fmtSigned(attack.attack_total)}, damage ${attack.damage_formula}`).join('; ')}`);
   }
+  if (Array.isArray(derived.active_spell_effects) && derived.active_spell_effects.length) {
+    lines.push(`Active effects: ${formatRulesActiveEffects(derived.active_spell_effects)}`);
+  }
   if (features.length) {
     lines.push(`Features: ${features.map((feature) => `${feature.name} (${feature.source || 'feature'})`).join('; ')}`);
   }
@@ -293,6 +296,32 @@ function summarizeCharacterSheetForRules(characterSheet) {
     lines.push(`Character details: ${[details.alignment, details.personality, details.backstory].filter(Boolean).join(' ')}`);
   }
   return lines.join('\n');
+}
+
+function formatRulesActiveEffects(effects = []) {
+  if (!Array.isArray(effects) || effects.length === 0) return 'none';
+  return effects.map((effect) => {
+    const remaining = effect.remaining_rounds != null
+      ? `${effect.remaining_rounds} rounds left`
+      : effect.remaining_minutes != null
+        ? `${effect.remaining_minutes} minutes left`
+        : effect.duration || 'duration unknown';
+    const rules = (effect.rules_effects || [])
+      .map((rule) => `${rule.label || rule.target}: ${rule.value != null ? formatRuleValue(rule.value) : rule.die || rule.target}`)
+      .join(', ');
+    return [
+      effect.name || effect.id || 'effect',
+      `target ${effect.target || 'self/scene'}`,
+      effect.mechanical_effect || null,
+      rules || null,
+      remaining,
+      effect.concentration ? 'concentration' : null,
+    ].filter(Boolean).join(' | ');
+  }).join('; ');
+}
+
+function formatRuleValue(value) {
+  return typeof value === 'number' && value >= 0 ? `+${value}` : String(value);
 }
 
 function fmtSigned(value) {
@@ -1281,6 +1310,9 @@ io.on('connection', (socket) => {
           const activeNpcs = (ws.npcs_encountered || []).filter((n) => n?.name);
           if (activeNpcs.length > 0) {
             contextParts.push(`NPCs present: ${activeNpcs.map((n) => `${n.name} (${n.disposition || 'unknown'})`).join(', ')}`);
+          }
+          if (ws.active_effects?.length) {
+            contextParts.push(`Active effects: ${formatRulesActiveEffects(ws.active_effects)}`);
           }
           if (ws.combat_state && ws.combat_state.active) {
             contextParts.push(`COMBAT ACTIVE — Round ${ws.combat_state.round}. Combatants: ${
