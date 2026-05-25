@@ -526,7 +526,7 @@ function validateCombatStartTarget({ message, worldState }) {
     handled: true,
     logType: 'referee_combat_spatial_block',
     worldState,
-    reply: spatialIssue?.message || `You are currently at ${currentSceneLocation(worldState)}, and ${target} is not here. Do you look around for it, or clarify where you mean?`,
+    reply: spatialIssue?.message || `You are currently at ${currentSceneLocation(worldState)}, and ${target} is not here. ${missingTargetPrompt(target)}`,
   };
 }
 
@@ -564,6 +564,17 @@ function singularizeTarget(value) {
 
 function currentSceneLocation(worldState = {}) {
   return String(worldState.scene_presence?.exact_location || worldState.current_location || 'your current location');
+}
+
+function missingTargetPrompt(target = '') {
+  if (targetLooksAnimate(target)) {
+    return 'Do you look for them, move toward where they might be, or clarify who you mean?';
+  }
+  return 'Do you look around for it, or clarify where you mean?';
+}
+
+function targetLooksAnimate(target = '') {
+  return /\b(?:acolyte|bandit|blacksmith|boy|clerk|creature|cultist|dragon|enemy|figure|girl|goblin|guard|hostile|innkeeper|keeper|man|merchant|monster|orc|person|priest|reeve|shadow|shopkeeper|stranger|thug|watchman|watchwoman|wolf|woman)\b/i.test(String(target));
 }
 
 function formatScenePresence(worldState = {}) {

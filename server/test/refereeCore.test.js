@@ -303,6 +303,27 @@ test('blocks combat against absent service NPCs before initiative starts', () =>
   assert.match(result.reply, /innkeeper is not here/);
 });
 
+test('uses person-friendly wording for absent combat targets near a matching location', () => {
+  const result = adjudicate({
+    message: 'I attack the innkeeper.',
+    worldState: worldState({
+      scene_presence: {
+        exact_location: "Mason's Rest, tavern eaves and square entrance",
+        location_type: 'tavern exterior',
+        present_npcs: ['ink-stained man'],
+        present_objects: ['tavern door'],
+      },
+    }),
+    characterSheet,
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.pending_roll, null);
+  assert.match(result.reply, /innkeeper is not here/);
+  assert.match(result.reply, /look for them/);
+  assert.doesNotMatch(result.reply, /look around for it/);
+});
+
 test('blocks invented hostile targets that are not established in the scene', () => {
   const result = adjudicate({
     message: 'I attack a hostile shadow emerging from the tree line.',

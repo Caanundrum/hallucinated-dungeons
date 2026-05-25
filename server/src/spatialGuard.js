@@ -284,7 +284,7 @@ function findGenericSpatialIssue(input, worldState, options = {}) {
   if (target && !isKnownPresentOrReachable(worldState, target, options)) {
     return {
       target,
-      message: `You are currently at ${currentLocation(worldState)}, and ${target} is not here. Do you look around for it, or clarify where you mean?`,
+      message: `You are currently at ${currentLocation(worldState)}, and ${target} is not here. ${missingTargetPrompt(target)}`,
     };
   }
 
@@ -311,3 +311,14 @@ function checkSpatialAction(message, worldState = {}, options = {}) {
 }
 
 module.exports = { checkSpatialAction };
+
+function missingTargetPrompt(target = '') {
+  if (targetLooksAnimate(target)) {
+    return 'Do you look for them, move toward where they might be, or clarify who you mean?';
+  }
+  return 'Do you look around for it, or clarify where you mean?';
+}
+
+function targetLooksAnimate(target = '') {
+  return /\b(?:acolyte|bandit|blacksmith|boy|clerk|creature|cultist|dragon|enemy|figure|girl|goblin|guard|hostile|innkeeper|keeper|man|merchant|monster|orc|person|priest|reeve|shadow|shopkeeper|stranger|thug|watchman|watchwoman|wolf|woman)\b/i.test(String(target));
+}

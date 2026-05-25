@@ -924,7 +924,7 @@ function CharacterSheetModal({ character, content, onClose }) {
               <h3>Passive Bonuses</h3>
               {passiveBonuses.map((effect) => (
                 <div key={`${effect.id || effect.name}-${effect.target || 'self'}`} className="sheet-line">
-                  <strong>{effect.name || effect.id}</strong>
+                  <strong>{formatEffectName(effect)}</strong>
                   <span>{formatEffectSummary(effect)}</span>
                 </div>
               ))}
@@ -1063,12 +1063,28 @@ function SheetStat({ label, value }) {
 function formatEffectSummary(effect) {
   const parts = [];
   if (effect.mechanical_effect) parts.push(effect.mechanical_effect);
-  else if (effect.target && effect.value != null) parts.push(`${effect.target}: ${fmtMod(effect.value)}`);
+  else if (effect.target === 'armor_formula') {
+    parts.push(`Base AC ${effect.base}${effect.dex_cap == null ? ' + full DEX modifier' : ` + DEX modifier cap ${effect.dex_cap}`}`);
+  } else if (effect.target === 'shield_bonus') {
+    parts.push(`AC ${fmtMod(effect.value)}`);
+  } else if (effect.target === 'max_hp_per_level_bonus') {
+    parts.push(`Max HP ${fmtMod(effect.value)} per level`);
+  } else if (effect.target && effect.value != null) {
+    parts.push(`${titleCase(String(effect.target).replaceAll('_', ' '))}: ${fmtMod(effect.value)}`);
+  }
   if (effect.duration) parts.push(`Duration ${effect.duration}`);
   if (effect.remaining_rounds != null) parts.push(`${effect.remaining_rounds} rounds left`);
   else if (effect.remaining_minutes != null) parts.push(`${effect.remaining_minutes} minutes left`);
   if (effect.concentration) parts.push('Concentration');
   return parts.join(' - ') || 'Effect active';
+}
+
+function formatEffectName(effect) {
+  if (effect.name) return effect.name;
+  if (effect.source_item_name) return effect.source_item_name;
+  if (effect.id) return titleCase(String(effect.id).replaceAll('_', ' '));
+  if (effect.target) return titleCase(String(effect.target).replaceAll('_', ' '));
+  return 'Passive Effect';
 }
 
 export default App;
