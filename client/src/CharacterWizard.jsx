@@ -58,8 +58,12 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
     selectedSkills: [],
     equipmentChoice: 'pack',
     backgroundEquipmentChoice: 'equipment',
+    classChoices: {},
+    weaponMasteries: [],
+    expertiseSkills: [],
     cantripsKnown: [],
     spellsKnown: [],
+    spellbookSpells: [],
     rolledStats: { attemptsUsed: 0, currentSet: [], acceptedSet: [], rollToken: null },
   }));
 
@@ -95,10 +99,23 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
   const selectedClassSkills = new Set(draft.selectedSkills);
   const allSkillIds = new Set([...speciesSkillIds, ...backgroundSkills, ...selectedClassSkills, ...originSkillIds]);
   const languageMap = Object.fromEntries((content.languages || []).map((language) => [language.id, language]));
+  const selectedClassChoiceOptions = getSelectedClassChoiceOptions(selectedClass, draft.classChoices);
+  const classExtraCantrips = selectedClassChoiceOptions.reduce((sum, option) => sum + Number(option.extra_cantrips || 0), 0);
+  const classExtraWeaponProficiencies = selectedClassChoiceOptions.flatMap((option) => option.weapons || []);
+  const weaponMasteryOptions = getWeaponMasteryOptions(selectedClass, content, classExtraWeaponProficiencies);
+  const expertiseOptions = [...allSkillIds].map((skillId) => skillMap[skillId]).filter(Boolean);
+  const alwaysPreparedSpells = selectedClass?.spellcasting?.always_prepared_spells || [];
   const cantripOptions = content.spells.filter((spell) => spell.level === 0 && spell.classes.includes(draft.classId));
-  const spellOptions = content.spells.filter((spell) => spell.level === 1 && spell.classes.includes(draft.classId));
-  const requiredCantrips = selectedClass?.spellcasting?.cantrips || 0;
-  const requiredSpells = requiredSpellCount(selectedClass, abilityMods);
+  const spellOptions = content.spells.filter((spell) => (
+    spell.level === 1 && spell.classes.includes(draft.classId) && !alwaysPreparedSpells.includes(spell.id)
+  ));
+  const spellbookSpellOptions = content.spells.filter((spell) => spell.level === 1 && spell.classes.includes(draft.classId));
+  const preparedSpellOptions = selectedClass?.spellcasting?.spellbook_spells
+    ? spellbookSpellOptions.filter((spell) => draft.spellbookSpells.includes(spell.id))
+    : spellOptions;
+  const requiredCantrips = (selectedClass?.spellcasting?.cantrips || 0) + classExtraCantrips;
+  const requiredSpells = requiredSpellCount(selectedClass);
+  const requiredSpellbookSpells = selectedClass?.spellcasting?.spellbook_spells || 0;
   const equipmentItems = (selectedClass?.equipment_pack || [])
     .map((id) => content.equipment.find((item) => item.id === id))
     .filter(Boolean);
@@ -223,6 +240,36 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
     });
   }
 
+  function updateClassChoice(choiceId, value) {
+    setDraft((current) => ({
+      ...current,
+      classChoices: { ...current.classChoices, [choiceId]: value },
+      cantripsKnown: [],
+      spellsKnown: [],
+      spellbookSpells: [],
+    }));
+  }
+
+  function toggleWeaponMastery(weaponId) {
+    const limit = selectedClass?.weapon_mastery_count || 0;
+    setDraft((current) => {
+      const selected = new Set(current.weaponMasteries || []);
+      if (selected.has(weaponId)) selected.delete(weaponId);
+      else if (selected.size < limit) selected.add(weaponId);
+      return { ...current, weaponMasteries: [...selected] };
+    });
+  }
+
+  function toggleExpertise(skillId) {
+    const limit = selectedClass?.expertise_count || 0;
+    setDraft((current) => {
+      const selected = new Set(current.expertiseSkills || []);
+      if (selected.has(skillId)) selected.delete(skillId);
+      else if (selected.size < limit) selected.add(skillId);
+      return { ...current, expertiseSkills: [...selected] };
+    });
+  }
+
   function setAbilityMethod(method) {
     onClearError?.();
     setDraft((current) => ({
@@ -266,6 +313,20 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
     });
   }
 
+  function toggleSpellbookSpell(spellId) {
+    setDraft((current) => {
+      const next = new Set(current.spellbookSpells || []);
+      if (next.has(spellId)) next.delete(spellId);
+      else if (next.size < requiredSpellbookSpells) next.add(spellId);
+      const spellbookSpells = [...next];
+      return {
+        ...current,
+        spellbookSpells,
+        spellsKnown: (current.spellsKnown || []).filter((id) => spellbookSpells.includes(id)),
+      };
+    });
+  }
+
   function canAdvance() {
     if (step === 0) return draft.name.trim().length > 0
       && draft.name.trim().length <= 30
@@ -273,13 +334,23 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
       && validSpeciesChoices(draft, selectedSpecies, content)
       && validLanguages(draft, content);
     if (step === 1) return validCharacterDetails(draft.characterDetails);
-    if (step === 2) return Boolean(draft.classId);
+    if (step === 2) return Boolean(draft.classId) && validClassSetup(draft, selectedClass, content);
     if (step === 3) return Boolean(draft.backgroundId) && validBackgroundBonus(backgroundBonus, selectedBackground);
     if (step === 4) return validOriginChoices(draft, selectedSpecies, selectedBackground, originFeatEntries, content, speciesSkillIds);
     if (step === 5) return validAbilityScores(draft);
-    if (step === 6) return draft.selectedSkills.length === (selectedClass?.skill_count || 0);
+    if (step === 6) return draft.selectedSkills.length === (selectedClass?.skill_count || 0)
+      && validExpertiseChoices(draft, selectedClass, allSkillIds);
     if (step === 7) return Boolean(draft.equipmentChoice) && Boolean(draft.backgroundEquipmentChoice);
-    if (isCaster && step === 8) return draft.cantripsKnown.length === requiredCantrips && draft.spellsKnown.length === requiredSpells;
+    if (isCaster && step === 8) return validSpellChoices({
+      draft,
+      selectedClass,
+      requiredCantrips,
+      requiredSpells,
+      requiredSpellbookSpells,
+      cantripOptions,
+      preparedSpellOptions,
+      spellbookSpellOptions,
+    });
     return true;
   }
 
@@ -391,8 +462,29 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
             <ChoiceStep title="Class">
               <CardGrid items={content.classes} selectedId={draft.classId} onSelect={(id) => {
                 update('classId', id);
-                setDraft((current) => ({ ...current, classId: id, selectedSkills: [], cantripsKnown: [], spellsKnown: [] }));
+                setDraft((current) => ({
+                  ...current,
+                  classId: id,
+                  selectedSkills: [],
+                  classChoices: {},
+                  weaponMasteries: [],
+                  expertiseSkills: [],
+                  cantripsKnown: [],
+                  spellsKnown: [],
+                  spellbookSpells: [],
+                }));
               }} />
+              {selectedClass && (
+                <ClassSetup
+                  selectedClass={selectedClass}
+                  content={content}
+                  classChoices={draft.classChoices}
+                  onClassChoice={updateClassChoice}
+                  weaponMasteries={draft.weaponMasteries}
+                  weaponMasteryOptions={weaponMasteryOptions}
+                  onWeaponMastery={toggleWeaponMastery}
+                />
+              )}
             </ChoiceStep>
           )}
 
@@ -523,6 +615,27 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
                   );
                 })}
               </div>
+              {(selectedClass?.expertise_count || 0) > 0 && (
+                <div className="impact-box">
+                  <h3>Expertise</h3>
+                  <p className="helper-text">
+                    Choose {selectedClass.expertise_count} proficient skills to double your proficiency bonus.
+                    Selected: {draft.expertiseSkills.length}/{selectedClass.expertise_count}.
+                  </p>
+                  <div className="option-list">
+                    {expertiseOptions.map((skill) => {
+                      const checked = draft.expertiseSkills.includes(skill.id);
+                      return (
+                        <label key={skill.id} className={`check-card ${checked ? 'selected' : ''}`}>
+                          <input type="checkbox" checked={checked} onChange={() => toggleExpertise(skill.id)} />
+                          <span><strong>{skill.name}</strong> ({skill.ability.toUpperCase()})</span>
+                          <small>{skill.description}</small>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </ChoiceStep>
           )}
 
@@ -557,7 +670,29 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
             <ChoiceStep title="Spells and Cantrips">
               <p className="helper-text">{formatSpellChoicePrompt(requiredCantrips, requiredSpells)}</p>
               <SpellPicker title="Cantrips" spells={cantripOptions} selected={draft.cantripsKnown} limit={requiredCantrips} onToggle={(id) => toggleSpell('cantripsKnown', id, requiredCantrips)} />
-              <SpellPicker title="Prepared Level 1 Spells" spells={spellOptions} selected={draft.spellsKnown} limit={requiredSpells} onToggle={(id) => toggleSpell('spellsKnown', id, requiredSpells)} />
+              {alwaysPreparedSpells.length > 0 && (
+                <InfoRow
+                  title="Always Prepared"
+                  meta="Class feature"
+                  body={alwaysPreparedSpells.map((id) => spellName(content, id)).join(', ')}
+                />
+              )}
+              {requiredSpellbookSpells > 0 && (
+                <SpellPicker
+                  title="Wizard Spellbook"
+                  spells={spellbookSpellOptions}
+                  selected={draft.spellbookSpells}
+                  limit={requiredSpellbookSpells}
+                  onToggle={toggleSpellbookSpell}
+                />
+              )}
+              <SpellPicker
+                title={requiredSpellbookSpells > 0 ? 'Prepared from Spellbook' : 'Prepared Level 1 Spells'}
+                spells={preparedSpellOptions}
+                selected={draft.spellsKnown}
+                limit={requiredSpells}
+                onToggle={(id) => toggleSpell('spellsKnown', id, requiredSpells)}
+              />
             </ChoiceStep>
           )}
 
@@ -681,6 +816,60 @@ function LanguageStep({ languages, selectedLanguages, onToggle }) {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function ClassSetup({
+  selectedClass,
+  content,
+  classChoices,
+  onClassChoice,
+  weaponMasteries,
+  weaponMasteryOptions,
+  onWeaponMastery,
+}) {
+  const choiceBlocks = selectedClass.class_choices || [];
+  const masteryCount = selectedClass.weapon_mastery_count || 0;
+  if (choiceBlocks.length === 0 && masteryCount === 0) return null;
+
+  return (
+    <div className="impact-box">
+      <h3>{selectedClass.name} level 1 choices</h3>
+      {choiceBlocks.map((choice) => {
+        const selectedOption = (choice.options || []).find((option) => option.id === classChoices?.[choice.id]);
+        return (
+          <label key={choice.id} className="field-label">
+            {choice.label}
+            <select value={classChoices?.[choice.id] || ''} onChange={(event) => onClassChoice(choice.id, event.target.value)}>
+              <option value="">Choose {choice.label}</option>
+              {(choice.options || []).map((option) => (
+                <option key={option.id} value={option.id}>{option.name}</option>
+              ))}
+            </select>
+            {selectedOption && <small>{selectedOption.description}</small>}
+          </label>
+        );
+      })}
+
+      {masteryCount > 0 && (
+        <div className="spell-picker">
+          <h3>Weapon Mastery ({weaponMasteries.length}/{masteryCount})</h3>
+          <p className="helper-text">Choose proficient weapons whose mastery properties your character can use at level 1.</p>
+          <div className="option-list">
+            {weaponMasteryOptions.map((weapon) => {
+              const checked = weaponMasteries.includes(weapon.id);
+              return (
+                <label key={weapon.id} className={`check-card ${checked ? 'selected' : ''}`}>
+                  <input type="checkbox" checked={checked} onChange={() => onWeaponMastery(weapon.id)} />
+                  <span><strong>{weapon.name}</strong> ({formatMasteryName(weapon.mastery)})</span>
+                  <small>{weapon.description}</small>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -897,13 +1086,17 @@ function ReviewPanel({ draft, content, finalScores, abilityMods, backgroundBonus
     .join('; ');
   const classSpellBody = [
     ...draft.cantripsKnown.map((id) => `Cantrip: ${spellName(content, id)}`),
+    ...draft.spellbookSpells.map((id) => `Spellbook: ${spellName(content, id)}`),
     ...draft.spellsKnown.map((id) => `Level 1: ${spellName(content, id)}`),
+    ...(selectedClass?.spellcasting?.always_prepared_spells || []).map((id) => `Always Prepared: ${spellName(content, id)}`),
   ].join(', ');
+  const classChoiceBody = formatClassChoices(selectedClass, draft, content, skillMap);
   return (
     <div className="review-grid">
       <InfoRow title={draft.name} meta={`${selectedSpecies?.name} ${selectedClass?.name}`} body={selectedBackground?.name} />
       <InfoRow title="Hit Points" meta={hpPreview} body={`d${selectedClass?.hit_die} + CON ${fmtMod(abilityMods.con)}`} />
       <InfoRow title="Armor Class" meta={acPreview.total} body={acPreview.parts.map((part) => `${part.label} ${fmtMod(part.value)}`).join(', ')} />
+      {classChoiceBody && <InfoRow title="Class Choices" meta={selectedClass?.name} body={classChoiceBody} />}
       {originFeatEntries.length > 0 && <InfoRow title="Origin Feats" meta={`${originFeatEntries.length} granted`} body={originFeatBody} />}
       {guidanceNotes.filter((note) => note.review).map((note) => (
         <InfoRow key={note.id} title={note.title} meta={note.tone === 'warning' ? 'Check' : 'Tip'} body={note.message} />
@@ -973,6 +1166,8 @@ function CharacterSummary({
             `Primary: ${selectedClass.primary_ability?.toUpperCase()}`,
             `Saves: ${(selectedClass.saving_throws || []).map((save) => save.toUpperCase()).join(', ')}`,
             selectedClass.spellcasting ? `Spellcasting: ${selectedClass.spellcasting.ability.toUpperCase()}` : 'No level 1 spellcasting',
+            ...(selectedClass.class_features || []).map((feature) => `${feature.name}: ${feature.description}`),
+            ...formatClassChoiceItems(selectedClass, draft, content, skillMap),
           ]}
         />
       )}
@@ -1062,8 +1257,36 @@ function formatSpeciesChoiceSummary(species, choices = {}, skillMap = {}) {
   }).filter(Boolean);
 }
 
+function formatClassChoiceItems(selectedClass, draft, content, skillMap = {}) {
+  if (!selectedClass) return [];
+  const items = [];
+  for (const choice of selectedClass.class_choices || []) {
+    const option = (choice.options || []).find((item) => item.id === draft.classChoices?.[choice.id]);
+    if (option) items.push(`${choice.label}: ${option.name}. ${option.description}`);
+  }
+  if ((draft.weaponMasteries || []).length > 0) {
+    const weaponMap = Object.fromEntries((content.equipment || []).map((item) => [item.id, item]));
+    items.push(`Weapon Mastery: ${(draft.weaponMasteries || []).map((id) => {
+      const weapon = weaponMap[id];
+      return weapon ? `${weapon.name} (${formatMasteryName(weapon.mastery)})` : id;
+    }).join(', ')}`);
+  }
+  if ((draft.expertiseSkills || []).length > 0) {
+    items.push(`Expertise: ${(draft.expertiseSkills || []).map((id) => skillMap[id]?.name || id).join(', ')}`);
+  }
+  return items;
+}
+
+function formatClassChoices(selectedClass, draft, content, skillMap = {}) {
+  return formatClassChoiceItems(selectedClass, draft, content, skillMap).join('; ');
+}
+
 function spellName(content, spellId) {
   return content.spells.find((spell) => spell.id === spellId)?.name || spellId.replaceAll('_', ' ');
+}
+
+function formatMasteryName(mastery) {
+  return String(mastery || '').replaceAll('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function formatOriginFeatChoiceItems(entry, draft, content = { spells: [] }) {
@@ -1113,6 +1336,86 @@ function validLanguages(draft, content) {
     .map((language) => language.id));
   const selected = draft.languages || [];
   return new Set(selected).size === 2 && selected.every((languageId) => standardLanguages.has(languageId));
+}
+
+function getSelectedClassChoiceOptions(selectedClass, classChoices = {}) {
+  return (selectedClass?.class_choices || [])
+    .map((choice) => (choice.options || []).find((option) => option.id === classChoices[choice.id]))
+    .filter(Boolean);
+}
+
+function validClassSetup(draft, selectedClass, content) {
+  if (!selectedClass) return false;
+  for (const choice of selectedClass.class_choices || []) {
+    const value = draft.classChoices?.[choice.id] || '';
+    if (choice.required && !value) return false;
+    if (value && !(choice.options || []).some((option) => option.id === value)) return false;
+  }
+  const masteryCount = selectedClass.weapon_mastery_count || 0;
+  if (masteryCount > 0) {
+    const selected = draft.weaponMasteries || [];
+    const selectedOptions = getSelectedClassChoiceOptions(selectedClass, draft.classChoices);
+    const weaponOptions = getWeaponMasteryOptions(
+      selectedClass,
+      content,
+      selectedOptions.flatMap((option) => option.weapons || []),
+    );
+    const allowed = new Set(weaponOptions.map((weapon) => weapon.id));
+    if (new Set(selected).size !== masteryCount) return false;
+    if (selected.some((weaponId) => !allowed.has(weaponId))) return false;
+  }
+  return true;
+}
+
+function getWeaponMasteryOptions(selectedClass, content, extraWeaponProficiencies = []) {
+  if (!selectedClass) return [];
+  const proficiencies = new Set([...(selectedClass.weapons || []), ...extraWeaponProficiencies]);
+  return (content.equipment || [])
+    .filter((item) => item.type === 'weapon' && item.mastery)
+    .filter((weapon) => isWeaponProficient(weapon, proficiencies));
+}
+
+function isWeaponProficient(weapon, proficiencies) {
+  if (proficiencies.has(weapon.id)) return true;
+  if (weapon.weapon_category && proficiencies.has(weapon.weapon_category)) return true;
+  if (proficiencies.has('finesse') && (weapon.properties || []).includes('finesse')) return true;
+  return false;
+}
+
+function validExpertiseChoices(draft, selectedClass, allSkillIds) {
+  const count = selectedClass?.expertise_count || 0;
+  if (count === 0) return true;
+  const selected = draft.expertiseSkills || [];
+  if (new Set(selected).size !== count) return false;
+  return selected.every((skillId) => allSkillIds.has(skillId));
+}
+
+function validSpellChoices({
+  draft,
+  selectedClass,
+  requiredCantrips,
+  requiredSpells,
+  requiredSpellbookSpells,
+  cantripOptions,
+  preparedSpellOptions,
+  spellbookSpellOptions,
+}) {
+  if (!selectedClass?.spellcasting) return true;
+  const cantripIds = new Set(cantripOptions.map((spell) => spell.id));
+  const preparedIds = new Set(preparedSpellOptions.map((spell) => spell.id));
+  const spellbookIds = new Set(spellbookSpellOptions.map((spell) => spell.id));
+  if (new Set(draft.cantripsKnown || []).size !== requiredCantrips) return false;
+  if ((draft.cantripsKnown || []).some((id) => !cantripIds.has(id))) return false;
+
+  if (requiredSpellbookSpells > 0) {
+    if (new Set(draft.spellbookSpells || []).size !== requiredSpellbookSpells) return false;
+    if ((draft.spellbookSpells || []).some((id) => !spellbookIds.has(id))) return false;
+    const preparedFromBook = new Set(draft.spellbookSpells || []);
+    if ((draft.spellsKnown || []).some((id) => !preparedFromBook.has(id))) return false;
+  }
+
+  if (new Set(draft.spellsKnown || []).size !== requiredSpells) return false;
+  return (draft.spellsKnown || []).every((id) => preparedIds.has(id));
 }
 
 function getSpeciesSkillIds(draft, species) {
@@ -1194,7 +1497,7 @@ function isFilledInteger(value) {
   return value !== '' && value !== null && value !== undefined && Number.isInteger(Number(value));
 }
 
-function requiredSpellCount(selectedClass, abilityMods) {
+function requiredSpellCount(selectedClass) {
   const config = selectedClass?.spellcasting;
   if (!config) return 0;
   if (config.prepared_spells) return config.prepared_spells;
@@ -1202,7 +1505,7 @@ function requiredSpellCount(selectedClass, abilityMods) {
 }
 
 function formatSpellChoicePrompt(requiredCantrips, requiredSpells) {
-  if (requiredCantrips <= 0) return `Choose ${requiredSpells} prepared level 1 spells.`;
+  if (requiredCantrips <= 0) return `Choose ${requiredSpells} prepared level 1 spells. Always Prepared spells are added for free.`;
   return `Choose ${requiredCantrips} cantrips and ${requiredSpells} prepared level 1 spells.`;
 }
 

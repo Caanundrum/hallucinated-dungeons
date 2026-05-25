@@ -2,6 +2,14 @@ const { byId } = require('./contentData');
 
 const ABILITIES = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
 const STANDARD_ARRAY = [15, 14, 13, 12, 10, 8];
+const WEAPON_MASTERY_DESCRIPTIONS = {
+  cleave: 'On a strong melee hit, the referee can carry damage into a second nearby creature when the weapon supports it.',
+  nick: 'Lets a light off-hand strike fold into the Attack action instead of needing the Bonus Action.',
+  sap: 'A hit can hinder the target and make its next attack less reliable.',
+  slow: 'A hit can reduce the target speed briefly.',
+  topple: 'A hit can force the target to resist being knocked prone.',
+  vex: 'A hit can set up advantage on your next attack against that target.',
+};
 
 function abilityMod(score) {
   return Math.floor((score - 10) / 2);
@@ -13,6 +21,10 @@ function proficiencyBonus(level) {
 
 function normalizeId(value) {
   return String(value || '').trim();
+}
+
+function titleCase(value) {
+  return String(value || '').replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function fail(step, field, message) {
@@ -51,6 +63,7 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
     ...speciesData.skillProficiencies,
     ...origin.skillProficiencies,
   ]);
+  const classData = validateClassLevelChoices(draft, characterClass, content, skillSet);
 
   const equipmentChoice = normalizeId(draft.equipmentChoice || 'pack');
   if (!['pack', 'gold'].includes(equipmentChoice)) {
@@ -70,7 +83,8 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
   })));
   const activeEffects = [...buildActiveEffects(equipped, content), ...speciesData.effects, ...featEffects];
 
-  const spellcasting = buildSpellcasting(draft, characterClass, content, abilityModifiers);
+  const spellcasting = buildSpellcasting(draft, characterClass, content, abilityModifiers, classData);
+  const resources = buildClassResources(characterClass, content);
   const level = 1;
   const pb = proficiencyBonus(level);
   const maxHpBonus = activeEffects
@@ -98,7 +112,7 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
     initiative: initiativeBreakdown.total,
     initiative_breakdown: initiativeBreakdown.parts,
     death_saves: { successes: 0, failures: 0 },
-    skill_modifiers: buildSkillModifiers(content.skills, skillSet, abilityModifiers, pb),
+    skill_modifiers: buildSkillModifiers(content.skills, skillSet, abilityModifiers, pb, classData.expertiseSkills),
     saving_throw_modifiers: buildSaveModifiers(characterClass.saving_throws, abilityModifiers, pb),
     attack_breakdowns: buildAttackBreakdowns(equipped, content, abilityModifiers, pb, activeEffects),
   };
@@ -143,8 +157,8 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
       origin_skills: origin.skillProficiencies,
       tools: [background.tool].filter(Boolean),
       languages,
-      armor: characterClass.armor,
-      weapons: characterClass.weapons,
+      armor: [...new Set([...(characterClass.armor || []), ...classData.armorProficiencies])],
+      weapons: [...new Set([...(characterClass.weapons || []), ...classData.weaponProficiencies])],
     },
     inventory,
     equipped,
@@ -166,9 +180,18 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
         name: entry.feat.name,
         description: entry.feat.description,
       })),
+      ...(characterClass.class_features || []).map((feature) => ({
+        source: 'class',
+        name: feature.name,
+        description: feature.description,
+      })),
+      ...classData.features,
     ],
     species_choices: speciesData.choices,
     species_spells: speciesData.spells,
+    class_choices: classData.choices,
+    weapon_masteries: classData.weaponMasteries,
+    expertise_skills: classData.expertiseSkills,
     languages,
     origin: {
       background_feat: origin.backgroundFeat?.id || null,
@@ -178,6 +201,7 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
       magic_initiate: origin.magicInitiate,
     },
     spellcasting,
+    resources,
     derived_stats: derivedStats,
     notes: {
       item_math_rule: 'Inventory does not alter math unless an item is equipped, attuned, or otherwise active.',
@@ -485,6 +509,126 @@ function validateSkills(selectedSkills, characterClass, background, content, ori
   return new Set([...(background.skills || []), ...picked, ...originSkills]);
 }
 
+function validateClassLevelChoices(draft, characterClass, content, skillSet) {
+  const submittedChoices = draft.classChoices && typeof draft.classChoices === 'object' ? draft.classChoices : {};
+  const choices = {};
+  const features = [];
+  const armorProficiencies = [];
+  const weaponProficiencies = [];
+  let extraCantrips = 0;
+
+  for (const choice of characterClass.class_choices || []) {
+    const value = normalizeId(submittedChoices[choice.id]);
+    if (choice.required && !value) fail('class', choice.id, `${characterClass.name} requires ${choice.label}.`);
+    if (!value) continue;
+
+    const option = (choice.options || []).find((item) => item.id === value);
+    if (!option) fail('class', choice.id, `Choose a valid ${choice.label}.`);
+    choices[choice.id] = option.id;
+    armorProficiencies.push(...(option.armor || []));
+    weaponProficiencies.push(...(option.weapons || []));
+    extraCantrips += Number(option.extra_cantrips || 0);
+    features.push({
+      source: 'class_choice',
+      name: `${choice.label}: ${option.name}`,
+      description: option.description,
+    });
+  }
+
+  const weaponMasteries = validateWeaponMasteries(
+    draft.weaponMasteries,
+    characterClass,
+    content,
+    weaponProficiencies,
+  );
+  const expertiseSkills = validateExpertiseSkills(draft.expertiseSkills, characterClass, skillSet, content);
+
+  if (weaponMasteries.length > 0) {
+    features.push({
+      source: 'class_choice',
+      name: 'Weapon Mastery Choices',
+      description: weaponMasteries
+        .map((entry) => `${entry.name}: ${entry.mastery_name}`)
+        .join(', '),
+    });
+  }
+  if (expertiseSkills.length > 0) {
+    const skillNames = expertiseSkills.map((skillId) => byId(content.skills, skillId)?.name || skillId);
+    features.push({
+      source: 'class_choice',
+      name: 'Expertise Choices',
+      description: skillNames.join(', '),
+    });
+  }
+
+  return {
+    choices,
+    features,
+    armorProficiencies: [...new Set(armorProficiencies)],
+    weaponProficiencies: [...new Set(weaponProficiencies)],
+    extraCantrips,
+    weaponMasteries,
+    expertiseSkills,
+  };
+}
+
+function validateWeaponMasteries(submitted, characterClass, content, extraWeaponProficiencies = []) {
+  const requiredCount = Number(characterClass.weapon_mastery_count || 0);
+  const selected = Array.isArray(submitted) ? submitted.map(normalizeId).filter(Boolean) : [];
+  const unique = [...new Set(selected)];
+  if (unique.length !== selected.length) fail('class', 'weaponMasteries', 'Weapon Mastery choices cannot repeat.');
+  if (requiredCount === 0) return [];
+  if (unique.length !== requiredCount) {
+    fail('class', 'weaponMasteries', `${characterClass.name} must choose exactly ${requiredCount} Weapon Mastery options.`);
+  }
+
+  const available = getWeaponMasteryOptions(characterClass, content, extraWeaponProficiencies);
+  const availableById = new Map(available.map((weapon) => [weapon.id, weapon]));
+  return unique.map((weaponId) => {
+    const weapon = availableById.get(weaponId);
+    if (!weapon) fail('class', 'weaponMasteries', 'Weapon Mastery choices must be proficient weapons with mastery properties.');
+    return {
+      weapon_id: weapon.id,
+      name: weapon.name,
+      mastery: weapon.mastery,
+      mastery_name: titleCase(String(weapon.mastery || '').replaceAll('_', ' ')),
+      description: weapon.description,
+      mastery_description: WEAPON_MASTERY_DESCRIPTIONS[weapon.mastery] || 'Use this weapon mastery property when the referee resolves attacks with this weapon.',
+    };
+  });
+}
+
+function validateExpertiseSkills(submitted, characterClass, skillSet, content) {
+  const requiredCount = Number(characterClass.expertise_count || 0);
+  const selected = Array.isArray(submitted) ? submitted.map(normalizeId).filter(Boolean) : [];
+  const unique = [...new Set(selected)];
+  if (unique.length !== selected.length) fail('skills', 'expertiseSkills', 'Expertise choices cannot repeat.');
+  if (requiredCount === 0) return [];
+  if (unique.length !== requiredCount) {
+    fail('skills', 'expertiseSkills', `${characterClass.name} must choose exactly ${requiredCount} Expertise skills.`);
+  }
+  const allSkills = new Set(content.skills.map((skill) => skill.id));
+  for (const skillId of unique) {
+    if (!allSkills.has(skillId)) fail('skills', 'expertiseSkills', 'Choose valid Expertise skills.');
+    if (!skillSet.has(skillId)) fail('skills', 'expertiseSkills', 'Expertise must be chosen from your proficient skills.');
+  }
+  return unique;
+}
+
+function getWeaponMasteryOptions(characterClass, content, extraWeaponProficiencies = []) {
+  const proficiencies = new Set([...(characterClass.weapons || []), ...extraWeaponProficiencies]);
+  return (content.equipment || [])
+    .filter((item) => item.type === 'weapon' && item.mastery)
+    .filter((weapon) => isWeaponProficient(weapon, proficiencies));
+}
+
+function isWeaponProficient(weapon, proficiencies) {
+  if (proficiencies.has(weapon.id)) return true;
+  if (weapon.weapon_category && proficiencies.has(weapon.weapon_category)) return true;
+  if (proficiencies.has('finesse') && (weapon.properties || []).includes('finesse')) return true;
+  return false;
+}
+
 function buildInventory(characterClass, content, equipmentChoice, background, backgroundEquipmentChoice) {
   const inventory = [];
   if (equipmentChoice === 'gold') {
@@ -580,13 +724,16 @@ function calculateInitiative(abilityModifiers, pb, activeEffects) {
   };
 }
 
-function buildSkillModifiers(skills, proficientSkills, abilityModifiers, pb) {
+function buildSkillModifiers(skills, proficientSkills, abilityModifiers, pb, expertiseSkills = []) {
+  const expertise = new Set(expertiseSkills);
   return Object.fromEntries(skills.map((skill) => {
     const proficient = proficientSkills.has(skill.id);
+    const expert = proficient && expertise.has(skill.id);
     return [skill.id, {
       ability: skill.ability,
       proficient,
-      total: (abilityModifiers[skill.ability] || 0) + (proficient ? pb : 0),
+      expertise: expert,
+      total: (abilityModifiers[skill.ability] || 0) + (proficient ? pb : 0) + (expert ? pb : 0),
     }];
   }));
 }
@@ -627,32 +774,75 @@ function buildAttackBreakdowns(equipped, content, abilityModifiers, pb, activeEf
   }];
 }
 
-function buildSpellcasting(draft, characterClass, content, abilityModifiers) {
+function buildSpellcasting(draft, characterClass, content, abilityModifiers, classData = {}) {
   const config = characterClass.spellcasting;
   if (!config) return null;
   const cantripsKnown = Array.isArray(draft.cantripsKnown) ? draft.cantripsKnown.map(normalizeId) : [];
   const spellsKnown = Array.isArray(draft.spellsKnown) ? draft.spellsKnown.map(normalizeId) : [];
+  const spellbookKnown = Array.isArray(draft.spellbookSpells) ? draft.spellbookSpells.map(normalizeId) : [];
   const cantripOptions = content.spells.filter((spell) => spell.level === 0 && spell.classes.includes(characterClass.id));
   const spellOptions = content.spells.filter((spell) => spell.level === 1 && spell.classes.includes(characterClass.id));
-  if ((config.cantrips || 0) !== cantripsKnown.length) {
-    fail('spells', 'cantripsKnown', `Choose exactly ${config.cantrips || 0} cantrips.`);
+  const alwaysPrepared = config.always_prepared_spells || [];
+  const requiredCantrips = (config.cantrips || 0) + Number(classData.extraCantrips || 0);
+  if (requiredCantrips !== cantripsKnown.length) {
+    fail('spells', 'cantripsKnown', `Choose exactly ${requiredCantrips} cantrips.`);
   }
+  if (new Set(cantripsKnown).size !== cantripsKnown.length) fail('spells', 'cantripsKnown', 'Cantrip choices cannot repeat.');
   for (const id of cantripsKnown) {
     if (!cantripOptions.some((spell) => spell.id === id)) fail('spells', 'cantripsKnown', 'Choose valid class cantrips.');
+  }
+  if (config.spellbook_spells) {
+    if (new Set(spellbookKnown).size !== spellbookKnown.length) fail('spells', 'spellbookSpells', 'Spellbook choices cannot repeat.');
+    if (spellbookKnown.length !== config.spellbook_spells) {
+      fail('spells', 'spellbookSpells', `Choose exactly ${config.spellbook_spells} level 1 spells for your spellbook.`);
+    }
+    for (const id of spellbookKnown) {
+      if (!spellOptions.some((spell) => spell.id === id)) fail('spells', 'spellbookSpells', 'Choose valid class spells for the spellbook.');
+    }
   }
   const requiredSpellCount = config.prepared_spells || 0;
   if (requiredSpellCount !== spellsKnown.length) {
     fail('spells', 'spellsKnown', `Choose exactly ${requiredSpellCount} level 1 spells.`);
   }
+  if (new Set(spellsKnown).size !== spellsKnown.length) fail('spells', 'spellsKnown', 'Prepared spell choices cannot repeat.');
   for (const id of spellsKnown) {
     if (!spellOptions.some((spell) => spell.id === id)) fail('spells', 'spellsKnown', 'Choose valid class spells.');
+    if (alwaysPrepared.includes(id)) fail('spells', 'spellsKnown', 'Always Prepared spells do not count against your chosen prepared spells.');
+    if (config.spellbook_spells && !spellbookKnown.includes(id)) {
+      fail('spells', 'spellsKnown', 'Prepared Wizard spells must come from your spellbook.');
+    }
   }
   return {
     ability: config.ability,
     cantrips_known: cantripsKnown,
-    spells_prepared: spellsKnown,
+    prepared_from_choices: spellsKnown,
+    always_prepared_spells: alwaysPrepared,
+    spells_prepared: [...spellsKnown, ...alwaysPrepared],
+    ...(config.spellbook_spells ? { spellbook_spells: spellbookKnown } : {}),
     slots: config.slots || {},
   };
+}
+
+function buildClassResources(characterClass, content) {
+  const resources = {};
+  const freeSpellUses = characterClass.spellcasting?.free_spell_uses || {};
+  const spellUses = {};
+  for (const [spellId, config] of Object.entries(freeSpellUses)) {
+    const spell = byId(content.spells, spellId);
+    const source = normalizeId(config.source || 'class_feature');
+    const key = `class_feature:${source}:${spellId}`;
+    spellUses[key] = {
+      name: spell?.name || spellId,
+      spell_id: spellId,
+      source,
+      source_name: titleCase(source.replaceAll('_', ' ')),
+      remaining: Number(config.uses || 0),
+      max: Number(config.uses || 0),
+      reset: config.reset || 'long_rest',
+    };
+  }
+  if (Object.keys(spellUses).length > 0) resources.spell_uses = spellUses;
+  return resources;
 }
 
 module.exports = {

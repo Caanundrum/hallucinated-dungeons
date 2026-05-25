@@ -863,6 +863,10 @@ function CharacterSheetModal({ character, content, onClose }) {
   const languages = character.languages || character.proficiencies?.languages || [];
   const speciesSpells = character.species_spells || [];
   const resistances = character.resistances || [];
+  const classChoices = character.class_choices || {};
+  const weaponMasteries = character.weapon_masteries || [];
+  const expertiseSkills = character.expertise_skills || [];
+  const resources = character.resources || {};
   const spellcasting = character.spellcasting || null;
   const magicInitiate = character.origin?.magic_initiate || {};
   const spellById = (spellId) => content?.spells?.find((spell) => spell.id === spellId);
@@ -954,10 +958,34 @@ function CharacterSheetModal({ character, content, onClose }) {
             <h3>Skills</h3>
             <div className="skill-list">
               {Object.entries(skills).map(([skill, data]) => (
-                <span key={skill}>{skill.replaceAll('_', ' ')} {fmtMod(data.total)}{data.proficient ? ' *' : ''}</span>
+                <span key={skill}>{skill.replaceAll('_', ' ')} {fmtMod(data.total)}{data.expertise ? ' expertise' : data.proficient ? ' *' : ''}</span>
               ))}
             </div>
           </section>
+
+          {(Object.keys(classChoices).length > 0 || weaponMasteries.length > 0 || expertiseSkills.length > 0) && (
+            <section className="sheet-section">
+              <h3>Class Choices</h3>
+              {Object.entries(classChoices).map(([choiceId, optionId]) => (
+                <div key={choiceId} className="sheet-line">
+                  <strong>{choiceId.replaceAll('_', ' ')}</strong>
+                  <span>{String(optionId).replaceAll('_', ' ')}</span>
+                </div>
+              ))}
+              {weaponMasteries.length > 0 && (
+                <div className="sheet-line">
+                  <strong>Weapon Mastery</strong>
+                  <span>{weaponMasteries.map((entry) => `${entry.name} (${entry.mastery_name || entry.mastery})`).join(' | ')}</span>
+                </div>
+              )}
+              {expertiseSkills.length > 0 && (
+                <div className="sheet-line">
+                  <strong>Expertise</strong>
+                  <span>{expertiseSkills.map((skill) => String(skill).replaceAll('_', ' ')).join(', ')}</span>
+                </div>
+              )}
+            </section>
+          )}
 
           <section className="sheet-section">
             <h3>Origin</h3>
@@ -1006,6 +1034,18 @@ function CharacterSheetModal({ character, content, onClose }) {
                       <span>{spellcasting.cantrips_known.map(spellSummary).join(' | ')}</span>
                     </div>
                   )}
+                  {(spellcasting.spellbook_spells || []).length > 0 && (
+                    <div className="sheet-line">
+                      <strong>Spellbook</strong>
+                      <span>{spellcasting.spellbook_spells.map(spellSummary).join(' | ')}</span>
+                    </div>
+                  )}
+                  {(spellcasting.always_prepared_spells || []).length > 0 && (
+                    <div className="sheet-line">
+                      <strong>Always Prepared</strong>
+                      <span>{spellcasting.always_prepared_spells.map(spellSummary).join(' | ')}</span>
+                    </div>
+                  )}
                   {(spellcasting.spells_prepared || []).length > 0 && (
                     <div className="sheet-line">
                       <strong>Prepared Level 1</strong>
@@ -1021,6 +1061,18 @@ function CharacterSheetModal({ character, content, onClose }) {
                     row.cantrips.length ? `Cantrips: ${(magicInitiate[row.source]?.cantrips || []).map(spellSummary).join(' | ')}` : null,
                     row.spell ? `Level 1: ${spellSummary(magicInitiate[row.source]?.spell)}` : null,
                   ].filter(Boolean).join('; ')}</span>
+                </div>
+              ))}
+            </section>
+          )}
+
+          {Object.keys(resources.spell_uses || {}).length > 0 && (
+            <section className="sheet-section">
+              <h3>Limited Uses</h3>
+              {Object.entries(resources.spell_uses || {}).map(([key, use]) => (
+                <div key={key} className="sheet-line">
+                  <strong>{use.name}</strong>
+                  <span>{use.remaining}/{use.max} until {String(use.reset || 'rest').replaceAll('_', ' ')}</span>
                 </div>
               ))}
             </section>

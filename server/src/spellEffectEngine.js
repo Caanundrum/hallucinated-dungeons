@@ -656,12 +656,23 @@ function normalizeSpellName(value) {
 function getKnownSpellInfo(characterSheet = {}, spell = {}) {
   if (!spell || spell.unknown) return { known: false };
   const cantrips = new Set(characterSheet.spellcasting?.cantrips_known || []);
+  const alwaysPrepared = new Set(characterSheet.spellcasting?.always_prepared_spells || []);
   const classSpells = new Set(characterSheet.spellcasting?.spells_prepared || []);
   const speciesSpell = (characterSheet.species_spells || []).find((entry) => (entry.id || entry) === spell.id);
   const originEntry = Object.entries(characterSheet.origin?.magic_initiate || {})
     .find(([, choice]) => (choice.cantrips || []).includes(spell.id) || choice.spell === spell.id);
 
   if (cantrips.has(spell.id)) return { known: true, type: 'class_cantrip', label: 'class cantrip' };
+  if (alwaysPrepared.has(spell.id)) {
+    const resourceEntry = Object.entries(characterSheet.resources?.spell_uses || {})
+      .find(([, use]) => use.spell_id === spell.id);
+    return {
+      known: true,
+      type: 'class_feature_spell',
+      source: resourceEntry?.[1]?.source || 'class_feature',
+      label: resourceEntry?.[1]?.source_name || 'class feature',
+    };
+  }
   if (classSpells.has(spell.id)) return { known: true, type: 'class_spell', label: 'prepared class spell' };
   if (speciesSpell) return { known: true, type: 'species_spell', label: `${speciesSpell.source || 'species'} spell` };
   if (originEntry) {
@@ -700,6 +711,13 @@ function spendSpellResource(characterSheet = {}, spell = {}, known = {}) {
     return { ok: true, characterSheet, note: 'cantrip/no slot' };
   }
 
+  let limitedFailure = null;
+  if (known.type === 'origin_spell' || known.type === 'species_spell' || known.type === 'class_feature_spell') {
+    const limited = spendLimitedSpellUse(characterSheet, spell, known);
+    if (limited.ok) return limited;
+    limitedFailure = limited;
+  }
+
   const slotKey = String(spell.level);
   const currentSlots = characterSheet.spellcasting?.slots || {};
   const remainingSlots = Number(currentSlots[slotKey] || 0);
@@ -720,9 +738,7 @@ function spendSpellResource(characterSheet = {}, spell = {}, known = {}) {
     };
   }
 
-  if (known.type === 'origin_spell' || known.type === 'species_spell') {
-    return spendLimitedSpellUse(characterSheet, spell, known);
-  }
+  if (limitedFailure) return limitedFailure;
 
   return {
     ok: false,
@@ -731,7 +747,8 @@ function spendSpellResource(characterSheet = {}, spell = {}, known = {}) {
 }
 
 function spendLimitedSpellUse(characterSheet, spell, known) {
-  const resourceKey = `${known.type}:${known.source || 'default'}:${spell.id}`;
+  const resourceType = known.type === 'class_feature_spell' ? 'class_feature' : known.type;
+  const resourceKey = `${resourceType}:${known.source || 'default'}:${spell.id}`;
   const spellUses = characterSheet.resources?.spell_uses || {};
   const currentUse = spellUses[resourceKey] || {
     name: spell.name,
@@ -740,9 +757,10 @@ function spendLimitedSpellUse(characterSheet, spell, known) {
     reset: 'long_rest',
   };
   if (Number(currentUse.remaining || 0) <= 0) {
+    const resetText = String(currentUse.reset || 'rest').replaceAll('_', ' ');
     return {
       ok: false,
-      reply: `${spell.name} is available through ${known.label}, but that once-per-rest use is already spent. The spell politely refuses to be double-booked.`,
+      reply: `${spell.name} is available through ${known.label}, but that limited use is already spent until your next ${resetText}. The spell politely refuses to be double-booked.`,
     };
   }
   return {

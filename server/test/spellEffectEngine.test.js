@@ -292,6 +292,47 @@ test('blocks class spell when no matching slot remains', () => {
   assert.match(result.reply, /do not have a level 1 spell slot left/);
 });
 
+test("Ranger casts Hunter's Mark from Favored Enemy before spending slots", () => {
+  const result = resolveSpellCast({
+    message: "I cast Hunter's Mark on the wolf.",
+    content,
+    characterSheet: {
+      identity: { name: 'Bryn', level: 1, class: 'ranger', class_name: 'Ranger' },
+      abilities: { modifiers: { wis: 2 } },
+      derived_stats: { armor_class: 14, armor_class_breakdown: [], active_spell_effects: [] },
+      spellcasting: {
+        ability: 'wis',
+        cantrips_known: [],
+        prepared_from_choices: ['cure_wounds', 'speak_with_animals'],
+        always_prepared_spells: ['hunter_mark'],
+        spells_prepared: ['cure_wounds', 'speak_with_animals', 'hunter_mark'],
+        slots: { 1: 2 },
+      },
+      resources: {
+        spell_uses: {
+          'class_feature:favored_enemy:hunter_mark': {
+            name: "Hunter's Mark",
+            spell_id: 'hunter_mark',
+            source: 'favored_enemy',
+            source_name: 'Favored Enemy',
+            remaining: 2,
+            max: 2,
+            reset: 'long_rest',
+          },
+        },
+      },
+    },
+    worldState: worldState({
+      scene_presence: { npcs_present: ['wolf'] },
+      player_stats: { armor_class: 14, base_armor_class: 14, spell_slots: { 1: 2 } },
+    }),
+  });
+
+  assert.equal(result.blocked, false);
+  assert.equal(result.characterSheet.resources.spell_uses['class_feature:favored_enemy:hunter_mark'].remaining, 1);
+  assert.equal(result.characterSheet.spellcasting.slots[1], 2);
+});
+
 test('ticking active effects expires Shield of Faith and restores base AC', () => {
   const shield = resolveSpellCast({
     message: 'I cast Shield of Faith.',

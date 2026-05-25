@@ -35,12 +35,16 @@ function baseDraft(overrides = {}) {
     selectedSkills: ['athletics', 'intimidation'],
     equipmentChoice: 'pack',
     backgroundEquipmentChoice: 'equipment',
+    classChoices: { fighting_style: 'defense' },
+    weaponMasteries: ['longsword', 'dagger', 'longbow'],
+    expertiseSkills: [],
     humanSkillId: 'perception',
     humanOriginFeatId: 'alert',
     featSkillChoices: {},
     magicInitiateChoices: {},
     cantripsKnown: [],
     spellsKnown: [],
+    spellbookSpells: [],
     ...overrides,
   };
 }
@@ -81,6 +85,95 @@ function fighterSkillsExcluding(excluded) {
   return ['acrobatics', 'animal_handling', 'athletics', 'history', 'insight', 'intimidation', 'perception', 'survival']
     .filter((skillId) => !excluded.has(skillId))
     .slice(0, 2);
+}
+
+function skillsForClass(characterClass, background, count = characterClass.skill_count) {
+  const excluded = new Set(background.skills || []);
+  return characterClass.skill_options
+    .filter((skillId) => !excluded.has(skillId))
+    .slice(0, count);
+}
+
+function spellDraftFor(characterClass, content, classChoices = {}) {
+  const spellcasting = characterClass.spellcasting;
+  if (!spellcasting) return {};
+  const selectedOptions = (characterClass.class_choices || [])
+    .map((choice) => (choice.options || []).find((option) => option.id === classChoices[choice.id]))
+    .filter(Boolean);
+  const extraCantrips = selectedOptions.reduce((sum, option) => sum + Number(option.extra_cantrips || 0), 0);
+  const cantripCount = Number(spellcasting.cantrips || 0) + extraCantrips;
+  const cantripsKnown = content.spells
+    .filter((spell) => spell.level === 0 && spell.classes.includes(characterClass.id))
+    .map((spell) => spell.id)
+    .slice(0, cantripCount);
+  const levelOneSpells = content.spells
+    .filter((spell) => spell.level === 1 && spell.classes.includes(characterClass.id))
+    .map((spell) => spell.id);
+  const alwaysPrepared = new Set(spellcasting.always_prepared_spells || []);
+  const choiceSpells = levelOneSpells.filter((spellId) => !alwaysPrepared.has(spellId));
+
+  if (spellcasting.spellbook_spells) {
+    const spellbookSpells = levelOneSpells.slice(0, spellcasting.spellbook_spells);
+    return {
+      cantripsKnown,
+      spellbookSpells,
+      spellsKnown: spellbookSpells.slice(0, spellcasting.prepared_spells || 0),
+    };
+  }
+
+  return {
+    cantripsKnown,
+    spellsKnown: choiceSpells.slice(0, spellcasting.prepared_spells || 0),
+  };
+}
+
+function classDraftFor(classId, overrides = {}) {
+  const content = getContentBundle();
+  const characterClass = content.classes.find((item) => item.id === classId);
+  const background = content.backgrounds.find((item) => item.id === 'soldier');
+  const classChoicesByClass = {
+    cleric: { divine_order: 'protector' },
+    druid: { primal_order: 'warden' },
+    fighter: { fighting_style: 'defense' },
+    warlock: { eldritch_invocation: 'armor_of_shadows' },
+  };
+  const weaponMasteriesByClass = {
+    barbarian: ['greataxe', 'handaxe'],
+    fighter: ['longsword', 'dagger', 'longbow'],
+    paladin: ['longsword', 'mace'],
+    ranger: ['longbow', 'shortsword'],
+    rogue: ['dagger', 'shortsword'],
+  };
+  const classChoices = classChoicesByClass[classId] || {};
+  const selectedSkills = skillsForClass(characterClass, background);
+  return baseDraft({
+    speciesId: 'dwarf',
+    speciesChoices: {},
+    backgroundId: 'soldier',
+    classId,
+    abilityScores: {
+      str: 15,
+      dex: 13,
+      con: 14,
+      int: 10,
+      wis: 12,
+      cha: 8,
+      backgroundBonus: { str: 2, con: 1 },
+    },
+    selectedSkills,
+    humanSkillId: '',
+    humanOriginFeatId: '',
+    classChoices,
+    weaponMasteries: weaponMasteriesByClass[classId] || [],
+    expertiseSkills: classId === 'rogue' ? selectedSkills.slice(0, 2) : [],
+    featSkillChoices: {},
+    magicInitiateChoices: {},
+    cantripsKnown: [],
+    spellsKnown: [],
+    spellbookSpells: [],
+    ...spellDraftFor(characterClass, content, classChoices),
+    ...overrides,
+  });
 }
 
 test('applies Human Skillful, Human Versatile, background Origin feat, and static math', () => {
@@ -308,6 +401,78 @@ test('level 1 spellcasters use fixed 2024 prepared spell counts', () => {
   }
 });
 
+test('validates every available level 1 class with required 2024 class choices', () => {
+  const content = getContentBundle();
+  for (const characterClass of content.classes) {
+    const sheet = validateCharacter(classDraftFor(characterClass.id), content);
+    assert.equal(sheet.identity.class, characterClass.id);
+    assert.equal((sheet.weapon_masteries || []).length, characterClass.weapon_mastery_count || 0);
+    assert.equal((sheet.expertise_skills || []).length, characterClass.expertise_count || 0);
+  }
+});
+
+test('class choices can grant level 1 proficiencies and extra cantrips', () => {
+  const content = getContentBundle();
+  const protector = validateCharacter(classDraftFor('cleric', {
+    classChoices: { divine_order: 'protector' },
+    cantripsKnown: ['light', 'mending', 'thaumaturgy'],
+    spellsKnown: ['cure_wounds', 'bless', 'command', 'shield_of_faith'],
+  }), content);
+  assert.equal(protector.proficiencies.armor.includes('heavy'), true);
+  assert.equal(protector.proficiencies.weapons.includes('martial'), true);
+
+  const thaumaturge = validateCharacter(classDraftFor('cleric', {
+    classChoices: { divine_order: 'thaumaturge' },
+    cantripsKnown: ['light', 'mending', 'thaumaturgy', 'sacred_flame'],
+    spellsKnown: ['cure_wounds', 'bless', 'command', 'shield_of_faith'],
+  }), content);
+  assert.equal(thaumaturge.spellcasting.cantrips_known.length, 4);
+});
+
+test('Rogue Expertise doubles proficiency on selected proficient skills', () => {
+  const content = getContentBundle();
+  const sheet = validateCharacter(classDraftFor('rogue', {
+    selectedSkills: ['deception', 'insight', 'investigation', 'perception'],
+    expertiseSkills: ['deception', 'insight'],
+  }), content);
+
+  assert.equal(sheet.derived_stats.skill_modifiers.deception.expertise, true);
+  assert.equal(sheet.derived_stats.skill_modifiers.deception.total, 3);
+  assert.equal(sheet.derived_stats.skill_modifiers.investigation.expertise, false);
+  assert.equal(sheet.derived_stats.skill_modifiers.investigation.total, 2);
+});
+
+test('Wizard records six spellbook spells and prepares from that spellbook', () => {
+  const content = getContentBundle();
+  const sheet = validateCharacter(classDraftFor('wizard', {
+    spellbookSpells: ['magic_missile', 'shield', 'detect_magic', 'charm_person', 'mage_armor', 'sleep'],
+    spellsKnown: ['magic_missile', 'shield', 'detect_magic', 'charm_person'],
+  }), content);
+
+  assert.equal(sheet.spellcasting.spellbook_spells.length, 6);
+  assert.deepEqual(sheet.spellcasting.spells_prepared, ['magic_missile', 'shield', 'detect_magic', 'charm_person']);
+
+  assert.throws(
+    () => validateCharacter(classDraftFor('wizard', {
+      spellbookSpells: ['magic_missile', 'shield', 'detect_magic', 'charm_person', 'mage_armor', 'sleep'],
+      spellsKnown: ['magic_missile', 'shield', 'detect_magic', 'thunderwave'],
+    }), content),
+    /must come from your spellbook/,
+  );
+});
+
+test("Ranger adds Hunter's Mark as an always-prepared free-use class spell", () => {
+  const content = getContentBundle();
+  const sheet = validateCharacter(classDraftFor('ranger', {
+    spellsKnown: ['cure_wounds', 'speak_with_animals'],
+  }), content);
+
+  assert.deepEqual(sheet.spellcasting.prepared_from_choices, ['cure_wounds', 'speak_with_animals']);
+  assert.equal(sheet.spellcasting.always_prepared_spells.includes('hunter_mark'), true);
+  assert.equal(sheet.spellcasting.spells_prepared.includes('hunter_mark'), true);
+  assert.equal(sheet.resources.spell_uses['class_feature:favored_enemy:hunter_mark'].remaining, 2);
+});
+
 test('validates Human Paladin Noble with high Charisma and spell choices', () => {
   const content = getContentBundle();
   const sheet = validateCharacter(baseDraft({
@@ -316,6 +481,8 @@ test('validates Human Paladin Noble with high Charisma and spell choices', () =>
     speciesChoices: { size: 'medium' },
     backgroundId: 'noble',
     classId: 'paladin',
+    classChoices: {},
+    weaponMasteries: ['longsword', 'mace'],
     abilityScores: {
       str: 14,
       dex: 10,
@@ -353,6 +520,8 @@ test('Paladin level 1 prepares two spells even with low Charisma', () => {
     languages: ['elvish', 'dwarvish'],
     backgroundId: 'guard',
     classId: 'paladin',
+    classChoices: {},
+    weaponMasteries: ['longsword', 'mace'],
     abilityScores: {
       str: 15,
       dex: 10,
