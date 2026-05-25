@@ -15,6 +15,7 @@ const {
   spendTurnResource,
 } = require('./actionEconomy');
 const { resolveCreatureTurns } = require('./creatureTurnEngine');
+const { checkSpatialAction } = require('./spatialGuard');
 const {
   getAttackMode,
   getAttackModeSources,
@@ -64,6 +65,8 @@ function adjudicate({ message, worldState = {}, characterSheet = null, currentTu
   }
 
   if (!state.combat_state?.active && isCombatStarter(text)) {
+    const targetIssue = validateCombatStartTarget({ message: text, worldState: state });
+    if (targetIssue) return targetIssue;
     return promptInitiative({ message: text, worldState: state, characterSheet: sheet, currentTurn });
   }
 
@@ -499,7 +502,76 @@ function buildCheckResolutionReply(pending, result, outcome) {
 }
 
 function isCombatStarter(text) {
-  return /\b(?:attack|hit|strike|stab|swing at|shoot|charge|draw (?:my|a|the).*(?:weapon|sword|bow)|start (?:a )?fight)\b/i.test(text);
+  return /\b(?:attack|hit|strike|stab|swing at|shoot|charge|start (?:a )?fight)\b/i.test(text);
+}
+
+function validateCombatStartTarget({ message, worldState }) {
+  if (!worldState.scene_presence?.exact_location) return null;
+
+  const target = extractCombatStartTarget(message);
+  if (!target) {
+    const present = formatScenePresence(worldState);
+    return {
+      handled: true,
+      logType: 'referee_combat_target_needed',
+      worldState,
+      reply: `Combat needs a target. Who are you attacking here${present ? `? Present: ${present}.` : '?'}`,
+    };
+  }
+
+  const spatialIssue = checkSpatialAction(message, worldState);
+  if (!spatialIssue && combatTargetAppearsPresent(worldState, target)) return null;
+
+  return {
+    handled: true,
+    logType: 'referee_combat_spatial_block',
+    worldState,
+    reply: spatialIssue?.message || `You are currently at ${currentSceneLocation(worldState)}, and ${target} is not here. Do you look around for it, or clarify where you mean?`,
+  };
+}
+
+function combatTargetAppearsPresent(worldState = {}, target = '') {
+  const scene = worldState.scene_presence || {};
+  return targetMatchesSceneList([...(scene.present_npcs || []), ...(scene.present_objects || [])], target);
+}
+
+function targetMatchesSceneList(list = [], target = '') {
+  const normalizedTarget = singularizeTarget(normalizeTargetPhrase(target));
+  if (!normalizedTarget) return false;
+  return list.some((item) => {
+    const normalizedItem = singularizeTarget(normalizeTargetPhrase(item));
+    if (!normalizedItem) return false;
+    return normalizedItem === normalizedTarget
+      || normalizedItem.includes(normalizedTarget)
+      || normalizedTarget.includes(normalizedItem)
+      || targetTokensOverlap(normalizedItem, normalizedTarget);
+  });
+}
+
+function targetTokensOverlap(left, right) {
+  const leftTokens = new Set(left.split(' ').filter(isTargetToken));
+  const rightTokens = right.split(' ').filter(isTargetToken);
+  return rightTokens.some((token) => leftTokens.has(token));
+}
+
+function isTargetToken(token) {
+  return token.length >= 4 && !['with', 'that', 'this', 'from', 'near', 'away', 'toward'].includes(token);
+}
+
+function singularizeTarget(value) {
+  return value.endsWith('s') && value.length > 3 ? value.slice(0, -1) : value;
+}
+
+function currentSceneLocation(worldState = {}) {
+  return String(worldState.scene_presence?.exact_location || worldState.current_location || 'your current location');
+}
+
+function formatScenePresence(worldState = {}) {
+  const scene = worldState.scene_presence || {};
+  return [...(scene.present_npcs || []), ...(scene.present_objects || [])]
+    .filter(Boolean)
+    .slice(0, 5)
+    .join(', ');
 }
 
 function getRestIntent(text) {
@@ -1387,14 +1459,18 @@ function buildDefaultEnemy(name = 'Opponent') {
 
 function inferEnemyName(worldState = {}, message = '') {
   const sceneNpcs = worldState.scene_presence?.present_npcs || [];
-  const targetMatch = String(message || '').match(/\b(?:attack|hit|strike|stab|swing at|shoot|charge|shove|push|grapple|grab|seize|trip)\s+(?:the\s+|a\s+|an\s+)?([a-z][a-z' -]{2,50}?)(?:\s+(?:with|using|because|if|when|while|as|from|near|beside|behind|emerging|coming|rushing|charging|away|toward|towards|not)\b|[.!?]|$)/i);
-  const cleanedTarget = cleanTarget(targetMatch?.[1]);
+  const cleanedTarget = extractCombatStartTarget(message);
   if (cleanedTarget) return titleCase(cleanedTarget);
   const explicitHostile = extractHostileTarget(message);
   if (explicitHostile) return titleCase(explicitHostile);
   const likelyNpc = sceneNpcs.find((name) => /\b(stranger|figure|enemy|guard|creature|bandit|cultist|goblin|orc|thug)\b/i.test(String(name)))
     || sceneNpcs.find(Boolean);
   return likelyNpc ? String(likelyNpc) : 'Opponent';
+}
+
+function extractCombatStartTarget(message = '') {
+  const targetMatch = String(message || '').match(/\b(?:attack|hit|strike|stab|swing at|shoot|charge|shove|push|grapple|grab|seize|trip)\s+(?:the\s+|a\s+|an\s+)?([a-z][a-z' -]{2,50}?)(?:\s+(?:with|using|because|if|when|while|as|from|near|beside|behind|emerging|coming|rushing|charging|away|toward|towards|not)\b|[.!?]|$)/i);
+  return cleanTarget(targetMatch?.[1]);
 }
 
 function cleanTarget(value) {

@@ -249,7 +249,13 @@ test('combat saving throws do not consume the player action or advance enemy tur
 test('starts combat by asking for initiative instead of narrating a free attack', () => {
   const result = adjudicate({
     message: 'I attack the hooded stranger.',
-    worldState: worldState({ scene_presence: { present_npcs: ['hooded stranger'] } }),
+    worldState: worldState({
+      scene_presence: {
+        exact_location: 'town gate',
+        present_npcs: ['hooded stranger'],
+        present_objects: ['muddy road'],
+      },
+    }),
     characterSheet,
     currentTurn: 8,
   });
@@ -267,7 +273,7 @@ test('combat starter preserves explicit hostile target instead of falling back t
     worldState: worldState({
       scene_presence: {
         exact_location: 'inn overhang',
-        present_npcs: ['sealed-parchment guards (2)', 'reeve'],
+        present_npcs: ['sealed-parchment guards (2)', 'reeve', 'hostile shadow'],
         present_objects: ['sealed parchment'],
         available_exits: ['tree line'],
       },
@@ -277,6 +283,59 @@ test('combat starter preserves explicit hostile target instead of falling back t
 
   assert.equal(result.handled, true);
   assert.equal(result.worldState.pending_roll.enemy.name, 'Hostile Shadow');
+});
+
+test('blocks combat against absent service NPCs before initiative starts', () => {
+  const result = adjudicate({
+    message: 'I attack the innkeeper.',
+    worldState: worldState({
+      scene_presence: {
+        exact_location: 'Morrowgate town gate',
+        present_npcs: ['older gate guard', 'younger gate guard'],
+        present_objects: ['palisade gate'],
+      },
+    }),
+    characterSheet,
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.pending_roll, null);
+  assert.match(result.reply, /innkeeper is not here/);
+});
+
+test('blocks invented hostile targets that are not established in the scene', () => {
+  const result = adjudicate({
+    message: 'I attack a hostile shadow emerging from the tree line.',
+    worldState: worldState({
+      scene_presence: {
+        exact_location: 'Morrowgate town gate',
+        present_npcs: ['older gate guard', 'younger gate guard'],
+        present_objects: ['palisade gate'],
+        available_exits: ['tree line'],
+      },
+    }),
+    characterSheet,
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.pending_roll, null);
+  assert.match(result.reply, /hostile shadow is not here/);
+});
+
+test('drawing a weapon alone does not conjure combat', () => {
+  const result = adjudicate({
+    message: 'I draw my longsword.',
+    worldState: worldState({
+      scene_presence: {
+        exact_location: 'Morrowgate town gate',
+        present_npcs: ['older gate guard', 'younger gate guard'],
+        present_objects: ['palisade gate'],
+      },
+    }),
+    characterSheet,
+  });
+
+  assert.equal(result, null);
 });
 
 test('keeps round 1 when enemies beat player initiative and act first', () => {

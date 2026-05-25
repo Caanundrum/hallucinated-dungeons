@@ -37,7 +37,7 @@ const LOCATION_PREPOSITIONS = /\b(?:in|inside|at|within|on)\s+(?:the\s+|a\s+|an\
 const DEFINITE_TARGET = /\b(?:the|that)\s+([a-z][a-z' -]{2,40})\b/i;
 const ASK_FOR_INFORMATION = /\b(?:ask|asks|asking|inquire|inquires|request|requests)\s+(?:about|after|for)\b/i;
 const TARGETED_INTERACTIONS = [
-  /\b(?:attack|hit|strike|stab|swing at|shoot)\s+(?:the\s+|a\s+|an\s+)?([a-z][a-z' -]{2,60}?)(?:\s+(?:with|using|because|if|when)\b|[.!?]|$)/i,
+  /\b(?:attack|hit|strike|stab|swing at|shoot)\s+(?:the\s+|a\s+|an\s+)?([a-z][a-z' -]{2,60}?)(?:\s+(?:with|using|because|if|when|while|as|from|near|beside|behind|emerging|coming|rushing|charging|away|toward|towards|not)\b|[.!?]|$)/i,
   /\b(?:ask|question|press|approach|watch|study|read|inspect|examine|search|check|open|unlock|take|grab|pick|touch|use|climb|pet)\s+(?:the\s+|that\s+|a\s+|an\s+)?([a-z][a-z' -]{2,60}?)(?:\s+(?:about|for|to|with|carefully|closely|again|before|after|because|if|when)\b|[.!?]|$)/i,
   /\b(?:talk|speak)\s+to\s+(?:the\s+|that\s+|a\s+|an\s+)?([a-z][a-z' -]{2,60}?)(?:\s+(?:about|for|with|carefully|closely|again|before|after|because|if|when)\b|[.!?]|$)/i,
 ];
@@ -245,7 +245,7 @@ function escapeRegExp(value) {
 
 function cleanCandidate(value) {
   const cleaned = compact(value)
-    .replace(/\b(to|from|with|about|for|in|inside|at|on|within|before|after|while|and|or|but|as|so|because|if|when|using)\b.*$/i, '')
+    .replace(/\b(to|from|with|about|for|in|inside|at|on|within|before|after|while|and|or|but|as|so|because|if|when|using|emerging|coming|rushing|charging|away|toward|towards|not)\b.*$/i, '')
     .replace(/\b(carefully|closely|again|quietly|discreetly|slowly|nearest|nearby)\b/g, '')
     .trim();
   if (!cleaned || cleaned.length < 3 || VAGUE_TARGETS.has(cleaned)) return '';
