@@ -661,6 +661,5 @@ function buildSpellcasting(draft, characterClass, content, abilityModifiers) {
 module.exports = {
   validateCharacter,
   abilityMod,
-  proficiencyBonus,
   ABILITIES,
 };

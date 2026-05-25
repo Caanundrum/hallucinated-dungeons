@@ -1,7 +1,7 @@
 // ── Campaign log extractor ─────────────────────────────────────────────────
 // After each DM1 response, asks the utility model whether anything story-defining happened.
 // If yes, saves a one-to-two sentence entry to the campaign_log table.
-// Also triggers AI-powered compression if the 60-entry cap is reached (BUG-015).
+// Also triggers AI-powered compression if the 60-entry cap is reached.
 // All failures are silent — the game continues unchanged.
 
 const ai                   = require('./aiClient');
@@ -50,7 +50,7 @@ Return ONLY the summary paragraph. No JSON, no labels, no markdown.`;
  */
 async function extract(sessionId, playerMessage, dm1Reply, turnNumber) {
   try {
-    // Fetch current world state for context (BUG-016)
+    // Fetch current world state for context.
     const worldStateRow = await db.getWorldState(sessionId).catch(() => null);
     const worldState    = worldStateRow?.state || db.DEFAULT_WORLD_STATE;
 
@@ -101,7 +101,7 @@ async function extract(sessionId, playerMessage, dm1Reply, turnNumber) {
     if (result?.notable && result?.summary) {
       await db.addCampaignLogEntry(sessionId, turnNumber, result.summary);
 
-      // Check cap and compress if needed (BUG-015)
+      // Check cap and compress if needed.
       await compressIfNeeded(sessionId);
     }
 

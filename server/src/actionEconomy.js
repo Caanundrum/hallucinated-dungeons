@@ -163,10 +163,8 @@ function getSpeed(characterSheet = {}, worldState = {}) {
 }
 
 module.exports = {
-  ensureTurnResources,
   beginPlayerTurn,
   spendTurnResource,
   spendMovement,
   getSpellActionResource,
-  describeAvailableResources,
 };

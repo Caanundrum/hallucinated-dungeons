@@ -158,7 +158,7 @@ function summarizeCharacterOption(characterId, character) {
   };
 }
 
-// ── BUG-021: Fallback roll detector ──────────────────────────────────────
+// ── Fallback roll detector ────────────────────────────────────────────────
 // When DM1 requests a roll in natural language but the [ROLL:] sentinel tag
 // is absent or unparseable, detect the roll request and show a generic roller.
 // Returns { dieSides } if a roll request is detected, or null otherwise.
@@ -207,7 +207,7 @@ function App() {
 
   // Dice roller state
   const [pendingRoll, setPendingRoll] = useState(null);     // { diceCount, dieSides, modifier } | null
-  // BUG-021: fallback roller state for natural-language roll detection without sentinel tag
+  // Fallback roller state for natural-language roll detection without sentinel tag.
   const [fallbackRoll, setFallbackRoll] = useState(null);   // { dieSides, modifier } | null — modifier is user-entered
   const [fallbackModInput, setFallbackModInput] = useState('0'); // controlled input for modifier
 
@@ -291,7 +291,7 @@ function App() {
           id:   m.id,
         }));
 
-      // BUG-012: if no history exists, treat as new session
+      // If no history exists, treat as new session.
       if (narrativeHistory.length === 0 && rulesHistory.length === 0) {
         pendingSessionStartRef.current = true;
         setRulesLog([]);
@@ -388,7 +388,7 @@ function App() {
         setFallbackRoll({ dieSides: rollTag.dieSides, modifier: rollTag.modifier });
         setFallbackModInput(String(rollTag.modifier || 0));
       } else {
-        // BUG-021 fallback: no parseable sentinel — scan natural language for roll request
+        // No parseable sentinel, so scan natural language for a roll request.
         const fallback = detectFallbackRoll(message);
         if (fallback) {
           setFallbackRoll(fallback);
@@ -411,7 +411,7 @@ function App() {
       });
     });
 
-    // DM2-track errors → rules feed (BUG-011)
+    // Route DM2-track errors into the rules feed.
     socket.on('dm2_error', ({ message, code }) => {
       setRulesLog((prev) => {
         const base = code === 'moderation_blocked' && prev.at(-1)?.type === 'player'
@@ -489,7 +489,7 @@ function App() {
     setPendingRoll(null);
   }, [pendingRoll]);
 
-  // ── BUG-021: Fallback roller handlers ────────────────────────────────────
+  // ── Fallback roller handlers ─────────────────────────────────────────────
   const handleFallbackRoll = useCallback(() => {
     if (!fallbackRoll) return;
     const modifier = parseInt(fallbackModInput, 10) || 0;
@@ -580,11 +580,11 @@ function App() {
     socket.emit('roll_character_stats', { sessionId, sessionToken });
   }), [sessionId, sessionToken]);
 
-  // BUG-009: textarea stays active during DM loading; only the submit button locks
+  // Textarea stays active during DM loading; only the submit button locks.
   const storyTextareaDisabled = !connected || !sessionId;
   // During a pending roll (primary or fallback), the story input is locked — the dice roller takes over
   const storyDisabled = dm1Typing || !connected || !sessionId || !!pendingRoll || !!fallbackRoll;
-  // BUG-017: rules textarea stays active during DM2 typing; only the ASK button locks
+  // Rules textarea stays active during DM2 typing; only the Ask button locks.
   const rulesTextareaDisabled = !connected || !sessionId;
   const rulesDisabled = dm2Typing || !connected || !sessionId;
 
@@ -711,7 +711,7 @@ function App() {
               </div>
             )}
 
-            {/* ── BUG-021: Fallback generic dice roller ──────────────────── */}
+            {/* ── Fallback generic dice roller ──────────────────────────── */}
             {fallbackRoll && !pendingRoll && !dm1Typing && (
               <div className="dice-roller dice-roller--fallback" id="dice-roller-fallback">
                 <div className="dice-roller-header">

@@ -1150,24 +1150,23 @@ function getSavingThrowModifier(characterSheet, ability) {
   };
 }
 
-function chooseDc(text, check, worldState, inCombat) {
-  const lower = String(text || '').toLowerCase();
-  const explicitDc = lower.match(/\bdc\s*(\d{1,2})\b/);
-  if (explicitDc) return Math.max(5, Math.min(30, Number(explicitDc[1])));
-
+function chooseDc(_text, check, worldState, inCombat) {
+  const sceneText = JSON.stringify({
+    location_type: worldState?.scene_presence?.location_type,
+    present_npcs: worldState?.scene_presence?.present_npcs,
+    present_objects: worldState?.scene_presence?.present_objects,
+    npc_states: worldState?.npc_states,
+    current_location: worldState?.current_location,
+  }).toLowerCase();
   let dc = DEFAULT_CHECK_DC;
-  if (/\b(?:easy|simple|obvious|routine)\b/.test(lower)) dc -= 5;
-  if (/\b(?:hard|difficult|alert|hostile|hidden|careful|guarded|suspicious)\b/.test(lower)) dc += 5;
-  if (/\b(?:very hard|extreme|nearly impossible|overwhelming|deadly)\b/.test(lower)) dc += 5;
+  if (/\b(?:alert|hostile|hidden|careful|guarded|suspicious|locked|obscured)\b/.test(sceneText)) dc += 5;
   if (inCombat && ['stealth', 'sleight_of_hand', 'persuasion', 'deception', 'intimidation'].includes(check.skill)) dc += 2;
   return Math.max(5, Math.min(30, dc));
 }
 
-function buildDcSource(dc, text, inCombat) {
-  if (/\bdc\s*\d{1,2}\b/i.test(text || '')) return 'explicit DC declared by referee context';
+function buildDcSource(dc, _text, inCombat) {
   const parts = [`base adventuring DC ${DEFAULT_CHECK_DC}`];
-  if (dc < DEFAULT_CHECK_DC) parts.push('reduced for simple circumstances');
-  if (dc > DEFAULT_CHECK_DC) parts.push('increased for pressure, opposition, or difficult circumstances');
+  if (dc > DEFAULT_CHECK_DC) parts.push('increased for scene pressure, opposition, or difficult circumstances');
   if (inCombat) parts.push('combat pressure applies');
   return parts.join('; ');
 }
@@ -1439,8 +1438,5 @@ module.exports = {
   resolveRefereeAction: adjudicate,
   advanceEnemyTurns,
   advanceNarrativeTime,
-  parseRollResult,
-  promptCheck,
-  chooseDc,
   rollDamage,
 };

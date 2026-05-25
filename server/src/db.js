@@ -258,8 +258,8 @@ const DEFAULT_WORLD_STATE = {
     conditions:     [],
     spell_slots:    {},
     death_saves:    { successes: 0, failures: 0 },
-    weapon_name:    '',          // BUG-023: primary weapon for DM2 context
-    ability_scores: {},          // BUG-023: ability modifiers e.g. { str: 3, dex: 1, ... }
+    weapon_name:    '',          // Primary weapon for DM2 context.
+    ability_scores: {},          // Ability modifiers, e.g. { str: 3, dex: 1, ... }.
   },
   pending_roll: null,
   combat_state: null,
@@ -385,7 +385,7 @@ async function addCampaignLogEntry(sessionId, turnNumber, summary) {
       type:        'entry',
     });
   if (error) throw error;
-  // Compression is now triggered from campaignLogExtractor after insertion (spec §BUG-015).
+  // Compression is now triggered from campaignLogExtractor after insertion.
 }
 
 /**

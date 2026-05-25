@@ -464,7 +464,7 @@ textarea:disabled { opacity: 0.4; cursor: not-allowed; }
 .submit-roll-btn:hover  { opacity: 0.85; }
 .submit-roll-btn:active { transform: scale(0.97); }
 
-/* ── BUG-021: Fallback dice roller (modifier input) ──────────────────────── */
+/* ── Fallback dice roller (modifier input) ───────────────────────────────── */
 .dice-roller--fallback {
   border-color: #5a3f90;
 }

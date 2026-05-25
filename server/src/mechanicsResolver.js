@@ -80,5 +80,4 @@ function consumesCombatTurn(ruleAction) {
 module.exports = {
   resolvePreNarration,
   consumesCombatTurn,
-  buildCombatFrame,
 };

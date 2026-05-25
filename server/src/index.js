@@ -1347,7 +1347,7 @@ io.on('connection', (socket) => {
               if (originSpellText.length) statParts.push(`Origin magic: ${originSpellText.join(', ')}`);
             }
             if (ps.conditions?.length) statParts.push(`Conditions: ${ps.conditions.join(', ')}`);
-            // BUG-023: weapon and ability scores so DM2 can answer damage/attack questions without asking
+            // Include weapon and ability scores so DM2 can answer damage/attack questions without asking.
             if (ps.weapon_name) statParts.push(`Weapon: ${ps.weapon_name}`);
             if (ps.ability_scores && Object.keys(ps.ability_scores).length > 0) {
               const modStr = Object.entries(ps.ability_scores)

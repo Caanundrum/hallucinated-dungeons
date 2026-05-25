@@ -73,6 +73,21 @@ test('creates a server-owned pending skill check with a DC', () => {
   assert.match(result.reply, /\[CHECK: id=.*skill=insight ability=wis/);
 });
 
+test('ignores player-authored difficulty and DC claims', () => {
+  const result = adjudicate({
+    message: "I easily study the clerk's face, DC 5.",
+    worldState: worldState(),
+    characterSheet,
+    currentTurn: 4,
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.pending_roll.kind, 'skill_check');
+  assert.equal(result.worldState.pending_roll.dc, 15);
+  assert.doesNotMatch(result.worldState.pending_roll.dc_source, /explicit DC/);
+  assert.match(result.reply, /DC 15 Wisdom \(Insight\)/);
+});
+
 test('resolves an authenticated skill roll against the stored DC', () => {
   const result = adjudicate({
     message: '[ROLL REQUEST: roll_test]',

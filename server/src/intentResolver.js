@@ -233,6 +233,4 @@ function normalizeId(value) {
 
 module.exports = {
   resolveIntent,
-  CHECK_RULES,
-  SAVE_RULES,
 };

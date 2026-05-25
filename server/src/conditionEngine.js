@@ -159,11 +159,8 @@ function formatSigned(value) {
 }
 
 module.exports = {
-  getConditions,
   getTurnBlockReason,
   getAttackMode,
   getAttackModeSources,
   resolveSavingThrow,
-  hasCondition,
-  normalizeCondition,
 };
