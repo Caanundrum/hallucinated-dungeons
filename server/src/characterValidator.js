@@ -640,9 +640,9 @@ function buildSpellcasting(draft, characterClass, content, abilityModifiers) {
   for (const id of cantripsKnown) {
     if (!cantripOptions.some((spell) => spell.id === id)) fail('spells', 'cantripsKnown', 'Choose valid class cantrips.');
   }
-  const requiredSpellCount = config.spells_known
-    || Math.max(1, (abilityModifiers[config.ability] || 0) + 1)
-    || 0;
+  const requiredSpellCount = config.prepared_spells
+    || config.spells_known
+    || (config.prepared_formula === 'ability_mod_plus_1' ? Math.max(1, (abilityModifiers[config.ability] || 0) + 1) : 0);
   if (requiredSpellCount !== spellsKnown.length) {
     fail('spells', 'spellsKnown', `Choose exactly ${requiredSpellCount} level 1 spells.`);
   }

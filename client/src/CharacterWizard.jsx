@@ -555,9 +555,9 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
 
           {isCaster && step === 8 && (
             <ChoiceStep title="Spells and Cantrips">
-              <p className="helper-text">Choose {requiredCantrips} cantrips and {requiredSpells} level 1 spells.</p>
+              <p className="helper-text">{formatSpellChoicePrompt(requiredCantrips, requiredSpells)}</p>
               <SpellPicker title="Cantrips" spells={cantripOptions} selected={draft.cantripsKnown} limit={requiredCantrips} onToggle={(id) => toggleSpell('cantripsKnown', id, requiredCantrips)} />
-              <SpellPicker title="Level 1 Spells" spells={spellOptions} selected={draft.spellsKnown} limit={requiredSpells} onToggle={(id) => toggleSpell('spellsKnown', id, requiredSpells)} />
+              <SpellPicker title="Prepared Level 1 Spells" spells={spellOptions} selected={draft.spellsKnown} limit={requiredSpells} onToggle={(id) => toggleSpell('spellsKnown', id, requiredSpells)} />
             </ChoiceStep>
           )}
 
@@ -1197,8 +1197,15 @@ function isFilledInteger(value) {
 function requiredSpellCount(selectedClass, abilityMods) {
   const config = selectedClass?.spellcasting;
   if (!config) return 0;
+  if (config.prepared_spells) return config.prepared_spells;
   if (config.spells_known) return config.spells_known;
-  return Math.max(1, (abilityMods[config.ability] || 0) + 1);
+  if (config.prepared_formula === 'ability_mod_plus_1') return Math.max(1, (abilityMods[config.ability] || 0) + 1);
+  return 0;
+}
+
+function formatSpellChoicePrompt(requiredCantrips, requiredSpells) {
+  if (requiredCantrips <= 0) return `Choose ${requiredSpells} prepared level 1 spells.`;
+  return `Choose ${requiredCantrips} cantrips and ${requiredSpells} prepared level 1 spells.`;
 }
 
 function calculateAcPreview(armor, shield, abilityMods, selectedClass) {
@@ -1293,11 +1300,13 @@ function getGuidanceNotes({
     const spellAbility = spellcasting.ability;
     const spellMod = abilityMods[spellAbility];
     const spellAbilityName = ABILITY_LABELS[spellAbility] || spellAbility.toUpperCase();
-    const countText = spellcasting.prepared_formula
-      ? `Prepared spells scale from ${spellAbilityName}${showAbilityMath ? ` ${fmtMod(spellMod || 0)}` : ''}.`
-      : spellcasting.spells_known
-        ? `You choose ${spellcasting.spells_known} known level 1 spells.`
-        : 'Your spell choices are tied to class rules.';
+    const countText = spellcasting.prepared_spells
+      ? `You prepare ${spellcasting.prepared_spells} level 1 spells from your class list.`
+      : spellcasting.prepared_formula
+        ? `Prepared spells scale from ${spellAbilityName}${showAbilityMath ? ` ${fmtMod(spellMod || 0)}` : ''}.`
+        : spellcasting.spells_known
+          ? `You choose ${spellcasting.spells_known} known level 1 spells.`
+          : 'Your spell choices are tied to class rules.';
     notes.push({
       id: 'spellcasting',
       title: 'Spellcasting',

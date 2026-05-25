@@ -276,7 +276,7 @@ test('caster spell lists cover the largest level 1 creation choices', () => {
     if (!spellcasting) continue;
     const cantripOptions = content.spells.filter((spell) => spell.level === 0 && spell.classes.includes(characterClass.id));
     const levelOneOptions = content.spells.filter((spell) => spell.level === 1 && spell.classes.includes(characterClass.id));
-    const requiredLevelOne = spellcasting.spells_known || (spellcasting.prepared_formula ? 6 : 0);
+    const requiredLevelOne = spellcasting.prepared_spells || spellcasting.spells_known || (spellcasting.prepared_formula ? 6 : 0);
 
     assert.ok(
       cantripOptions.length >= (spellcasting.cantrips || 0),
@@ -286,6 +286,25 @@ test('caster spell lists cover the largest level 1 creation choices', () => {
       levelOneOptions.length >= requiredLevelOne,
       `${characterClass.name} needs ${requiredLevelOne} level 1 spell choices but only has ${levelOneOptions.length}`,
     );
+  }
+});
+
+test('level 1 spellcasters use fixed 2024 prepared spell counts', () => {
+  const content = getContentBundle();
+  const expectedCounts = {
+    bard: 4,
+    cleric: 4,
+    druid: 4,
+    paladin: 2,
+    ranger: 2,
+    sorcerer: 2,
+    warlock: 2,
+    wizard: 4,
+  };
+
+  for (const [classId, expectedCount] of Object.entries(expectedCounts)) {
+    const characterClass = content.classes.find((item) => item.id === classId);
+    assert.equal(characterClass?.spellcasting?.prepared_spells, expectedCount, `${classId} prepared spell count`);
   }
 });
 
@@ -316,11 +335,41 @@ test('validates Human Paladin Noble with high Charisma and spell choices', () =>
       human_feat: { cantrips: ['light', 'guidance'], spell: 'healing_word' },
     },
     cantripsKnown: [],
-    spellsKnown: ['cure_wounds', 'bless', 'command', 'shield_of_faith'],
+    spellsKnown: ['cure_wounds', 'shield_of_faith'],
   }), content);
 
   assert.equal(sheet.identity.class, 'paladin');
-  assert.deepEqual(sheet.spellcasting.spells_prepared, ['cure_wounds', 'bless', 'command', 'shield_of_faith']);
+  assert.deepEqual(sheet.spellcasting.spells_prepared, ['cure_wounds', 'shield_of_faith']);
   assert.equal(sheet.origin.magic_initiate.human_feat.spell, 'healing_word');
   assert.equal(sheet.derived_stats.spell_save_dc, 13);
+});
+
+test('Paladin level 1 prepares two spells even with low Charisma', () => {
+  const content = getContentBundle();
+  const sheet = validateCharacter(baseDraft({
+    name: 'Low Charm Paladin',
+    speciesId: 'dwarf',
+    speciesChoices: {},
+    languages: ['elvish', 'dwarvish'],
+    backgroundId: 'guard',
+    classId: 'paladin',
+    abilityScores: {
+      str: 15,
+      dex: 10,
+      con: 14,
+      int: 12,
+      wis: 13,
+      cha: 8,
+      backgroundBonus: { str: 2, wis: 1 },
+    },
+    selectedSkills: ['insight', 'intimidation'],
+    humanSkillId: '',
+    humanOriginFeatId: '',
+    featSkillChoices: {},
+    magicInitiateChoices: {},
+    cantripsKnown: [],
+    spellsKnown: ['cure_wounds', 'bless'],
+  }), content);
+
+  assert.deepEqual(sheet.spellcasting.spells_prepared, ['cure_wounds', 'bless']);
 });
