@@ -118,6 +118,44 @@ test('allows recently established objects, doors, and NPC aliases in the scene s
   assert.equal(guardMessage('I attack the hooded stranger with my longsword.', state), null);
 });
 
+test('allows reachable container contents from recent narration when extractor is behind', () => {
+  const state = {
+    current_location: 'Bracken Hollow town gate',
+    scene_presence: {
+      exact_location: 'Bracken Hollow town gate',
+      location_type: 'gate',
+      present_npcs: ['gate guard', 'messenger boy'],
+      present_objects: ['torn satchel'],
+      available_exits: ['town square', 'road'],
+      nearby_locations: ['chapel'],
+    },
+    npcs_encountered: [],
+  };
+  const recentNarration = 'The boy thrusts the satchel toward you. Inside, you glimpse a wax-sealed note, a smear of ash, and a small silver token.';
+
+  assert.equal(checkSpatialAction('Read the note.', state, { recentNarration }), null);
+  assert.equal(checkSpatialAction('Open the wax-sealed note.', state, { recentNarration }), null);
+  assert.equal(checkSpatialAction('Examine the silver token.', state, { recentNarration }), null);
+});
+
+test('does not treat prior spatial rejection text as object presence', () => {
+  const state = {
+    current_location: 'Bracken Hollow town gate',
+    scene_presence: {
+      exact_location: 'Bracken Hollow town gate',
+      location_type: 'gate',
+      present_npcs: ['gate guard'],
+      present_objects: ['muddy road'],
+      available_exits: ['town square', 'road'],
+      nearby_locations: [],
+    },
+    npcs_encountered: [],
+  };
+  const recentNarration = 'You are currently at Bracken Hollow town gate, and note is not here. Do you look around for it, or clarify where you mean?';
+
+  assert.match(checkSpatialAction('Read the note.', state, { recentNarration }).message, /note is not here/);
+});
+
 test('extracts the real target instead of intent or reason phrases', () => {
   const state = {
     current_location: 'Brackenford lane',

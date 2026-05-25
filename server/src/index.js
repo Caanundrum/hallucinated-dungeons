@@ -97,6 +97,16 @@ async function runPostResponsePipeline(sessionId, playerMessage, dm1Reply, newTu
   }
 }
 
+function recentNarrationForSpatialGuard(history = []) {
+  return (history || [])
+    .filter((row) => row.role === 'dm1')
+    .map((row) => String(row.content || ''))
+    .filter((content) => content.trim())
+    .filter((content) => !/\b(?:is not here|are not here|no specific .* established|do you look around for it|clarify where you mean)\b/i.test(content))
+    .slice(-3)
+    .join('\n\n');
+}
+
 async function moderateUserMessage(socket, errorEvent, message) {
   const moderation = await ai.moderateText(message);
   if (moderation.ok) return true;
@@ -1136,7 +1146,14 @@ io.on('connection', (socket) => {
       }
 
       if (!mechanics.skipSpatialGuard) {
-        const spatialIssue = checkSpatialAction(message, effectiveWorldState);
+        let spatialIssue = checkSpatialAction(message, effectiveWorldState);
+        if (spatialIssue) {
+          const recentHistory = await db.getRollingWindow(sessionId, 8).catch(() => []);
+          const recentNarration = recentNarrationForSpatialGuard(recentHistory);
+          if (recentNarration) {
+            spatialIssue = checkSpatialAction(message, effectiveWorldState, { recentNarration });
+          }
+        }
         if (spatialIssue) {
           await db.saveMessage(sessionId, 'player_dm1', message, currentTurn);
           await db.saveMessage(sessionId, 'dm1', spatialIssue.message, currentTurn);

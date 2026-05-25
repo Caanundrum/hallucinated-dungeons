@@ -73,6 +73,34 @@ const VAGUE_TARGETS = new Set([
   'reason',
   'fear',
 ]);
+const RECENT_REACHABLE_CUES = /\b(?:inside|contains?|holding|clutch(?:es|ed|ing)?|thrusts?|hands?|gives?|offers?|find|found|see|saw|glimpse|visible|rests?|lies?|sits?|hangs?|pinned|wrapped|folded|tucked|draws?|pulls?|produces?|sets?|places?|contents?)\b/i;
+const SPATIAL_REJECTION_TEXT = /\b(?:is not here|are not here|no specific .* established|do you look around for it|clarify where you mean|not within reach)\b/i;
+const PORTABLE_OBJECT_HINTS = new Set([
+  'ash',
+  'badge',
+  'book',
+  'bottle',
+  'bread',
+  'coin',
+  'envelope',
+  'gem',
+  'journal',
+  'key',
+  'letter',
+  'map',
+  'note',
+  'oilcloth',
+  'paper',
+  'parchment',
+  'ring',
+  'satchel',
+  'scroll',
+  'seal',
+  'token',
+  'tooth',
+  'vial',
+  'wax',
+]);
 
 function normalize(value) {
   return String(value || '').toLowerCase();
@@ -148,14 +176,28 @@ function locationSummary(worldState) {
   ].join(' ');
 }
 
-function isKnownPresentOrReachable(worldState, term) {
+function isKnownPresentOrReachable(worldState, term, options = {}) {
   const scene = worldState.scene_presence || {};
   const location = currentLocation(worldState);
   return listIncludesTerm([location, scene.location_type], term)
     || listIncludesTerm(scene.present_npcs, term)
     || listIncludesTerm(scene.present_objects, term)
     || listIncludesTerm(scene.available_exits, term)
-    || listIncludesTerm(scene.nearby_locations, term);
+    || listIncludesTerm(scene.nearby_locations, term)
+    || recentNarrationEstablishesReachableObject(options.recentNarration, term);
+}
+
+function recentNarrationEstablishesReachableObject(recentNarration, term) {
+  const text = String(recentNarration || '');
+  if (!text.trim() || SPATIAL_REJECTION_TEXT.test(text)) return false;
+
+  const normalizedTerm = singularize(compact(term));
+  if (!normalizedTerm || !listIncludesTerm([text], normalizedTerm)) return false;
+  if (!RECENT_REACHABLE_CUES.test(text)) return false;
+
+  const termTokens = normalizedTerm.split(' ').filter(Boolean);
+  return termTokens.some((token) => PORTABLE_OBJECT_HINTS.has(token))
+    || /\b(?:satchel|bag|pack|pouch|chest|box|drawer|case|pocket|bundle|contents?)\b/i.test(text);
 }
 
 function cleanCandidate(value) {
@@ -178,7 +220,7 @@ function extractInteractionTarget(input) {
   return cleanCandidate(targetMatch?.[1]);
 }
 
-function findGenericSpatialIssue(input, worldState) {
+function findGenericSpatialIssue(input, worldState, options = {}) {
   const scene = worldState.scene_presence;
   if (!scene || !scene.exact_location) return null;
   if (!INTERACTION_VERBS.test(input) || MOVEMENT_VERBS.test(input)) return null;
@@ -187,7 +229,7 @@ function findGenericSpatialIssue(input, worldState) {
   const locationMatch = input.match(LOCATION_PREPOSITIONS);
   if (locationMatch) {
     const place = cleanCandidate(locationMatch[1]);
-    if (place && !isKnownPresentOrReachable(worldState, place)) {
+    if (place && !isKnownPresentOrReachable(worldState, place, options)) {
       return {
         target: place,
         message: `You are currently at ${currentLocation(worldState)}, and no specific ${place} has been established here. Do you look for a way to reach one, or clarify where you mean?`,
@@ -196,7 +238,7 @@ function findGenericSpatialIssue(input, worldState) {
   }
 
   const target = extractInteractionTarget(input);
-  if (target && !isKnownPresentOrReachable(worldState, target)) {
+  if (target && !isKnownPresentOrReachable(worldState, target, options)) {
     return {
       target,
       message: `You are currently at ${currentLocation(worldState)}, and ${target} is not here. Do you look around for it, or clarify where you mean?`,
@@ -206,7 +248,7 @@ function findGenericSpatialIssue(input, worldState) {
   return null;
 }
 
-function checkSpatialAction(message, worldState = {}) {
+function checkSpatialAction(message, worldState = {}, options = {}) {
   const input = String(message || '');
   const location = currentLocation(worldState);
   if (!input.trim() || !location.trim()) return null;
@@ -222,7 +264,7 @@ function checkSpatialAction(message, worldState = {}) {
     };
   }
 
-  return findGenericSpatialIssue(input, worldState);
+  return findGenericSpatialIssue(input, worldState, options);
 }
 
 module.exports = { checkSpatialAction };
