@@ -43,6 +43,7 @@ const BONUS_DIE_RULES = {
 };
 
 function resolveSpellCast({ message, content, characterSheet, worldState = {} }) {
+  const castWorldState = clearResolvedCombatState(worldState);
   const spell = getCastSpellFromMessage(message, content);
   if (!spell) return null;
 
@@ -55,7 +56,7 @@ function resolveSpellCast({ message, content, characterSheet, worldState = {} })
     };
   }
 
-  const timingBlock = validateSpellTiming({ spell, message, worldState, characterSheet });
+  const timingBlock = validateSpellTiming({ spell, message, worldState: castWorldState, characterSheet });
   if (timingBlock) {
     return {
       matched: true,
@@ -75,19 +76,19 @@ function resolveSpellCast({ message, content, characterSheet, worldState = {} })
 
   let nextSheet = resource.characterSheet;
   let nextWorldState = {
-    ...worldState,
+    ...castWorldState,
     player_stats: {
-      ...(worldState.player_stats || {}),
-      spell_slots: nextSheet.spellcasting?.slots || worldState.player_stats?.spell_slots || {},
+      ...(castWorldState.player_stats || {}),
+      spell_slots: nextSheet.spellcasting?.slots || castWorldState.player_stats?.spell_slots || {},
     },
   };
 
   const currentEffects = normalizeEffects(
-    Array.isArray(worldState.active_effects)
-      ? worldState.active_effects
+    Array.isArray(castWorldState.active_effects)
+      ? castWorldState.active_effects
       : nextSheet.derived_stats?.active_spell_effects || [],
   );
-  const spellEffect = buildSpellEffect(nextSheet, spell, known, message, worldState);
+  const spellEffect = buildSpellEffect(nextSheet, spell, known, message, castWorldState);
   if (spellEffect) {
     const retainedEffects = spellEffect.concentration
       ? currentEffects.filter((effect) => !effect.concentration)
@@ -116,10 +117,10 @@ function resolveSpellOutcome({ spellCast, characterSheet, worldState = {}, rollD
   if (!spell) return null;
 
   const rule = SPELL_OUTCOMES[spell.id];
-  const stateWithMessage = {
+  const stateWithMessage = clearResolvedCombatState({
     ...worldState,
     __spell_message: spellCast.message || '',
-  };
+  });
 
   if (!rule) {
     return resolveUtilitySpell({ spell, worldState: stateWithMessage });
@@ -423,7 +424,7 @@ function getSpellTargetContext({ spell, spellCastMessage = '', worldState = {}, 
   if (worldState.combat_state?.active) {
     const combat = cloneCombatState(worldState.combat_state);
     const target = firstEnemy(combat);
-    return target ? { combat, target, activeCombat: true } : null;
+    if (target) return { combat, target, activeCombat: true };
   }
 
   const explicitTarget = inferSpellTargetName(spellCastMessage, worldState, spell);
@@ -477,6 +478,7 @@ function buildSceneTargetCombatant(name, worldState = {}) {
 
 function getPlayerCombatant(combat, characterSheet = {}, worldState = {}) {
   return (combat.combatants || []).find((combatant) => combatant.is_player) || {
+    character_id: worldState.player_stats?.character_id || characterSheet?.derived_stats?.character_id || null,
     name: characterSheet?.identity?.name || worldState.player_stats?.name || 'You',
     conditions: worldState.player_stats?.conditions || characterSheet?.derived_stats?.conditions || [],
     is_player: true,
@@ -530,13 +532,24 @@ function cleanTargetName(value) {
 }
 
 function targetNamesMatch(a, b) {
-  const left = normalizeName(a);
-  const right = normalizeName(b);
-  return left === right || left.includes(right) || right.includes(left);
+  const leftNames = comparableTargetNames(a);
+  const rightNames = comparableTargetNames(b);
+  return leftNames.some((left) => rightNames.some((right) => (
+    left === right || left.includes(right) || right.includes(left)
+  )));
 }
 
 function normalizeName(value) {
   return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function comparableTargetNames(value) {
+  const normalized = normalizeName(value);
+  const stripped = normalized
+    .replace(/\b(?:injured|wounded|collapsed|fallen|reeling|unknown|hooded)\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return [...new Set([normalized, stripped].filter(Boolean))];
 }
 
 function rollD20WithMode(rollDie, mode = null) {
@@ -870,6 +883,13 @@ function clearExpiredEffectState(worldState, expiredEffects = []) {
 
 function cloneCombatState(combatState) {
   return JSON.parse(JSON.stringify(combatState || { active: false, round: 1, turn_index: 0, combatants: [] }));
+}
+
+function clearResolvedCombatState(worldState = {}) {
+  if (!worldState.combat_state?.active) return worldState;
+  const enemiesAlive = (worldState.combat_state.combatants || [])
+    .some((combatant) => !combatant.is_player && Number(combatant.hp || 0) > 0);
+  return enemiesAlive ? worldState : { ...worldState, combat_state: null };
 }
 
 function firstEnemy(combat) {

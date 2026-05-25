@@ -18,6 +18,13 @@ function resolveCreatureTurns({
   if (playerIndex < 0) {
     combatants.unshift(buildPlayerCombatant(characterSheet, worldState));
     playerIndex = 0;
+  } else if (!combatantMatchesCharacter(combatants[playerIndex], characterSheet, worldState)) {
+    const activePlayer = buildPlayerCombatant(characterSheet, worldState);
+    combatants[playerIndex] = {
+      ...combatants[playerIndex],
+      ...activePlayer,
+      initiative: combatants[playerIndex].initiative ?? activePlayer.initiative,
+    };
   }
 
   let player = combatants[playerIndex];
@@ -170,6 +177,7 @@ function buildPlayerCombatant(characterSheet, worldState) {
   const stats = worldState.player_stats || {};
   const hp = Number(stats.hp ?? derived.hp ?? derived.max_hp ?? 10);
   return {
+    character_id: stats.character_id || derived.character_id || null,
     name: identity.name || stats.name || 'You',
     initiative: Number(derived.initiative || 0),
     hp,
@@ -179,6 +187,14 @@ function buildPlayerCombatant(characterSheet, worldState) {
     conditions: derived.conditions || stats.conditions || [],
     is_player: true,
   };
+}
+
+function combatantMatchesCharacter(combatant = {}, characterSheet = {}, worldState = {}) {
+  const expectedId = worldState.player_stats?.character_id || characterSheet?.derived_stats?.character_id || null;
+  const expectedName = characterSheet?.identity?.name || worldState.player_stats?.name || '';
+  if (expectedId && combatant.character_id !== expectedId) return false;
+  if (!combatant.character_id && expectedName && combatant.name && combatant.name !== expectedName) return false;
+  return true;
 }
 
 function applyDamageToPlayer({ player, characterSheet, worldState, damage }) {

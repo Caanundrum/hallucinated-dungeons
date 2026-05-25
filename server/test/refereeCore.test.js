@@ -120,6 +120,31 @@ test('blocks new actions until a pending roll is resolved', () => {
   assert.match(result.reply, /\[CHECK: skill=insight ability=wis/);
 });
 
+test('clears stale combat with no living enemies before prompting checks', () => {
+  const result = adjudicate({
+    message: "I study the injured lantern-figure's face.",
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 2,
+        turn_index: 0,
+        combatants: [
+          { name: 'Old Fighter', hp: 14, max_hp: 14, ac: 18, is_player: true },
+          { name: 'Unknown lantern-figure', hp: 0, max_hp: 8, ac: 10, is_player: false },
+        ],
+      },
+    }),
+    characterSheet,
+    currentTurn: 9,
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.combat_state, null);
+  assert.equal(result.worldState.pending_roll.kind, 'skill_check');
+  assert.equal(result.worldState.pending_roll.combat, false);
+  assert.match(result.reply, /Wisdom \(Insight\)/);
+});
+
 test('maps declared rule actions to the required check instead of asking the DM to improvise', () => {
   const result = adjudicate({
     message: 'I take the Hide action.',

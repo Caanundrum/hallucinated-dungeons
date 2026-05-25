@@ -82,8 +82,10 @@ function adjudicate({ message, worldState = {}, characterSheet = null, currentTu
 }
 
 function normalizeWorldState(worldState = {}) {
+  const combatState = clearResolvedCombat(worldState.combat_state);
   return {
     ...worldState,
+    combat_state: combatState,
     player_stats: {
       ...(worldState.player_stats || {}),
     },
@@ -91,6 +93,13 @@ function normalizeWorldState(worldState = {}) {
       ...(worldState.time_state || {}),
     },
   };
+}
+
+function clearResolvedCombat(combatState) {
+  if (!combatState?.active) return combatState;
+  const enemiesAlive = (combatState.combatants || [])
+    .some((combatant) => !combatant.is_player && Number(combatant.hp || 0) > 0);
+  return enemiesAlive ? combatState : null;
 }
 
 function defaultRollDie(sides) {
@@ -1222,6 +1231,7 @@ function buildPlayerCombatant(characterSheet, worldState) {
   const stats = worldState.player_stats || {};
   const hp = Number(stats.hp ?? derived.hp ?? derived.max_hp ?? 10);
   return {
+    character_id: stats.character_id || derived.character_id || null,
     name: identity.name || stats.name || 'You',
     initiative: Number(derived.initiative || 0),
     hp,

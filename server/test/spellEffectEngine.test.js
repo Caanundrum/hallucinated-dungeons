@@ -514,6 +514,52 @@ test('non-combat save spells resolve against present scene targets', () => {
   assert.match(outcome.reply, /WIS save: 5/);
 });
 
+test('save-effect spells can target described scene aliases after stale combat clears', () => {
+  const sheet = casterSheet({
+    spellcasting: {
+      ability: 'int',
+      cantrips_known: [],
+      spells_prepared: ['command'],
+      slots: { 1: 1 },
+    },
+  });
+  const cast = resolveSpellCast({
+    message: 'I cast Command on the injured lantern-figure and say Halt.',
+    content,
+    characterSheet: sheet,
+    worldState: worldState({
+      scene_presence: {
+        exact_location: 'rain-slick lane',
+        present_npcs: ['Unknown lantern-figure'],
+        present_objects: ['chalk mark'],
+        available_exits: ['gate', 'deeper town'],
+      },
+      combat_state: {
+        active: true,
+        round: 2,
+        turn_index: 0,
+        combatants: [
+          { name: 'Old Fighter', hp: 14, max_hp: 14, ac: 18, is_player: true },
+          { name: 'Unknown lantern-figure', hp: 0, max_hp: 8, ac: 10, is_player: false },
+        ],
+      },
+    }),
+  });
+  const outcome = resolveSpellOutcome({
+    spellCast: cast,
+    characterSheet: cast.characterSheet,
+    worldState: cast.worldState,
+    rollDie: sequenceRolls([4]),
+  });
+
+  assert.equal(outcome.handled, true);
+  assert.equal(outcome.worldState.scene_target_states[0].name, 'Unknown lantern-figure');
+  assert.equal(outcome.worldState.scene_target_states[0].conditions.includes('command'), true);
+  assert.equal(outcome.worldState.combat_state.active, false);
+  assert.equal(outcome.worldState.combat_state.combatants[0].name, 'Unknown lantern-figure');
+  assert.match(outcome.reply, /Unknown lantern-figure/);
+});
+
 test('Sleep distributes its HP pool across multiple eligible enemies', () => {
   const sheet = casterSheet({
     spellcasting: {

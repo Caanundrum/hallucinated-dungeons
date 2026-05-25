@@ -136,13 +136,14 @@ function isValidSessionToken(sessionId, token) {
   return crypto.timingSafeEqual(expectedBuffer, tokenBuffer);
 }
 
-function characterSheetToWorldStats(characterSheet) {
+function characterSheetToWorldStats(characterSheet, characterId = null) {
   const stats = characterSheet.derived_stats || {};
   const identity = characterSheet.identity || {};
   const details = characterSheet.character_details || {};
   const modifiers = characterSheet.abilities?.modifiers || {};
   const primaryAttack = stats.attack_breakdowns?.[0];
   return {
+    character_id: characterId || stats.character_id || null,
     name: identity.name || '',
     class: identity.class_name || '',
     level: stats.level || identity.level || 1,
@@ -313,7 +314,7 @@ async function handleDeterministicSpellAction(socket, sessionId, message) {
   if (!character || !sheet) return { matched: false };
 
   const worldStateRow = await db.getWorldState(sessionId);
-  const currentWorldState = worldStateRow?.state || db.DEFAULT_WORLD_STATE;
+  const currentWorldState = normalizeActiveCharacterWorldState(worldStateRow?.state || db.DEFAULT_WORLD_STATE, sheet, character.id);
   const spellForEconomy = getCastSpellFromMessage(message, content);
   let actionWorldState = currentWorldState;
   if (spellForEconomy && currentWorldState.combat_state?.active) {
@@ -347,12 +348,31 @@ async function handleDeterministicSpellAction(socket, sessionId, message) {
     return { matched: true, handled: true };
   }
 
-  const saved = await db.updateCharacterSheet(character.id, result.characterSheet);
   const spellOutcome = resolveSpellOutcome({
     spellCast: result,
-    characterSheet: saved.character_sheet,
+    characterSheet: result.characterSheet,
     worldState: result.worldState,
   });
+  if (spellOutcome?.handled && spellOutcome.logType === 'spell_no_target') {
+    const currentTurn = currentWorldState.session_turn ?? 0;
+    await db.saveMessage(sessionId, 'player_dm1', message, currentTurn);
+    await db.saveMessage(sessionId, 'dm1', spellOutcome.reply, currentTurn);
+    await db.incrementSessionTurn(sessionId);
+    socket.emit('dm1_response', { message: spellOutcome.reply });
+    await db.logDmCall({
+      sessionId,
+      dm:           spellOutcome.logType,
+      model:        'deterministic',
+      playerInput:  message,
+      fullPrompt:   JSON.stringify({ spell: result.spell, worldState: currentWorldState }),
+      dmResponse:   spellOutcome.reply,
+      inputTokens:  null,
+      outputTokens: null,
+    }).catch(console.error);
+    return { matched: true, handled: true };
+  }
+
+  const saved = await db.updateCharacterSheet(character.id, result.characterSheet);
   if (spellOutcome?.handled) {
     let finalWorldState = spellOutcome.worldState;
     let reply = spellOutcome.reply;
@@ -405,6 +425,7 @@ async function syncCharacterFromWorldState(socket, sessionId) {
   if (!character || !sheet || !worldState?.player_stats) return;
 
   const stats = worldState.player_stats;
+  if (stats.character_id && stats.character_id !== character.id) return;
   const derived = sheet.derived_stats || {};
   const nextDerived = { ...derived };
   let changed = false;
@@ -485,17 +506,51 @@ async function syncCharacterFromWorldState(socket, sessionId) {
   });
 }
 
-async function syncCharacterToWorldState(sessionId, characterSheet) {
+async function syncCharacterToWorldState(sessionId, characterSheet, characterId = null) {
   const row = await db.getWorldState(sessionId);
   const current = row?.state || db.DEFAULT_WORLD_STATE;
-  await db.updateWorldState(sessionId, {
-    ...current,
-    active_effects: characterSheet.derived_stats?.active_spell_effects || current.active_effects || [],
-    player_stats: {
-      ...(current.player_stats || db.DEFAULT_WORLD_STATE.player_stats),
-      ...characterSheetToWorldStats(characterSheet),
-    },
-  });
+  await db.updateWorldState(sessionId, normalizeActiveCharacterWorldState(current, characterSheet, characterId));
+}
+
+function normalizeActiveCharacterWorldState(worldState, characterSheet, characterId = null) {
+  const stats = characterSheetToWorldStats(characterSheet, characterId);
+  const nextPlayerStats = {
+    ...(worldState.player_stats || db.DEFAULT_WORLD_STATE.player_stats),
+    ...stats,
+  };
+  return {
+    ...worldState,
+    active_effects: characterSheet.derived_stats?.active_spell_effects || worldState.active_effects || [],
+    player_stats: nextPlayerStats,
+    combat_state: alignCombatPlayerToCharacter(worldState.combat_state, characterSheet, nextPlayerStats),
+  };
+}
+
+function alignCombatPlayerToCharacter(combatState, characterSheet, playerStats) {
+  if (!combatState?.active) return combatState;
+  const derived = characterSheet.derived_stats || {};
+  const identity = characterSheet.identity || {};
+  const aligned = {
+    ...combatState,
+    combatants: (combatState.combatants || []).map((combatant) => (
+      combatant.is_player
+        ? {
+            ...combatant,
+            character_id: playerStats.character_id || combatant.character_id || null,
+            name: identity.name || playerStats.name || combatant.name || 'You',
+            initiative: Number(combatant.initiative ?? derived.initiative ?? 0),
+            hp: Number(derived.hp ?? derived.max_hp ?? playerStats.hp ?? combatant.hp ?? 10),
+            max_hp: Number(derived.max_hp ?? playerStats.max_hp ?? combatant.max_hp ?? 10),
+            temp_hp: Number(derived.temp_hp ?? playerStats.temp_hp ?? combatant.temp_hp ?? 0),
+            ac: Number(derived.armor_class ?? playerStats.armor_class ?? combatant.ac ?? 10),
+            conditions: derived.conditions || playerStats.conditions || combatant.conditions || [],
+          }
+        : combatant
+    )),
+  };
+  const enemiesAlive = (aligned.combatants || [])
+    .some((combatant) => !combatant.is_player && Number(combatant.hp || 0) > 0);
+  return enemiesAlive ? aligned : null;
 }
 
 function hasValidSocketSession(socket, sessionId, sessionToken) {
@@ -770,7 +825,10 @@ io.on('connection', (socket) => {
       const campaign = await db.getOrCreateDefaultCampaign();
       const character = await db.getCharacterForSession(sessionId);
       const characters = await db.getAccessibleCharacters(sessionId);
-      if (character) socket.currentCharacterId = character.id;
+      if (character) {
+        socket.currentCharacterId = character.id;
+        await syncCharacterToWorldState(sessionId, character.character_sheet, character.id).catch(console.error);
+      }
       socket.emit('character_data', {
         campaign,
         content: getContentBundle(),
@@ -845,7 +903,7 @@ io.on('connection', (socket) => {
         presence: 'present',
         inCombat,
       });
-      await syncCharacterToWorldState(sessionId, characterSheet).catch(console.error);
+      await syncCharacterToWorldState(sessionId, saved.character_sheet, saved.id).catch(console.error);
       const history = await db.getSessionHistory(sessionId).catch(() => []);
       const shouldStartSession = !history.some((m) => m.role === 'player_dm1' || m.role === 'dm1');
       socket.emit('character_ready', {
@@ -900,7 +958,7 @@ io.on('connection', (socket) => {
         inCombat,
       });
       socket.currentCharacterId = character.id;
-      await syncCharacterToWorldState(sessionId, character.character_sheet).catch(console.error);
+      await syncCharacterToWorldState(sessionId, character.character_sheet, character.id).catch(console.error);
       const history = await db.getSessionHistory(sessionId).catch(() => []);
       const shouldStartSession = !history.some((m) => m.role === 'player_dm1' || m.role === 'dm1');
       socket.emit('character_ready', {
@@ -984,10 +1042,15 @@ io.on('connection', (socket) => {
       const worldStateRow = await db.getWorldState(sessionId);
       const currentTurn   = worldStateRow?.state?.session_turn ?? 0;
       const activeCharacter = await db.getCharacterForSession(sessionId).catch(() => null);
+      let activeWorldState = worldStateRow?.state || db.DEFAULT_WORLD_STATE;
+      if (activeCharacter?.character_sheet) {
+        activeWorldState = normalizeActiveCharacterWorldState(activeWorldState, activeCharacter.character_sheet, activeCharacter.id);
+        await db.updateWorldState(sessionId, activeWorldState);
+      }
 
       const referee = resolveRefereeAction({
         message,
-        worldState: worldStateRow?.state || db.DEFAULT_WORLD_STATE,
+        worldState: activeWorldState,
         characterSheet: activeCharacter?.character_sheet || null,
         currentTurn,
       });
@@ -1022,7 +1085,7 @@ io.on('connection', (socket) => {
       if (spellAction.handled) {
         return;
       }
-      const effectiveWorldState = spellAction.worldState || worldStateRow?.state;
+      const effectiveWorldState = spellAction.worldState || activeWorldState;
 
       const mechanics = resolvePreNarration({ message, worldState: effectiveWorldState });
       if (mechanics.handled) {
