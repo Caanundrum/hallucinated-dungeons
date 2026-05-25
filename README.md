@@ -1,6 +1,10 @@
 # Hallucinated Dungeons
 
-An AI-powered Dungeon Master experience built on D&D 5.5e (2024) rules.
+An AI-powered Game Master experience built on 2024 fantasy d20 rules.
+
+This project is an original fantasy campaign tool. It is not affiliated with or endorsed by Wizards of the Coast, and public-facing rules text should stay in original SRD-style wording rather than quoted rulebook text.
+
+Rules reference: This work includes material from the System Reference Document 5.2.1 ("SRD 5.2.1") by Wizards of the Coast LLC, available at https://www.dndbeyond.com/srd. The SRD 5.2.1 is licensed under the Creative Commons Attribution 4.0 International License, available at https://creativecommons.org/licenses/by/4.0/legalcode.
 
 ## Project Structure
 
@@ -31,7 +35,7 @@ npm run dev
 
 ### Server
 - `OPENAI_API_KEY` — your OpenAI API key
-- `DM1_MODEL` — main Dungeon Master model
+- `DM1_MODEL` — main Game Master model
 - `UTILITY_MODEL` — utility model for rules, summaries, and state extraction
 - `SUPABASE_URL` — your Supabase project URL
 - `SUPABASE_SERVICE_ROLE_KEY` — your Supabase service role key

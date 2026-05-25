@@ -168,10 +168,12 @@ function characterSheetToWorldStats(characterSheet, characterId = null) {
     personality: details.personality || '',
     backstory: details.backstory || '',
     languages: characterSheet.languages || characterSheet.proficiencies?.languages || [],
+    tools: characterSheet.proficiencies?.tools || [],
     resistances: characterSheet.resistances || [],
     species_spells: (characterSheet.species_spells || []).map((spell) => spell.id || spell),
     class_cantrips: characterSheet.spellcasting?.cantrips_known || [],
     class_spells: characterSheet.spellcasting?.spells_prepared || [],
+    class_choice_spells: characterSheet.class_choice_spells || characterSheet.spellcasting?.class_choice_spells || [],
     origin_magic: characterSheet.origin?.magic_initiate || {},
     conditions: stats.conditions || [],
     spell_slots: characterSheet.spellcasting?.slots || {},
@@ -269,6 +271,7 @@ function summarizeCharacterSheetForRules(characterSheet) {
   const saves = derived.saving_throw_modifiers || {};
   const features = characterSheet.features || [];
   const inventory = characterSheet.inventory || [];
+  const tools = characterSheet.proficiencies?.tools || [];
   const lines = [];
 
   lines.push(`Name: ${identity.name || 'Unnamed'}`);
@@ -299,9 +302,13 @@ function summarizeCharacterSheetForRules(characterSheet) {
     const cantrips = spellcasting.cantrips_known || [];
     const spells = spellcasting.spells_prepared || [];
     lines.push(`Spellcasting: ${spellcasting.ability.toUpperCase()}, attack ${fmtSigned(derived.spell_attack_bonus)}, DC ${derived.spell_save_dc ?? '--'}, slots ${formatSpellSlots(spellcasting.slots)}, cantrips ${formatList(cantrips)}, level 1 ${formatList(spells)}`);
+    if ((spellcasting.class_choice_spells || characterSheet.class_choice_spells || []).length) {
+      lines.push(`Class choice spells: ${(spellcasting.class_choice_spells || characterSheet.class_choice_spells).map((entry) => `${entry.id} from ${entry.source || 'class choice'}`).join(', ')}`);
+    }
   }
   const languages = characterSheet.languages || characterSheet.proficiencies?.languages || [];
   if (languages.length) lines.push(`Languages: ${languages.join(', ')}`);
+  if (tools.length) lines.push(`Tool proficiencies: ${tools.join(', ')}`);
   if (details.alignment || details.personality || details.backstory) {
     lines.push(`Character details: ${[details.alignment, details.personality, details.backstory].filter(Boolean).join(' ')}`);
   }
@@ -643,7 +650,7 @@ async function narratePartyChange(socket, sessionId, type, characterSheet) {
 
     const safeReply = await moderateAssistantReply(
       response.text,
-      'The party shifts position, but the moment refuses to settle cleanly. The Dungeon Master keeps everyone anchored where the scene already placed them.'
+      'The party shifts position, but the moment refuses to settle cleanly. The Game Master keeps everyone anchored where the scene already placed them.'
     );
     const currentTurn = worldState.session_turn ?? 0;
     await db.saveMessage(sessionId, 'dm1', safeReply, currentTurn);
@@ -820,13 +827,13 @@ io.on('connection', (socket) => {
       } catch (apiErr) {
         console.error('session_start DM1 API error:', apiErr.message);
         socket.emit('dm1_typing', false);
-        socket.emit('error', { message: 'The Dungeon Master encountered an error starting your session. Please refresh.' });
+        socket.emit('error', { message: 'The Game Master encountered an error starting your session. Please refresh.' });
         return;
       }
 
       dm1Reply = await moderateAssistantReply(
         dm1Reply,
-        'The road ahead is momentarily veiled. Try refreshing the adventure, and the Dungeon Master will gather the threads again.'
+        'The road ahead is momentarily veiled. Try refreshing the adventure, and the Game Master will gather the threads again.'
       );
 
       // Save the opening as a DM1 message (no player_dm1 counterpart)
@@ -853,7 +860,7 @@ io.on('connection', (socket) => {
     } catch (err) {
       console.error('session_start error:', err);
       socket.emit('dm1_typing', false);
-      socket.emit('error', { message: 'The Dungeon Master encountered an error. Please refresh.' });
+      socket.emit('error', { message: 'The Game Master encountered an error. Please refresh.' });
     } finally {
       activeDm1Sessions.delete(sessionId);
     }
@@ -1074,7 +1081,7 @@ io.on('connection', (socket) => {
     }
 
     if (activeDm1Sessions.has(sessionId)) {
-      socket.emit('error', { message: 'The Dungeon Master is still resolving your last action. Give the dice a second to stop clattering.' });
+      socket.emit('error', { message: 'The Game Master is still resolving your last action. Give the dice a second to stop clattering.' });
       return;
     }
     activeDm1Sessions.add(sessionId);
@@ -1214,7 +1221,7 @@ io.on('connection', (socket) => {
         // do NOT increment session_turn (spec §12).
         console.error('DM1 API error:', apiErr.message);
         socket.emit('dm1_typing', false);
-        socket.emit('error', { message: 'The Dungeon Master encountered an error. Please try again.' });
+        socket.emit('error', { message: 'The Game Master encountered an error. Please try again.' });
 
         // Store assembled prompt; append error details (spec §12)
         const fullPromptForLog = [
@@ -1238,7 +1245,7 @@ io.on('connection', (socket) => {
 
       dm1Reply = await moderateAssistantReply(
         dm1Reply,
-        'The Dungeon Master lowers the screen and stares at you over it. That idea has been denied entry to the campaign, the tavern, and polite society. Try something else.'
+        'The Game Master lowers the screen and stares at you over it. That idea has been denied entry to the campaign, the tavern, and polite society. Try something else.'
       );
 
       const narrativeClock = advanceNarrativeTime({
@@ -1280,7 +1287,7 @@ io.on('connection', (socket) => {
     } catch (err) {
       console.error('story_input error:', err);
       socket.emit('dm1_typing', false);
-      socket.emit('error', { message: 'The Dungeon Master encountered an error. Please try again.' });
+      socket.emit('error', { message: 'The Game Master encountered an error. Please try again.' });
     } finally {
       activeDm1Sessions.delete(sessionId);
     }

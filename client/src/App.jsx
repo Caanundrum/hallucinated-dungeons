@@ -487,7 +487,7 @@ function App() {
     if (!pendingRoll) return;
     const { id, diceCount, dieSides, modifier, label, bonusDice } = pendingRoll;
     if (!id) {
-      setNarrative((prev) => [...prev, { type: 'error', text: 'This roll was missing its server roll id. Ask the DM to request the roll again.', id: Date.now() }]);
+      setNarrative((prev) => [...prev, { type: 'error', text: 'This roll was missing its server roll id. Ask the Game Master to request the roll again.', id: Date.now() }]);
       setPendingRoll(null);
       return;
     }
@@ -590,7 +590,7 @@ function App() {
     socket.emit('roll_character_stats', { sessionId, sessionToken });
   }), [sessionId, sessionToken]);
 
-  // Textarea stays active during DM loading; only the submit button locks.
+  // Textarea stays active during Game Master loading; only the submit button locks.
   const storyTextareaDisabled = !connected || !sessionId;
   // During a pending roll (primary or fallback), the story input is locked — the dice roller takes over
   const storyDisabled = dm1Typing || !connected || !sessionId || !!pendingRoll || !!fallbackRoll;
@@ -605,6 +605,7 @@ function App() {
           <div className="brand-block">
             <h1>Hallucinated Dungeons</h1>
             <p className="ai-disclosure">AI-generated adventure and rules responses</p>
+            <p className="legal-disclosure">Rules reference: SRD 5.2.1 (CC BY 4.0)</p>
           </div>
           <span className={`connection-status ${connected ? 'online' : 'offline'}`}>
             {connected ? 'Connected' : 'Disconnected'}
@@ -646,6 +647,7 @@ function App() {
         <div className="brand-block">
           <h1>Hallucinated Dungeons</h1>
           <p className="ai-disclosure">AI-generated adventure and rules responses</p>
+          <p className="legal-disclosure">Rules reference: SRD 5.2.1 (CC BY 4.0)</p>
         </div>
         <span className={`connection-status ${connected ? 'online' : 'offline'}`}>
           {connected ? '⚔ Connected' : '✖ Disconnected'}
@@ -657,7 +659,7 @@ function App() {
         {/* ── Narrative panel (DM1) ─────────────────────────────────── */}
         <section className="panel narrative-panel">
           <div className="panel-header">
-            <span className="panel-label dm1-label">The Dungeon Master</span>
+            <span className="panel-label dm1-label">The Game Master</span>
             <div className="panel-actions">
               <button type="button" className="sheet-toggle" onClick={() => setSheetOpen(true)} disabled={!currentCharacter}>
                 Character Sheet
@@ -673,7 +675,7 @@ function App() {
               msg.type === 'divider'
                 ? <div key={msg.id} className="session-divider"><span>{msg.text}</span></div>
                 : <div key={msg.id} className={`message message--${msg.type}`}>
-                    {msg.type === 'dm1' && <span className="msg-tag">DM</span>}
+                    {msg.type === 'dm1' && <span className="msg-tag">GM</span>}
                     {msg.type === 'player' && <span className="msg-tag player-tag">You</span>}
                     {msg.type === 'error' && <span className="msg-tag error-tag">!</span>}
                     {msg.type === 'dm1'
@@ -683,7 +685,7 @@ function App() {
             ))}
             {dm1Typing && (
               <div className="message message--dm1 typing-indicator">
-                <span className="msg-tag">DM</span>
+                <span className="msg-tag">GM</span>
                 <p><span className="dot" /><span className="dot" /><span className="dot" /></p>
               </div>
             )}
@@ -861,9 +863,12 @@ function CharacterSheetModal({ character, content, onClose }) {
   const inventory = character.inventory || [];
   const details = character.character_details || {};
   const languages = character.languages || character.proficiencies?.languages || [];
+  const tools = character.proficiencies?.tools || [];
   const speciesSpells = character.species_spells || [];
   const resistances = character.resistances || [];
   const classChoices = character.class_choices || {};
+  const classChoiceDetails = character.class_choice_details || {};
+  const classChoiceSpells = character.class_choice_spells || character.spellcasting?.class_choice_spells || [];
   const weaponMasteries = character.weapon_masteries || [];
   const expertiseSkills = character.expertise_skills || [];
   const resources = character.resources || {};
@@ -969,7 +974,10 @@ function CharacterSheetModal({ character, content, onClose }) {
               {Object.entries(classChoices).map(([choiceId, optionId]) => (
                 <div key={choiceId} className="sheet-line">
                   <strong>{choiceId.replaceAll('_', ' ')}</strong>
-                  <span>{String(optionId).replaceAll('_', ' ')}</span>
+                  <span>{[
+                    String(optionId).replaceAll('_', ' '),
+                    ...Object.entries(classChoiceDetails[choiceId] || {}).map(([detailId, detailValue]) => `${detailId.replaceAll('_', ' ')}: ${Array.isArray(detailValue) ? detailValue.map(spellName).join(', ') : spellName(detailValue)}`),
+                  ].join(' | ')}</span>
                 </div>
               ))}
               {weaponMasteries.length > 0 && (
@@ -1005,6 +1013,12 @@ function CharacterSheetModal({ character, content, onClose }) {
               <strong>Languages</strong>
               <span>{languages.length ? languages.join(', ') : 'None recorded'}</span>
             </div>
+            {tools.length > 0 && (
+              <div className="sheet-line">
+                <strong>Tools</strong>
+                <span>{tools.join(', ')}</span>
+              </div>
+            )}
             {resistances.length > 0 && (
               <div className="sheet-line">
                 <strong>Resistances</strong>
@@ -1050,6 +1064,12 @@ function CharacterSheetModal({ character, content, onClose }) {
                     <div className="sheet-line">
                       <strong>Prepared Level 1</strong>
                       <span>{(spellcasting.spells_prepared || []).map(spellSummary).join(' | ')}</span>
+                    </div>
+                  )}
+                  {classChoiceSpells.length > 0 && (
+                    <div className="sheet-line">
+                      <strong>Class Choice Spells</strong>
+                      <span>{classChoiceSpells.map((entry) => `${entry.source}: ${spellSummary(entry.id)}`).join(' | ')}</span>
                     </div>
                   )}
                 </>

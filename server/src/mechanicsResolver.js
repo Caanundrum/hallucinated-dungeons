@@ -4,7 +4,7 @@ function resolvePreNarration({ message, worldState }) {
   const intent = resolveIntent(message);
   if (intent.isRollResult) {
     const rollFrame = [
-      '[MECHANICS: This is a fallback/manual dice result from the client. Server-owned pending rolls use [ROLL REQUEST] and are resolved before narration. If no deterministic pending roll exists, you may use this fallback result for the roll the DM just requested; preserve natural 1/20 text when present. Apply 2024 RAW: natural 20/1 automatically matters for attack rolls, and death saves have their special natural 20/1 rules; ordinary ability checks and saving throws use the total against the DC unless a specific rule says otherwise.]',
+      '[MECHANICS: This is a fallback/manual dice result from the client. Server-owned pending rolls use [ROLL REQUEST] and are resolved before narration. If no deterministic pending roll exists, you may use this fallback result for the roll the Game Master just requested; preserve natural 1/20 text when present. Apply 2024 RAW: natural 20/1 automatically matters for attack rolls, and death saves have their special natural 20/1 rules; ordinary ability checks and saving throws use the total against the DC unless a specific rule says otherwise.]',
       buildCombatFrame(intent, worldState, { resolvingRoll: true }),
     ].filter(Boolean).join('\n');
 

@@ -199,6 +199,7 @@ function buildActiveCharacterText(characterSheet) {
   const features = characterSheet.features || [];
   const inventory = characterSheet.inventory || [];
   const languages = characterSheet.languages || characterSheet.proficiencies?.languages || [];
+  const tools = characterSheet.proficiencies?.tools || [];
   const lines = [];
 
   lines.push(`Name: ${identity.name || 'Unnamed'}`);
@@ -224,9 +225,13 @@ function buildActiveCharacterText(characterSheet) {
     const cantrips = spellcasting.cantrips_known || [];
     const spells = spellcasting.spells_prepared || [];
     lines.push(`Spellcasting: ${spellcasting.ability.toUpperCase()}, slots ${formatSpellSlots(spellcasting.slots)}, cantrips ${formatSpellList(cantrips, content)}, level 1 prepared ${formatSpellList(spells, content)}`);
+    if ((spellcasting.class_choice_spells || characterSheet.class_choice_spells || []).length) {
+      lines.push(`Class choice spells: ${formatClassChoiceSpellList(spellcasting.class_choice_spells || characterSheet.class_choice_spells, content)}`);
+    }
     lines.push('Spell rule: only these listed cantrips and level 1 prepared/known spells are currently castable. Do not allow unlisted spells or spells above level 1.');
   }
   if (languages.length) lines.push(`Languages: ${languages.join(', ')}`);
+  if (tools.length) lines.push(`Tool proficiencies: ${tools.join(', ')}`);
   lines.push('Capability rule: only grant supernatural actions, flight, telepathy, special senses, spells, or class features that appear here, in current world state, or in established inventory.');
   return lines.join('\n');
 }
@@ -243,6 +248,15 @@ function formatSpellSlots(slots = {}) {
   const entries = Object.entries(slots || {});
   if (entries.length === 0) return 'none';
   return entries.map(([level, count]) => `L${level}:${count}`).join(', ');
+}
+
+function formatClassChoiceSpellList(entries = [], content) {
+  return (entries || [])
+    .map((entry) => {
+      const spell = byId(content.spells, entry.id);
+      return `${spell?.name || entry.id} (${entry.source || 'class choice'}${entry.source_detail ? `: ${entry.source_detail}` : ''})`;
+    })
+    .join(', ');
 }
 
 function fmtSigned(value) {

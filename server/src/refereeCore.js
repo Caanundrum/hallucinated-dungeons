@@ -262,7 +262,7 @@ function resolvePendingRoll({ message, worldState, characterSheet, rollDie }) {
         handled: true,
         logType: 'referee_no_pending_roll',
         worldState,
-        reply: 'There is no pending roll to resolve. Declare an action first, then the DM will call for dice when the rules want their dramatic little entrance.',
+        reply: 'There is no pending roll to resolve. Declare an action first, then the Game Master will call for dice when the rules want their dramatic little entrance.',
       };
     }
     return null;

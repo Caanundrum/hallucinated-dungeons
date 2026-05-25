@@ -47,6 +47,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
     characterDetails: { alignment: '', appearance: '', personality: '', backstory: '' },
     classId: '',
     backgroundId: '',
+    backgroundToolChoices: [],
     abilityMethod: 'standard_array',
     abilityScores: Object.fromEntries(ABILITIES.map((ability, index) => [ability, STANDARD_ARRAY[index]])),
     backgroundBonus: {},
@@ -59,6 +60,8 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
     equipmentChoice: 'pack',
     backgroundEquipmentChoice: 'equipment',
     classChoices: {},
+    classChoiceDetails: {},
+    classLanguages: [],
     weaponMasteries: [],
     expertiseSkills: [],
     cantripsKnown: [],
@@ -90,12 +93,15 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
       : Number(draft.abilityScores[ability] || 0) + Number(backgroundBonus[ability] || 0),
   ]));
   const abilityMods = Object.fromEntries(ABILITIES.map((ability) => [ability, finalScores[ability] === null ? null : mod(finalScores[ability])]));
-  const originSkillIds = new Set([
-    ...(draft.humanSkillId ? [draft.humanSkillId] : []),
-    ...Object.values(draft.featSkillChoices || {}).flat(),
-  ]);
   const backgroundSkills = new Set(selectedBackground?.skills || []);
   const skillMap = Object.fromEntries(content.skills.map((skill) => [skill.id, skill]));
+  const toolMap = Object.fromEntries((content.tools || []).map((tool) => [tool.id, tool]));
+  const originChoiceIds = Object.values(draft.featSkillChoices || {}).flat();
+  const originSkillIds = new Set([
+    ...(draft.humanSkillId ? [draft.humanSkillId] : []),
+    ...originChoiceIds.filter((id) => skillMap[id]),
+  ]);
+  const originToolIds = new Set(originChoiceIds.filter((id) => toolMap[id]));
   const selectedClassSkills = new Set(draft.selectedSkills);
   const allSkillIds = new Set([...speciesSkillIds, ...backgroundSkills, ...selectedClassSkills, ...originSkillIds]);
   const languageMap = Object.fromEntries((content.languages || []).map((language) => [language.id, language]));
@@ -203,11 +209,23 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
     }));
   }
 
+  function toggleBackgroundTool(toolId) {
+    const limit = selectedBackground?.tool_choice?.count || 0;
+    setDraft((current) => {
+      const selected = new Set(current.backgroundToolChoices || []);
+      if (selected.has(toolId)) selected.delete(toolId);
+      else if (selected.size < limit) selected.add(toolId);
+      return { ...current, backgroundToolChoices: [...selected] };
+    });
+  }
+
   function updateFeatSkillChoice(source, skillId) {
+    const originEntry = originFeatEntries.find((entry) => entry.source === source);
+    const limit = originEntry?.feat?.choice?.count || 3;
     setDraft((current) => {
       const selected = new Set(current.featSkillChoices[source] || []);
       if (selected.has(skillId)) selected.delete(skillId);
-      else if (selected.size < 3) selected.add(skillId);
+      else if (selected.size < limit) selected.add(skillId);
       return {
         ...current,
         featSkillChoices: { ...current.featSkillChoices, [source]: [...selected] },
@@ -244,10 +262,46 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
     setDraft((current) => ({
       ...current,
       classChoices: { ...current.classChoices, [choiceId]: value },
+      classChoiceDetails: { ...current.classChoiceDetails, [choiceId]: {} },
       cantripsKnown: [],
       spellsKnown: [],
       spellbookSpells: [],
     }));
+  }
+
+  function updateClassChoiceDetail(choiceId, detailId, value, mode = 'single', limit = 0) {
+    setDraft((current) => {
+      const currentChoiceDetails = current.classChoiceDetails?.[choiceId] || {};
+      if (mode === 'multi') {
+        const selected = new Set(currentChoiceDetails[detailId] || []);
+        if (selected.has(value)) selected.delete(value);
+        else if (!limit || selected.size < limit) selected.add(value);
+        return {
+          ...current,
+          classChoiceDetails: {
+            ...current.classChoiceDetails,
+            [choiceId]: { ...currentChoiceDetails, [detailId]: [...selected] },
+          },
+        };
+      }
+      return {
+        ...current,
+        classChoiceDetails: {
+          ...current.classChoiceDetails,
+          [choiceId]: { ...currentChoiceDetails, [detailId]: value },
+        },
+      };
+    });
+  }
+
+  function toggleClassLanguage(languageId) {
+    const limit = selectedClass?.class_language_choice_count || 0;
+    setDraft((current) => {
+      const selected = new Set(current.classLanguages || []);
+      if (selected.has(languageId)) selected.delete(languageId);
+      else if (selected.size < limit) selected.add(languageId);
+      return { ...current, classLanguages: [...selected] };
+    });
   }
 
   function toggleWeaponMastery(weaponId) {
@@ -335,7 +389,9 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
       && validLanguages(draft, content);
     if (step === 1) return validCharacterDetails(draft.characterDetails);
     if (step === 2) return Boolean(draft.classId) && validClassSetup(draft, selectedClass, content);
-    if (step === 3) return Boolean(draft.backgroundId) && validBackgroundBonus(backgroundBonus, selectedBackground);
+    if (step === 3) return Boolean(draft.backgroundId)
+      && validBackgroundBonus(backgroundBonus, selectedBackground)
+      && validBackgroundTools(draft, selectedBackground, content);
     if (step === 4) return validOriginChoices(draft, selectedSpecies, selectedBackground, originFeatEntries, content, speciesSkillIds);
     if (step === 5) return validAbilityScores(draft);
     if (step === 6) return draft.selectedSkills.length === (selectedClass?.skill_count || 0)
@@ -433,7 +489,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
 
           {step === 1 && (
             <ChoiceStep title="Character Details">
-              <p className="helper-text">Optional story details help the DM keep the character consistent. Skip anything you want to discover during play.</p>
+              <p className="helper-text">Optional story details help the Game Master keep the character consistent. Skip anything you want to discover during play.</p>
               <label className="field-label">
                 Alignment
                 <select value={draft.characterDetails.alignment} onChange={(e) => updateDetail('alignment', e.target.value)}>
@@ -467,6 +523,8 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
                   classId: id,
                   selectedSkills: [],
                   classChoices: {},
+                  classChoiceDetails: {},
+                  classLanguages: [],
                   weaponMasteries: [],
                   expertiseSkills: [],
                   cantripsKnown: [],
@@ -479,7 +537,11 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
                   selectedClass={selectedClass}
                   content={content}
                   classChoices={draft.classChoices}
+                  classChoiceDetails={draft.classChoiceDetails}
+                  classLanguages={draft.classLanguages}
                   onClassChoice={updateClassChoice}
+                  onClassChoiceDetail={updateClassChoiceDetail}
+                  onClassLanguage={toggleClassLanguage}
                   weaponMasteries={draft.weaponMasteries}
                   weaponMasteryOptions={weaponMasteryOptions}
                   onWeaponMastery={toggleWeaponMastery}
@@ -496,9 +558,10 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
                   ...current,
                   backgroundId: id,
                   backgroundBonus: {},
+                  backgroundToolChoices: [],
                   selectedSkills: [],
                   featSkillChoices: { ...current.featSkillChoices, background_feat: [] },
-                  magicInitiateChoices: { ...current.magicInitiateChoices, background_feat: { cantrips: [], spell: '' } },
+                  magicInitiateChoices: { ...current.magicInitiateChoices, background_feat: { cantrips: [], spell: '', ability: '' } },
                 }));
               }} />
               <div className="impact-box">
@@ -517,6 +580,15 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
                   ))}
                 </div>
               </div>
+              {selectedBackground?.tool_choice && (
+                <ToolChoicePanel
+                  title={`${selectedBackground.name} Tool`}
+                  choice={selectedBackground.tool_choice}
+                  content={content}
+                  selected={draft.backgroundToolChoices}
+                  onToggle={toggleBackgroundTool}
+                />
+              )}
             </ChoiceStep>
           )}
 
@@ -532,7 +604,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
                   ...current,
                   humanOriginFeatId: id,
                   featSkillChoices: { ...current.featSkillChoices, human_feat: [] },
-                  magicInitiateChoices: { ...current.magicInitiateChoices, human_feat: { cantrips: [], spell: '' } },
+                  magicInitiateChoices: { ...current.magicInitiateChoices, human_feat: { cantrips: [], spell: '', ability: '' } },
                 }))}
                 humanSkillId={draft.humanSkillId}
                 onHumanSkillChange={(id) => update('humanSkillId', id)}
@@ -728,6 +800,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
           finalScores={finalScores}
           abilityMods={abilityMods}
           allSkillIds={allSkillIds}
+          originToolIds={originToolIds}
           languageMap={languageMap}
           equipmentItems={equipmentItems}
           acPreview={acPreview}
@@ -824,14 +897,19 @@ function ClassSetup({
   selectedClass,
   content,
   classChoices,
+  classChoiceDetails,
+  classLanguages,
   onClassChoice,
+  onClassChoiceDetail,
+  onClassLanguage,
   weaponMasteries,
   weaponMasteryOptions,
   onWeaponMastery,
 }) {
   const choiceBlocks = selectedClass.class_choices || [];
   const masteryCount = selectedClass.weapon_mastery_count || 0;
-  if (choiceBlocks.length === 0 && masteryCount === 0) return null;
+  const classLanguageCount = selectedClass.class_language_choice_count || 0;
+  if (choiceBlocks.length === 0 && masteryCount === 0 && classLanguageCount === 0) return null;
 
   return (
     <div className="impact-box">
@@ -839,18 +917,55 @@ function ClassSetup({
       {choiceBlocks.map((choice) => {
         const selectedOption = (choice.options || []).find((option) => option.id === classChoices?.[choice.id]);
         return (
-          <label key={choice.id} className="field-label">
-            {choice.label}
-            <select value={classChoices?.[choice.id] || ''} onChange={(event) => onClassChoice(choice.id, event.target.value)}>
-              <option value="">Choose {choice.label}</option>
-              {(choice.options || []).map((option) => (
-                <option key={option.id} value={option.id}>{option.name}</option>
-              ))}
-            </select>
-            {selectedOption && <small>{selectedOption.description}</small>}
-          </label>
+          <div key={choice.id} className="choice-subsection">
+            <label className="field-label">
+              {choice.label}
+              <select value={classChoices?.[choice.id] || ''} onChange={(event) => onClassChoice(choice.id, event.target.value)}>
+                <option value="">Choose {choice.label}</option>
+                {(choice.options || []).map((option) => (
+                  <option key={option.id} value={option.id}>{option.name}</option>
+                ))}
+              </select>
+              {selectedOption && <small>{selectedOption.description}</small>}
+            </label>
+            {selectedOption && (
+              <ClassSubchoices
+                choice={choice}
+                option={selectedOption}
+                content={content}
+                values={classChoiceDetails?.[choice.id] || {}}
+                onDetail={onClassChoiceDetail}
+              />
+            )}
+          </div>
         );
       })}
+
+      {classLanguageCount > 0 && (
+        <div className="spell-picker">
+          <h3>{selectedClass.class_language_choice_source || 'Class Language'} ({(classLanguages || []).length}/{classLanguageCount})</h3>
+          <p className="helper-text">Choose the extra language granted by this class feature.</p>
+          <div className="option-list">
+            {(content.languages || [])
+              .filter((language) => !(selectedClass.class_languages || []).includes(language.id))
+              .map((language) => {
+                const checked = (classLanguages || []).includes(language.id);
+                return (
+                  <label key={language.id} className={`check-card ${checked ? 'selected' : ''}`}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={!checked && (classLanguages || []).length >= classLanguageCount}
+                      onChange={() => onClassLanguage(language.id)}
+                    />
+                    <span><strong>{language.name}</strong></span>
+                    <small>{language.description}</small>
+                  </label>
+                );
+              })}
+          </div>
+        </div>
+      )}
 
       {masteryCount > 0 && (
         <div className="spell-picker">
@@ -872,6 +987,85 @@ function ClassSetup({
       )}
     </div>
   );
+}
+
+function ClassSubchoices({ choice, option, content, values, onDetail }) {
+  const subchoices = option.subchoices || [];
+  if (subchoices.length === 0) return null;
+  return (
+    <div className="subchoice-panel">
+      {subchoices.map((subchoice) => (
+        <ClassSubchoiceControl
+          key={subchoice.id}
+          choice={choice}
+          subchoice={subchoice}
+          content={content}
+          value={values[subchoice.id]}
+          onDetail={onDetail}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ClassSubchoiceControl({ choice, subchoice, content, value, onDetail }) {
+  if (subchoice.type === 'weapon') {
+    const weapons = getClassSubchoiceWeaponOptions(subchoice, content);
+    return (
+      <label className="field-label">
+        {subchoice.label}
+        <select value={value || ''} onChange={(event) => onDetail(choice.id, subchoice.id, event.target.value)}>
+          <option value="">Choose {subchoice.label}</option>
+          {weapons.map((weapon) => (
+            <option key={weapon.id} value={weapon.id}>{weapon.name}</option>
+          ))}
+        </select>
+      </label>
+    );
+  }
+
+  if (subchoice.type === 'option') {
+    return (
+      <label className="field-label">
+        {subchoice.label}
+        <select value={value || ''} onChange={(event) => onDetail(choice.id, subchoice.id, event.target.value)}>
+          <option value="">Choose {subchoice.label}</option>
+          {(subchoice.options || []).map((option) => (
+            <option key={option.id} value={option.id}>{option.name}</option>
+          ))}
+        </select>
+      </label>
+    );
+  }
+
+  if (subchoice.type === 'spell') {
+    const selected = Array.isArray(value) ? value : [];
+    const spellOptions = getClassSubchoiceSpellOptions(subchoice, content);
+    return (
+      <div className="spell-picker">
+        <h3>{subchoice.label} ({selected.length}/{subchoice.count})</h3>
+        <div className="option-list">
+          {spellOptions.map((spell) => {
+            const checked = selected.includes(spell.id);
+            return (
+              <label key={spell.id} className={`check-card ${checked ? 'selected' : ''}`}>
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  disabled={!checked && selected.length >= subchoice.count}
+                  onChange={() => onDetail(choice.id, subchoice.id, spell.id, 'multi', subchoice.count)}
+                />
+                <span><strong>{spell.name}</strong> ({spell.casting_time}, {spell.range})</span>
+                <small>{spell.description}</small>
+              </label>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  return null;
 }
 
 function ScoreGrid({ scores, finalScores, backgroundBonus, onChange, method, rolledStats, rolledAssignment, onAssignRoll }) {
@@ -984,7 +1178,7 @@ function OriginStep({
           key={entry.source}
           entry={entry}
           content={content}
-          selectedSkills={featSkillChoices[entry.source] || []}
+          selectedChoices={featSkillChoices[entry.source] || []}
           unavailableSkillIds={new Set([
             ...backgroundGrantedSkills,
             ...(humanSkillId ? [humanSkillId] : []),
@@ -992,8 +1186,8 @@ function OriginStep({
               .filter(([source]) => source !== entry.source)
               .flatMap(([, skills]) => skills || []),
           ])}
-          onSkillChoice={(skillId) => onFeatSkillChoice(entry.source, skillId)}
-          magicChoice={magicInitiateChoices[entry.source] || { cantrips: [], spell: '' }}
+          onChoice={(choiceId) => onFeatSkillChoice(entry.source, choiceId)}
+          magicChoice={magicInitiateChoices[entry.source] || { cantrips: [], spell: '', ability: '' }}
           onMagicChange={(field, value) => onMagicInitiateChange(entry.source, field, value)}
         />
       ))}
@@ -1001,32 +1195,34 @@ function OriginStep({
   );
 }
 
-function FeatChoicePanel({ entry, content, selectedSkills, unavailableSkillIds, onSkillChoice, magicChoice, onMagicChange }) {
+function FeatChoicePanel({ entry, content, selectedChoices, unavailableSkillIds, onChoice, magicChoice, onMagicChange }) {
   const feat = entry.feat;
   const magicList = feat.magic_list;
   const cantrips = magicList ? content.spells.filter((spell) => spell.level === 0 && spell.classes.includes(magicList)) : [];
   const spells = magicList ? content.spells.filter((spell) => spell.level === 1 && spell.classes.includes(magicList)) : [];
+  const choiceOptions = getFeatChoiceOptions(feat.choice, content);
+  const abilityOptions = feat.spellcasting_ability_choices || ['int', 'wis', 'cha'];
   return (
     <div className="impact-box">
       <h3>{entry.label}: {feat.name}</h3>
       <p>{feat.description}</p>
-      {feat.choice?.type === 'skills' && (
+      {feat.choice && (
         <>
-          <p className="helper-text">Choose {feat.choice.count} skills. Selected: {selectedSkills.length}.</p>
+          <p className="helper-text">Choose {feat.choice.count} {formatFeatChoiceKind(feat.choice)}. Selected: {selectedChoices.length}.</p>
           <div className="option-list">
-            {content.skills.map((skill) => {
-              const selected = selectedSkills.includes(skill.id);
-              const unavailable = unavailableSkillIds.has(skill.id) && !selected;
+            {choiceOptions.map((option) => {
+              const selected = selectedChoices.includes(option.id);
+              const unavailable = option.kind === 'skill' && unavailableSkillIds.has(option.id) && !selected;
               return (
-              <label key={skill.id} className={`check-card ${selected ? 'selected' : ''} ${unavailable ? 'locked' : ''}`}>
+              <label key={option.id} className={`check-card ${selected ? 'selected' : ''} ${unavailable ? 'locked' : ''}`}>
                 <input
                   type="checkbox"
                   checked={selected}
-                  disabled={unavailable || (!selected && selectedSkills.length >= feat.choice.count)}
-                  onChange={() => onSkillChoice(skill.id)}
+                  disabled={unavailable || (!selected && selectedChoices.length >= feat.choice.count)}
+                  onChange={() => onChoice(option.id)}
                 />
-                <span><strong>{skill.name}</strong> ({skill.ability.toUpperCase()})</span>
-                <small>{unavailable ? 'Already granted by another origin choice.' : skill.description}</small>
+                <span><strong>{option.name}</strong>{option.meta ? ` (${option.meta})` : ''}</span>
+                <small>{unavailable ? 'Already granted by another origin choice.' : option.description}</small>
               </label>
               );
             })}
@@ -1035,7 +1231,7 @@ function FeatChoicePanel({ entry, content, selectedSkills, unavailableSkillIds, 
       )}
       {magicList && (
         <>
-          <p className="helper-text">Choose 2 {magicList} cantrips and 1 level 1 {magicList} spell.</p>
+          <p className="helper-text">Choose 2 {magicList} cantrips, 1 level 1 {magicList} spell, and the ability those spells use.</p>
           <SpellPicker title="Magic Initiate Cantrips" spells={cantrips} selected={magicChoice.cantrips || []} limit={2} onToggle={(id) => onMagicChange('cantrips', id)} />
           <label className="field-label">
             Level 1 spell
@@ -1046,11 +1242,47 @@ function FeatChoicePanel({ entry, content, selectedSkills, unavailableSkillIds, 
               ))}
             </select>
           </label>
+          <label className="field-label">
+            Spellcasting ability
+            <select value={magicChoice.ability || ''} onChange={(event) => onMagicChange('ability', event.target.value)}>
+              <option value="">Choose ability</option>
+              {abilityOptions.map((ability) => (
+                <option key={ability} value={ability}>{ABILITY_LABELS[ability]}</option>
+              ))}
+            </select>
+          </label>
         </>
       )}
       {!feat.choice && !magicList && (
         <p className="helper-text">No additional setup is needed for this feat right now. The sheet records it and applies any static math.</p>
       )}
+    </div>
+  );
+}
+
+function ToolChoicePanel({ title, choice, content, selected, onToggle }) {
+  const options = getFeatChoiceOptions(choice, content).filter((option) => option.kind === 'tool');
+  return (
+    <div className="impact-box">
+      <h3>{title} ({selected.length}/{choice.count})</h3>
+      <p className="helper-text">Choose the specific tool proficiency for this background.</p>
+      <div className="option-list">
+        {options.map((tool) => {
+          const checked = selected.includes(tool.id);
+          return (
+            <label key={tool.id} className={`check-card ${checked ? 'selected' : ''}`}>
+              <input
+                type="checkbox"
+                checked={checked}
+                disabled={!checked && selected.length >= choice.count}
+                onChange={() => onToggle(tool.id)}
+              />
+              <span><strong>{tool.name}</strong></span>
+              <small>{tool.description}</small>
+            </label>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -1078,8 +1310,36 @@ function InfoRow({ title, body, meta }) {
   );
 }
 
+function getFeatChoiceOptions(choice, content) {
+  if (!choice) return [];
+  const skills = (content.skills || []).map((skill) => ({
+    ...skill,
+    kind: 'skill',
+    meta: skill.ability?.toUpperCase(),
+  }));
+  const tools = (content.tools || [])
+    .filter((tool) => !choice.category || tool.category === choice.category)
+    .map((tool) => ({
+      ...tool,
+      kind: 'tool',
+      meta: tool.category?.replaceAll('_', ' '),
+    }));
+  if (choice.type === 'skills') return skills;
+  if (choice.type === 'tools') return tools;
+  if (choice.type === 'skill_or_tool') return [...skills, ...tools];
+  return [];
+}
+
+function formatFeatChoiceKind(choice = {}) {
+  if (choice.type === 'skills') return 'skills';
+  if (choice.type === 'tools') return 'tools';
+  if (choice.type === 'skill_or_tool') return 'skills or tools';
+  return 'choices';
+}
+
 function ReviewPanel({ draft, content, finalScores, abilityMods, backgroundBonus, acPreview, hpPreview, guidanceNotes, selectedClass, selectedSpecies, selectedBackground, originFeatEntries, equipmentItems, allSkillIds }) {
   const skillMap = Object.fromEntries(content.skills.map((skill) => [skill.id, skill]));
+  const toolMap = Object.fromEntries((content.tools || []).map((tool) => [tool.id, tool]));
   const languageMap = Object.fromEntries((content.languages || []).map((language) => [language.id, language]));
   const originFeatBody = originFeatEntries
     .map((entry) => formatOriginFeatSummary(entry, draft, content))
@@ -1089,8 +1349,10 @@ function ReviewPanel({ draft, content, finalScores, abilityMods, backgroundBonus
     ...draft.spellbookSpells.map((id) => `Spellbook: ${spellName(content, id)}`),
     ...draft.spellsKnown.map((id) => `Level 1: ${spellName(content, id)}`),
     ...(selectedClass?.spellcasting?.always_prepared_spells || []).map((id) => `Always Prepared: ${spellName(content, id)}`),
+    ...formatClassChoiceSpellItems(selectedClass, draft, content),
   ].join(', ');
   const classChoiceBody = formatClassChoices(selectedClass, draft, content, skillMap);
+  const knownLanguages = [...new Set(['common', ...(draft.languages || []), ...(selectedClass?.class_languages || []), ...(draft.classLanguages || [])])];
   return (
     <div className="review-grid">
       <InfoRow title={draft.name} meta={`${selectedSpecies?.name} ${selectedClass?.name}`} body={selectedBackground?.name} />
@@ -1103,7 +1365,8 @@ function ReviewPanel({ draft, content, finalScores, abilityMods, backgroundBonus
       ))}
       <InfoRow title="Ability Scores" meta="Final" body={ABILITIES.map((ability) => `${ability.toUpperCase()} ${finalScores[ability]} (${fmtMod(abilityMods[ability])}; base ${draft.abilityScores[ability]} + ${backgroundBonus[ability] || 0})`).join('; ')} />
       <InfoRow title="Skills" meta={`${allSkillIds.size} proficient`} body={[...allSkillIds].map((id) => skillMap[id]?.name).filter(Boolean).join(', ')} />
-      <InfoRow title="Languages" meta={`${(draft.languages || []).length + 1} known`} body={['common', ...(draft.languages || [])].map((id) => languageMap[id]?.name).filter(Boolean).join(', ')} />
+      <InfoRow title="Tools" meta="Proficient" body={[selectedBackground?.tool_choice ? null : selectedBackground?.tool, ...(draft.backgroundToolChoices || []), ...Object.values(draft.featSkillChoices || {}).flat().filter((id) => toolMap[id])].filter(Boolean).map((id) => toolMap[id]?.name || id).join(', ')} />
+      <InfoRow title="Languages" meta={`${knownLanguages.length} known`} body={knownLanguages.map((id) => languageMap[id]?.name).filter(Boolean).join(', ')} />
       <InfoRow title="Details" meta={draft.characterDetails?.alignment || 'Unaligned'} body={[draft.characterDetails?.appearance, draft.characterDetails?.personality, draft.characterDetails?.backstory].filter(Boolean).join(' ')} />
       <InfoRow title="Equipment" meta={`${draft.equipmentChoice} / ${draft.backgroundEquipmentChoice}`} body={[
         draft.equipmentChoice === 'pack' ? equipmentItems.map((item) => item.name).join(', ') : 'Class starting gold',
@@ -1128,6 +1391,7 @@ function CharacterSummary({
   finalScores,
   abilityMods,
   allSkillIds,
+  originToolIds,
   equipmentItems,
   acPreview,
   hpPreview,
@@ -1166,6 +1430,8 @@ function CharacterSummary({
             `Primary: ${selectedClass.primary_ability?.toUpperCase()}`,
             `Saves: ${(selectedClass.saving_throws || []).map((save) => save.toUpperCase()).join(', ')}`,
             selectedClass.spellcasting ? `Spellcasting: ${selectedClass.spellcasting.ability.toUpperCase()}` : 'No level 1 spellcasting',
+            ...(selectedClass.class_languages || []).map((id) => `Class language: ${languageMap[id]?.name || id}`),
+            selectedClass.class_language_choice_count ? `Class language choice: ${(draft.classLanguages || []).map((id) => languageMap[id]?.name || id).join(', ') || 'Choose one'}` : null,
             ...(selectedClass.class_features || []).map((feature) => `${feature.name}: ${feature.description}`),
             ...formatClassChoiceItems(selectedClass, draft, content, skillMap),
           ]}
@@ -1179,7 +1445,7 @@ function CharacterSummary({
             `Skills: ${(selectedBackground.skills || []).map((id) => skillMap[id]?.name).join(', ')}`,
             `Ability bonus: ${(selectedBackground.asi_options || []).map((id) => `${id.toUpperCase()} +${backgroundBonus[id] || 0}`).join(', ')}`,
             `Origin feat: ${originFeatEntries.find((entry) => entry.source === 'background_feat')?.feat.name || 'None'}`,
-            `Tool: ${selectedBackground.tool}`,
+            `Tool: ${selectedBackground.tool_choice ? (draft.backgroundToolChoices || []).map((id) => content.tools?.find((tool) => tool.id === id)?.name || id).join(', ') || `Choose ${selectedBackground.tool}` : selectedBackground.tool}`,
           ]}
         />
       )}
@@ -1191,6 +1457,12 @@ function CharacterSummary({
             draft.humanSkillId ? `Human Skillful: ${skillMap[draft.humanSkillId]?.name || draft.humanSkillId}` : null,
             ...originFeatEntries.flatMap((entry) => formatOriginFeatChoiceItems(entry, draft, content)),
           ]}
+        />
+      )}
+      {originToolIds.size > 0 && (
+        <DetailBlock
+          title="Origin Tools"
+          body={[...originToolIds].map((id) => content.tools?.find((tool) => tool.id === id)?.name || id).join(', ')}
         />
       )}
       {showAbilities && (
@@ -1262,7 +1534,15 @@ function formatClassChoiceItems(selectedClass, draft, content, skillMap = {}) {
   const items = [];
   for (const choice of selectedClass.class_choices || []) {
     const option = (choice.options || []).find((item) => item.id === draft.classChoices?.[choice.id]);
-    if (option) items.push(`${choice.label}: ${option.name}. ${option.description}`);
+    if (option) {
+      const details = formatClassChoiceDetails(choice, option, draft.classChoiceDetails?.[choice.id], content);
+      items.push(`${choice.label}: ${option.name}. ${option.description}${details ? ` ${details}` : ''}`);
+    }
+  }
+  if ((selectedClass.class_languages || []).length > 0 || (draft.classLanguages || []).length > 0) {
+    const languageMap = Object.fromEntries((content.languages || []).map((language) => [language.id, language]));
+    const languages = [...new Set([...(selectedClass.class_languages || []), ...(draft.classLanguages || [])])];
+    if (languages.length) items.push(`Class Languages: ${languages.map((id) => languageMap[id]?.name || id).join(', ')}`);
   }
   if ((draft.weaponMasteries || []).length > 0) {
     const weaponMap = Object.fromEntries((content.equipment || []).map((item) => [item.id, item]));
@@ -1273,6 +1553,44 @@ function formatClassChoiceItems(selectedClass, draft, content, skillMap = {}) {
   }
   if ((draft.expertiseSkills || []).length > 0) {
     items.push(`Expertise: ${(draft.expertiseSkills || []).map((id) => skillMap[id]?.name || id).join(', ')}`);
+  }
+  return items;
+}
+
+function formatClassChoiceDetails(choice, option, details = {}, content = {}) {
+  const parts = [];
+  for (const subchoice of option.subchoices || []) {
+    const value = details?.[subchoice.id];
+    if (!value || (Array.isArray(value) && value.length === 0)) continue;
+    if (subchoice.type === 'weapon') {
+      const weapon = (content.equipment || []).find((item) => item.id === value);
+      parts.push(`${subchoice.label}: ${weapon?.name || value}`);
+    }
+    if (subchoice.type === 'option') {
+      const optionValue = (subchoice.options || []).find((item) => item.id === value);
+      parts.push(`${subchoice.label}: ${optionValue?.name || value}`);
+    }
+    if (subchoice.type === 'spell') {
+      parts.push(`${subchoice.label}: ${value.map((id) => spellName(content, id)).join(', ')}`);
+    }
+  }
+  return parts.length ? `Selections: ${parts.join('; ')}.` : '';
+}
+
+function formatClassChoiceSpellItems(selectedClass, draft, content) {
+  if (!selectedClass) return [];
+  const items = [];
+  for (const choice of selectedClass.class_choices || []) {
+    const option = (choice.options || []).find((item) => item.id === draft.classChoices?.[choice.id]);
+    if (!option) continue;
+    const details = draft.classChoiceDetails?.[choice.id] || {};
+    items.push(...(option.at_will_spells || []).map((id) => `${option.name}: ${spellName(content, id)} at will`));
+    items.push(...(option.ritual_spells || []).map((id) => `${option.name}: ${spellName(content, id)} ritual`));
+    for (const subchoice of option.subchoices || []) {
+      if (subchoice.type !== 'spell') continue;
+      const selected = Array.isArray(details[subchoice.id]) ? details[subchoice.id] : [];
+      items.push(...selected.map((id) => `${subchoice.label}: ${spellName(content, id)}`));
+    }
   }
   return items;
 }
@@ -1291,12 +1609,16 @@ function formatMasteryName(mastery) {
 
 function formatOriginFeatChoiceItems(entry, draft, content = { spells: [] }) {
   const choice = draft.magicInitiateChoices?.[entry.source];
-  if (!choice) return [];
+  const featChoices = draft.featSkillChoices?.[entry.source] || [];
+  const skillMap = Object.fromEntries((content.skills || []).map((skill) => [skill.id, skill]));
+  const toolMap = Object.fromEntries((content.tools || []).map((tool) => [tool.id, tool]));
   const cantrips = (choice.cantrips || []).map((id) => spellName(content, id));
   const spell = choice.spell ? spellName(content, choice.spell) : null;
   return [
+    featChoices.length ? `${entry.feat.name} choices: ${featChoices.map((id) => skillMap[id]?.name || toolMap[id]?.name || id).join(', ')}` : null,
     cantrips.length ? `${entry.feat.name} cantrips: ${cantrips.join(', ')}` : null,
     spell ? `${entry.feat.name} level 1 spell: ${spell}` : null,
+    choice?.ability ? `${entry.feat.name} ability: ${ABILITY_LABELS[choice.ability] || choice.ability.toUpperCase()}` : null,
   ].filter(Boolean);
 }
 
@@ -1308,6 +1630,13 @@ function formatOriginFeatSummary(entry, draft, content = { spells: [] }) {
 function validBackgroundBonus(bonus, background) {
   const values = (background?.asi_options || []).map((ability) => Number(bonus[ability] || 0)).sort((a, b) => b - a);
   return JSON.stringify(values) === JSON.stringify([2, 1, 0]) || JSON.stringify(values) === JSON.stringify([1, 1, 1]);
+}
+
+function validBackgroundTools(draft, background, content) {
+  if (!background?.tool_choice) return true;
+  const selected = draft.backgroundToolChoices || [];
+  const options = new Set(getFeatChoiceOptions(background.tool_choice, content).map((tool) => tool.id));
+  return new Set(selected).size === background.tool_choice.count && selected.every((toolId) => options.has(toolId));
 }
 
 function validSpeciesChoices(draft, species, content) {
@@ -1349,7 +1678,16 @@ function validClassSetup(draft, selectedClass, content) {
   for (const choice of selectedClass.class_choices || []) {
     const value = draft.classChoices?.[choice.id] || '';
     if (choice.required && !value) return false;
-    if (value && !(choice.options || []).some((option) => option.id === value)) return false;
+    const option = (choice.options || []).find((item) => item.id === value);
+    if (value && !option) return false;
+    if (option && !validClassChoiceDetails(draft.classChoiceDetails?.[choice.id], option, content)) return false;
+  }
+  const languageCount = selectedClass.class_language_choice_count || 0;
+  if (languageCount > 0) {
+    const languageIds = new Set((content.languages || []).map((language) => language.id));
+    const selected = draft.classLanguages || [];
+    if (new Set(selected).size !== languageCount) return false;
+    if (selected.some((languageId) => !languageIds.has(languageId) || (selectedClass.class_languages || []).includes(languageId))) return false;
   }
   const masteryCount = selectedClass.weapon_mastery_count || 0;
   if (masteryCount > 0) {
@@ -1367,6 +1705,30 @@ function validClassSetup(draft, selectedClass, content) {
   return true;
 }
 
+function validClassChoiceDetails(details, option, content) {
+  const values = details || {};
+  for (const subchoice of option.subchoices || []) {
+    if (subchoice.type === 'weapon') {
+      const value = values[subchoice.id] || '';
+      if (subchoice.required && !value) return false;
+      if (value && !getClassSubchoiceWeaponOptions(subchoice, content).some((weapon) => weapon.id === value)) return false;
+    }
+    if (subchoice.type === 'option') {
+      const value = values[subchoice.id] || '';
+      if (subchoice.required && !value) return false;
+      if (value && !(subchoice.options || []).some((item) => item.id === value)) return false;
+    }
+    if (subchoice.type === 'spell') {
+      const selected = Array.isArray(values[subchoice.id]) ? values[subchoice.id] : [];
+      const count = subchoice.count || 0;
+      const options = new Set(getClassSubchoiceSpellOptions(subchoice, content).map((spell) => spell.id));
+      if (subchoice.required && new Set(selected).size !== count) return false;
+      if (selected.some((spellId) => !options.has(spellId))) return false;
+    }
+  }
+  return true;
+}
+
 function getWeaponMasteryOptions(selectedClass, content, extraWeaponProficiencies = []) {
   if (!selectedClass) return [];
   const proficiencies = new Set([...(selectedClass.weapons || []), ...extraWeaponProficiencies]);
@@ -1379,7 +1741,26 @@ function isWeaponProficient(weapon, proficiencies) {
   if (proficiencies.has(weapon.id)) return true;
   if (weapon.weapon_category && proficiencies.has(weapon.weapon_category)) return true;
   if (proficiencies.has('finesse') && (weapon.properties || []).includes('finesse')) return true;
+  if (proficiencies.has('light_martial') && weapon.weapon_category === 'martial' && (weapon.properties || []).includes('light')) return true;
   return false;
+}
+
+function getClassSubchoiceWeaponOptions(subchoice, content) {
+  return (content.equipment || [])
+    .filter((item) => item.type === 'weapon')
+    .filter((weapon) => {
+      if (subchoice.weapon_filter === 'simple_or_martial_melee') {
+        return ['simple', 'martial'].includes(weapon.weapon_category) && !(weapon.properties || []).includes('ammunition');
+      }
+      return true;
+    });
+}
+
+function getClassSubchoiceSpellOptions(subchoice, content) {
+  return (content.spells || [])
+    .filter((spell) => Number(spell.level || 0) === Number(subchoice.level || 0))
+    .filter((spell) => !subchoice.ritual || Boolean(spell.ritual))
+    .filter((spell) => !subchoice.source || subchoice.source === 'any' || (spell.classes || []).includes(subchoice.source));
 }
 
 function validExpertiseChoices(draft, selectedClass, allSkillIds) {
@@ -1439,6 +1820,7 @@ function getSpeciesEffects(species, choices = {}) {
 function validOriginChoices(draft, selectedSpecies, selectedBackground, originFeatEntries, content, speciesSkillIds = new Set()) {
   const isHuman = selectedSpecies?.id === 'human';
   const allSkillIds = new Set(content.skills.map((skill) => skill.id));
+  const allToolIds = new Set((content.tools || []).map((tool) => tool.id));
   const originFeats = (content.feats || []).filter((feat) => feat.category === 'origin');
   const grantedSkillIds = new Set([...(selectedBackground?.skills || []), ...speciesSkillIds]);
   if (isHuman) {
@@ -1453,21 +1835,32 @@ function validOriginChoices(draft, selectedSpecies, selectedBackground, originFe
 
   for (const entry of originFeatEntries) {
     const feat = entry.feat;
-    if (feat.choice?.type === 'skills') {
+    if (feat.choice) {
       const selected = draft.featSkillChoices?.[entry.source] || [];
       if (new Set(selected).size !== feat.choice.count) return false;
-      if (selected.some((skillId) => !allSkillIds.has(skillId))) return false;
-      if (selected.some((skillId) => grantedSkillIds.has(skillId))) return false;
-      selected.forEach((skillId) => grantedSkillIds.add(skillId));
+      const toolOptions = new Set(getFeatChoiceOptions(feat.choice, content).filter((option) => option.kind === 'tool').map((option) => option.id));
+      for (const choiceId of selected) {
+        const isSkill = allSkillIds.has(choiceId);
+        const isTool = allToolIds.has(choiceId);
+        if (feat.choice.type === 'skills' && !isSkill) return false;
+        if (feat.choice.type === 'tools' && (!isTool || !toolOptions.has(choiceId))) return false;
+        if (feat.choice.type === 'skill_or_tool' && !isSkill && !isTool) return false;
+        if (isSkill) {
+          if (grantedSkillIds.has(choiceId)) return false;
+          grantedSkillIds.add(choiceId);
+        }
+      }
     }
     if (feat.magic_list) {
       const choice = draft.magicInitiateChoices?.[entry.source] || {};
       const cantrips = choice.cantrips || [];
       const cantripOptions = content.spells.filter((spell) => spell.level === 0 && spell.classes.includes(feat.magic_list));
       const spellOptions = content.spells.filter((spell) => spell.level === 1 && spell.classes.includes(feat.magic_list));
+      const abilityOptions = feat.spellcasting_ability_choices || ['int', 'wis', 'cha'];
       if (new Set(cantrips).size !== 2) return false;
       if (cantrips.some((id) => !cantripOptions.some((spell) => spell.id === id))) return false;
       if (!spellOptions.some((spell) => spell.id === choice.spell)) return false;
+      if (!abilityOptions.includes(choice.ability)) return false;
     }
   }
   return true;

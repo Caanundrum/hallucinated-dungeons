@@ -63,6 +63,13 @@ html, body, #root {
   letter-spacing: 0;
 }
 
+.legal-disclosure {
+  font-family: var(--font-ui);
+  font-size: 0.66rem;
+  color: var(--text-soft);
+  letter-spacing: 0;
+}
+
 .connection-status {
   font-family: var(--font-ui);
   font-size: 0.8rem;
@@ -801,6 +808,8 @@ textarea:disabled { opacity: 0.4; cursor: not-allowed; }
 }
 
 .field-label input,
+.field-label select,
+.field-label textarea,
 .score-card input,
 .score-card select,
 .asi-row select {
@@ -810,6 +819,25 @@ textarea:disabled { opacity: 0.4; cursor: not-allowed; }
   color: var(--text);
   font-family: var(--font-ui);
   padding: 0.55rem 0.7rem;
+}
+
+.field-label textarea {
+  min-height: 5rem;
+  resize: vertical;
+  text-transform: none;
+}
+
+.choice-subsection,
+.subchoice-panel {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.subchoice-panel {
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #12121b;
 }
 
 .card-grid {

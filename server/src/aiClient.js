@@ -19,7 +19,7 @@ const BLOCKED_MODERATION_CATEGORIES = new Set([
 ]);
 
 const PUBLIC_SAFETY_MESSAGE = [
-  'The Dungeon Master lowers the screen and stares at you over it.',
+  'The Game Master lowers the screen and stares at you over it.',
   'That idea has been denied entry to the campaign, the tavern, and polite society. Try something else.',
 ].join(' ');
 

@@ -658,6 +658,10 @@ function getKnownSpellInfo(characterSheet = {}, spell = {}) {
   const cantrips = new Set(characterSheet.spellcasting?.cantrips_known || []);
   const alwaysPrepared = new Set(characterSheet.spellcasting?.always_prepared_spells || []);
   const classSpells = new Set(characterSheet.spellcasting?.spells_prepared || []);
+  const classChoiceSpell = [
+    ...(characterSheet.class_choice_spells || []),
+    ...(characterSheet.spellcasting?.class_choice_spells || []),
+  ].find((entry) => entry.id === spell.id);
   const speciesSpell = (characterSheet.species_spells || []).find((entry) => (entry.id || entry) === spell.id);
   const originEntry = Object.entries(characterSheet.origin?.magic_initiate || {})
     .find(([, choice]) => (choice.cantrips || []).includes(spell.id) || choice.spell === spell.id);
@@ -674,6 +678,14 @@ function getKnownSpellInfo(characterSheet = {}, spell = {}) {
     };
   }
   if (classSpells.has(spell.id)) return { known: true, type: 'class_spell', label: 'prepared class spell' };
+  if (classChoiceSpell) {
+    return {
+      known: true,
+      type: 'class_choice_spell',
+      choiceType: classChoiceSpell.type,
+      label: `${classChoiceSpell.source || 'class choice'} spell`,
+    };
+  }
   if (speciesSpell) return { known: true, type: 'species_spell', label: `${speciesSpell.source || 'species'} spell` };
   if (originEntry) {
     const [source, choice] = originEntry;
@@ -692,6 +704,8 @@ function getKnownSpellIds(characterSheet = {}) {
   const ids = new Set([
     ...(characterSheet.spellcasting?.cantrips_known || []),
     ...(characterSheet.spellcasting?.spells_prepared || []),
+    ...(characterSheet.class_choice_spells || []).map((spell) => spell.id || spell),
+    ...(characterSheet.spellcasting?.class_choice_spells || []).map((spell) => spell.id || spell),
     ...(characterSheet.species_spells || []).map((spell) => spell.id || spell),
   ]);
   for (const choice of Object.values(characterSheet.origin?.magic_initiate || {})) {
@@ -709,6 +723,9 @@ function summarizeKnownSpells(characterSheet, content) {
 function spendSpellResource(characterSheet = {}, spell = {}, known = {}) {
   if (Number(spell.level || 0) <= 0) {
     return { ok: true, characterSheet, note: 'cantrip/no slot' };
+  }
+  if (known.type === 'class_choice_spell' && ['ritual', 'at_will'].includes(known.choiceType)) {
+    return { ok: true, characterSheet, note: `${known.choiceType} class choice spell/no slot` };
   }
 
   let limitedFailure = null;

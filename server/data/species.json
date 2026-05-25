@@ -1,7 +1,7 @@
 [
   {
-    "id": "aasimar",
-    "name": "Aasimar",
+    "id": "celestial_touched",
+    "name": "Celestial-Touched",
     "speed": 30,
     "darkvision": 60,
     "description": "Mortals carrying a spark of the Upper Planes: light, healing, resistance, and a revelation that blooms later.",
@@ -218,7 +218,7 @@
     "traits": [
       { "name": "Darkvision", "description": "See in dim light and darkness out to 60 feet." },
       { "name": "Fiendish Legacy", "description": "Choose Abyssal, Chthonic, or Infernal for your resistance and level 1 cantrip." },
-      { "name": "Otherworldly Presence", "description": "Know Thaumaturgy using the same spellcasting ability as your legacy." }
+      { "name": "Otherworldly Presence", "description": "Know Thaumaturgy using the same spellcasting ability as your legacy.", "spells": ["thaumaturgy"] }
     ],
     "choices": [
       {
@@ -239,7 +239,6 @@
         "required": true,
         "options": ["int", "wis", "cha"]
       }
-    ],
-    "spells": ["thaumaturgy"]
+    ]
   }
 ]

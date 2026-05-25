@@ -35,7 +35,10 @@ function baseDraft(overrides = {}) {
     selectedSkills: ['athletics', 'intimidation'],
     equipmentChoice: 'pack',
     backgroundEquipmentChoice: 'equipment',
+    backgroundToolChoices: [],
     classChoices: { fighting_style: 'defense' },
+    classChoiceDetails: {},
+    classLanguages: [],
     weaponMasteries: ['longsword', 'dagger', 'longbow'],
     expertiseSkills: [],
     humanSkillId: 'perception',
@@ -53,12 +56,19 @@ function originChoicesFor(background) {
   const content = getContentBundle();
   const feat = content.feats.find((item) => item.id === background.origin_feat);
   if (!feat) return {};
-  if (feat.choice?.type === 'skills') {
+  if (feat.choice) {
     const skills = content.skills
       .map((skill) => skill.id)
-      .filter((skillId) => !(background.skills || []).includes(skillId))
-      .slice(0, feat.choice.count);
-    return { featSkillChoices: { background_feat: skills } };
+      .filter((skillId) => !(background.skills || []).includes(skillId));
+    const tools = content.tools
+      .filter((tool) => !feat.choice.category || tool.category === feat.choice.category)
+      .map((tool) => tool.id);
+    const pool = feat.choice.type === 'tools'
+      ? tools
+      : feat.choice.type === 'skill_or_tool'
+        ? [...skills, ...tools]
+        : skills;
+    return { featSkillChoices: { background_feat: pool.slice(0, feat.choice.count) } };
   }
   if (feat.magic_list) {
     const cantrips = content.spells
@@ -66,7 +76,7 @@ function originChoicesFor(background) {
       .map((spell) => spell.id)
       .slice(0, 2);
     const spell = content.spells.find((item) => item.level === 1 && item.classes.includes(feat.magic_list))?.id;
-    return { magicInitiateChoices: { background_feat: { cantrips, spell } } };
+    return { magicInitiateChoices: { background_feat: { cantrips, spell, ability: 'wis' } } };
   }
   return {};
 }
@@ -79,6 +89,14 @@ function speciesChoicesFor(species) {
     if (choice.type === 'option') values[choice.id] = choice.options[0].id;
   }
   return values;
+}
+
+function backgroundToolChoicesFor(background, content) {
+  if (!background.tool_choice) return [];
+  return content.tools
+    .filter((tool) => !background.tool_choice.category || tool.category === background.tool_choice.category)
+    .map((tool) => tool.id)
+    .slice(0, background.tool_choice.count);
 }
 
 function fighterSkillsExcluding(excluded) {
@@ -150,6 +168,7 @@ function classDraftFor(classId, overrides = {}) {
     speciesId: 'dwarf',
     speciesChoices: {},
     backgroundId: 'soldier',
+    backgroundToolChoices: backgroundToolChoicesFor(background, content),
     classId,
     abilityScores: {
       str: 15,
@@ -164,6 +183,8 @@ function classDraftFor(classId, overrides = {}) {
     humanSkillId: '',
     humanOriginFeatId: '',
     classChoices,
+    classChoiceDetails: {},
+    classLanguages: classId === 'rogue' ? ['goblin'] : [],
     weaponMasteries: weaponMasteriesByClass[classId] || [],
     expertiseSkills: classId === 'rogue' ? selectedSkills.slice(0, 2) : [],
     featSkillChoices: {},
@@ -235,7 +256,7 @@ test('requires Magic Initiate choices granted by a background Origin feat', () =
     humanSkillId: '',
     humanOriginFeatId: '',
     magicInitiateChoices: {
-      background_feat: { cantrips: ['light', 'guidance'], spell: 'bless' },
+      background_feat: { cantrips: ['light', 'guidance'], spell: 'bless', ability: 'wis' },
     },
   }), getContentBundle());
 
@@ -243,6 +264,7 @@ test('requires Magic Initiate choices granted by a background Origin feat', () =
     list: 'cleric',
     cantrips: ['light', 'guidance'],
     spell: 'bless',
+    ability: 'wis',
   });
 });
 
@@ -311,6 +333,7 @@ test('validates every 2024 background with its Origin feat requirements', () => 
         backgroundBonus: { [first]: 2, [second]: 1 },
       },
       selectedSkills: fighterSkillsExcluding(excluded),
+      backgroundToolChoices: backgroundToolChoicesFor(background, content),
       humanSkillId: '',
       humanOriginFeatId: '',
       ...originChoiceDraft,
@@ -334,6 +357,7 @@ test('validates every 2024 species and applies species-level rules', () => {
       speciesId: species.id,
       speciesChoices,
       backgroundId: 'soldier',
+      backgroundToolChoices: backgroundToolChoicesFor(background, content),
       abilityScores: {
         str: 15,
         dex: 13,
@@ -358,6 +382,9 @@ test('validates every 2024 species and applies species-level rules', () => {
     if (species.id === 'elf' && speciesChoices.elven_lineage === 'drow') {
       assert.equal(sheet.derived_stats.senses.darkvision, 120);
       assert.equal(sheet.species_spells.some((spell) => spell.id === 'dancing_lights'), true);
+    }
+    if (species.id === 'tiefling') {
+      assert.equal(sheet.species_spells.some((spell) => spell.id === 'thaumaturgy'), true);
     }
   }
 });
@@ -409,6 +436,129 @@ test('validates every available level 1 class with required 2024 class choices',
     assert.equal((sheet.weapon_masteries || []).length, characterClass.weapon_mastery_count || 0);
     assert.equal((sheet.expertise_skills || []).length, characterClass.expertise_count || 0);
   }
+});
+
+test('level 1 option catalogs expose 2024 choices that drive later mechanics', () => {
+  const content = getContentBundle();
+  const fighter = content.classes.find((item) => item.id === 'fighter');
+  const warlock = content.classes.find((item) => item.id === 'warlock');
+  const druid = content.classes.find((item) => item.id === 'druid');
+  const rogue = content.classes.find((item) => item.id === 'rogue');
+  const fightingStyles = fighter.class_choices[0].options.map((option) => option.id);
+  const invocations = warlock.class_choices[0].options.map((option) => option.id);
+  const weapons = content.equipment.filter((item) => item.type === 'weapon' && ['simple', 'martial'].includes(item.weapon_category));
+
+  assert.deepEqual(fightingStyles.sort(), [
+    'archery',
+    'blind_fighting',
+    'defense',
+    'dueling',
+    'great_weapon_fighting',
+    'interception',
+    'protection',
+    'thrown_weapon_fighting',
+    'two_weapon_fighting',
+    'unarmed_fighting',
+  ].sort());
+  assert.deepEqual(invocations.sort(), [
+    'armor_of_shadows',
+    'eldritch_mind',
+    'pact_of_the_blade',
+    'pact_of_the_chain',
+    'pact_of_the_tome',
+  ].sort());
+  assert.equal(weapons.length, 36);
+  assert.equal(new Set(weapons.map((weapon) => weapon.mastery)).size >= 8, true);
+  assert.equal(druid.class_languages.includes('druidic'), true);
+  assert.equal(druid.spellcasting.always_prepared_spells.includes('speak_with_animals'), true);
+  assert.equal(rogue.class_languages.includes('thieves_cant'), true);
+  assert.equal(rogue.class_language_choice_count, 1);
+  assert.ok(content.tools.filter((tool) => tool.category === 'artisan').length >= 17);
+  assert.ok(content.tools.filter((tool) => tool.category === 'instrument').length >= 10);
+});
+
+test('origin feat subchoices record tools and Magic Initiate ability', () => {
+  const content = getContentBundle();
+  const crafter = validateCharacter(baseDraft({
+    speciesId: 'dwarf',
+    speciesChoices: {},
+    backgroundId: 'artisan',
+    backgroundToolChoices: ['smith_tools'],
+    abilityScores: {
+      str: 15,
+      dex: 13,
+      con: 14,
+      int: 10,
+      wis: 12,
+      cha: 8,
+      backgroundBonus: { str: 2, dex: 1 },
+    },
+    selectedSkills: ['athletics', 'perception'],
+    humanSkillId: '',
+    humanOriginFeatId: '',
+    featSkillChoices: {
+      background_feat: ['smith_tools', 'weaver_tools', 'woodcarver_tools'],
+    },
+  }), content);
+  assert.deepEqual(crafter.origin.tool_choices.background_feat, ['smith_tools', 'weaver_tools', 'woodcarver_tools']);
+  assert.equal(crafter.proficiencies.tools.includes('smith_tools'), true);
+
+  assert.throws(
+    () => validateCharacter(baseDraft({
+      speciesId: 'dwarf',
+      speciesChoices: {},
+      backgroundId: 'acolyte',
+      abilityScores: {
+        str: 15,
+        dex: 13,
+        con: 14,
+        int: 10,
+        wis: 12,
+        cha: 8,
+        backgroundBonus: { wis: 2, int: 1 },
+      },
+      selectedSkills: ['athletics', 'perception'],
+      humanSkillId: '',
+      humanOriginFeatId: '',
+      magicInitiateChoices: {
+        background_feat: { cantrips: ['light', 'guidance'], spell: 'bless' },
+      },
+    }), content),
+    /spellcasting ability/,
+  );
+});
+
+test('Warlock Pact options validate subchoices and expose class-choice spells', () => {
+  const content = getContentBundle();
+  const tome = validateCharacter(classDraftFor('warlock', {
+    classChoices: { eldritch_invocation: 'pact_of_the_tome' },
+    classChoiceDetails: {
+      eldritch_invocation: {
+        tome_cantrips: ['guidance', 'thaumaturgy', 'druidcraft'],
+        tome_rituals: ['alarm', 'identify'],
+      },
+    },
+  }), content);
+  assert.equal(tome.spellcasting.cantrips_known.includes('guidance'), true);
+  assert.deepEqual(tome.spellcasting.ritual_spells, ['alarm', 'identify']);
+  assert.equal(tome.class_choice_spells.length, 5);
+
+  const chain = validateCharacter(classDraftFor('warlock', {
+    classChoices: { eldritch_invocation: 'pact_of_the_chain' },
+    classChoiceDetails: {
+      eldritch_invocation: { familiar_form: 'imp' },
+    },
+  }), content);
+  assert.equal(chain.class_choice_details.eldritch_invocation.familiar_form, 'imp');
+  assert.equal(chain.class_choice_spells.some((entry) => entry.id === 'find_familiar' && entry.type === 'ritual'), true);
+
+  assert.throws(
+    () => validateCharacter(classDraftFor('warlock', {
+      classChoices: { eldritch_invocation: 'pact_of_the_blade' },
+      classChoiceDetails: { eldritch_invocation: {} },
+    }), content),
+    /Pact Weapon/,
+  );
 });
 
 test('class choices can grant level 1 proficiencies and extra cantrips', () => {
@@ -480,6 +630,7 @@ test('validates Human Paladin Noble with high Charisma and spell choices', () =>
     speciesId: 'human',
     speciesChoices: { size: 'medium' },
     backgroundId: 'noble',
+    backgroundToolChoices: ['dice_set'],
     classId: 'paladin',
     classChoices: {},
     weaponMasteries: ['longsword', 'mace'],
@@ -499,7 +650,7 @@ test('validates Human Paladin Noble with high Charisma and spell choices', () =>
       background_feat: ['acrobatics', 'arcana', 'animal_handling'],
     },
     magicInitiateChoices: {
-      human_feat: { cantrips: ['light', 'guidance'], spell: 'healing_word' },
+      human_feat: { cantrips: ['light', 'guidance'], spell: 'healing_word', ability: 'wis' },
     },
     cantripsKnown: [],
     spellsKnown: ['cure_wounds', 'shield_of_faith'],
@@ -519,6 +670,7 @@ test('Paladin level 1 prepares two spells even with low Charisma', () => {
     speciesChoices: {},
     languages: ['elvish', 'dwarvish'],
     backgroundId: 'guard',
+    backgroundToolChoices: ['dice_set'],
     classId: 'paladin',
     classChoices: {},
     weaponMasteries: ['longsword', 'mace'],

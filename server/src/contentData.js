@@ -14,6 +14,7 @@ const content = {
   backgrounds: readJson('backgrounds.json'),
   skills: readJson('skills.json'),
   languages: readJson('languages.json'),
+  tools: readJson('tools.json'),
   equipment: readJson('equipment.json'),
   spells: readJson('spells.json'),
   feats: readJson('feats.json'),

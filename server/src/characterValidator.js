@@ -4,7 +4,9 @@ const ABILITIES = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
 const STANDARD_ARRAY = [15, 14, 13, 12, 10, 8];
 const WEAPON_MASTERY_DESCRIPTIONS = {
   cleave: 'On a strong melee hit, the referee can carry damage into a second nearby creature when the weapon supports it.',
+  graze: 'A heavy melee weapon can still deal a small amount of ability-based damage on a miss.',
   nick: 'Lets a light off-hand strike fold into the Attack action instead of needing the Bonus Action.',
+  push: 'A hit can shove the target away when the weapon supports that impact.',
   sap: 'A hit can hinder the target and make its next attack less reliable.',
   slow: 'A hit can reduce the target speed briefly.',
   topple: 'A hit can force the target to resist being knocked prone.',
@@ -56,7 +58,8 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
   const abilityModifiers = Object.fromEntries(ABILITIES.map((ability) => [ability, abilityMod(abilityScores[ability])]));
 
   const selectedSkills = Array.isArray(draft.selectedSkills) ? draft.selectedSkills.map(normalizeId) : [];
-  const languages = validateLanguages(draft, content);
+  const backgroundTools = validateBackgroundTools(draft, background, content);
+  const baseLanguages = validateLanguages(draft, content);
   const speciesData = validateSpeciesChoices(draft, species, content);
   const origin = validateOriginChoices(draft, species, background, content, speciesData.skillProficiencies);
   const skillSet = validateSkills(selectedSkills, characterClass, background, content, [
@@ -64,6 +67,7 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
     ...origin.skillProficiencies,
   ]);
   const classData = validateClassLevelChoices(draft, characterClass, content, skillSet);
+  const languages = [...new Set([...baseLanguages, ...classData.classLanguages])];
 
   const equipmentChoice = normalizeId(draft.equipmentChoice || 'pack');
   if (!['pack', 'gold'].includes(equipmentChoice)) {
@@ -155,7 +159,7 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
       background_skills: background.skills,
       class_skills: selectedSkills,
       origin_skills: origin.skillProficiencies,
-      tools: [background.tool].filter(Boolean),
+      tools: [...new Set([...backgroundTools, ...origin.toolProficiencies].filter(Boolean))],
       languages,
       armor: [...new Set([...(characterClass.armor || []), ...classData.armorProficiencies])],
       weapons: [...new Set([...(characterClass.weapons || []), ...classData.weaponProficiencies])],
@@ -190,14 +194,18 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
     species_choices: speciesData.choices,
     species_spells: speciesData.spells,
     class_choices: classData.choices,
+    class_choice_details: classData.choiceDetails,
+    class_choice_spells: classData.choiceSpells,
     weapon_masteries: classData.weaponMasteries,
     expertise_skills: classData.expertiseSkills,
     languages,
     origin: {
       background_feat: origin.backgroundFeat?.id || null,
+      background_tool_choices: backgroundTools,
       human_origin_feat: origin.humanFeat?.id || null,
       human_skill: origin.humanSkill || null,
       skill_choices: origin.skillChoices,
+      tool_choices: origin.toolChoices,
       magic_initiate: origin.magicInitiate,
     },
     spellcasting,
@@ -320,6 +328,26 @@ function validateCharacterDetails(input = {}) {
   return details;
 }
 
+function validateBackgroundTools(draft, background, content) {
+  const choice = background.tool_choice;
+  if (!choice) return [background.tool].filter(Boolean);
+
+  const selected = Array.isArray(draft.backgroundToolChoices)
+    ? draft.backgroundToolChoices.map(normalizeId).filter(Boolean)
+    : [];
+  const unique = [...new Set(selected)];
+  if (unique.length !== selected.length) fail('background', 'backgroundToolChoices', 'Background tool choices cannot repeat.');
+  if (unique.length !== Number(choice.count || 0)) {
+    fail('background', 'backgroundToolChoices', `${background.name} must choose ${choice.count} ${formatChoiceKind(choice)}.`);
+  }
+  const allowedTools = getToolChoiceOptions(choice, content);
+  const allowed = new Set(allowedTools.map((tool) => tool.id));
+  for (const toolId of unique) {
+    if (!allowed.has(toolId)) fail('background', 'backgroundToolChoices', `Choose a valid ${background.tool}.`);
+  }
+  return unique;
+}
+
 function validateLanguages(draft, content) {
   const allLanguages = new Set((content.languages || []).map((language) => language.id));
   const standardLanguages = new Set((content.languages || [])
@@ -413,6 +441,7 @@ function validateOriginChoices(draft, species, background, content, speciesSkill
 
   const isHuman = species.id === 'human';
   const allSkillIds = new Set(content.skills.map((skill) => skill.id));
+  const allToolIds = new Set((content.tools || []).map((tool) => tool.id));
   const originFeats = content.feats.filter((feat) => feat.category === 'origin');
   const humanFeatId = normalizeId(draft.humanOriginFeatId);
   const humanFeat = isHuman ? byId(originFeats, humanFeatId) : null;
@@ -436,27 +465,53 @@ function validateOriginChoices(draft, species, background, content, speciesSkill
     ...(humanFeat ? [{ source: 'human_feat', feat: humanFeat }] : []),
   ];
   const skillProficiencies = [];
+  const toolProficiencies = [];
   if (humanSkill) skillProficiencies.push(humanSkill);
   const reservedSkills = new Set([...(background.skills || []), ...speciesSkills, ...(humanSkill ? [humanSkill] : [])]);
   const skillChoices = {};
+  const toolChoices = {};
   const magicInitiate = {};
 
   for (const entry of entries) {
-    if (entry.feat.choice?.type === 'skills') {
+    if (entry.feat.choice) {
       const selected = Array.isArray(draft.featSkillChoices?.[entry.source])
-        ? draft.featSkillChoices[entry.source].map(normalizeId)
+        ? draft.featSkillChoices[entry.source].map(normalizeId).filter(Boolean)
         : [];
-      const unique = new Set(selected);
-      if (unique.size !== entry.feat.choice.count) {
-        fail('origin', entry.source, `${entry.feat.name} must choose ${entry.feat.choice.count} skills.`);
+      const unique = [...new Set(selected)];
+      if (unique.length !== selected.length) fail('origin', entry.source, `${entry.feat.name} choices cannot repeat.`);
+      if (unique.length !== entry.feat.choice.count) {
+        fail('origin', entry.source, `${entry.feat.name} must choose ${entry.feat.choice.count} ${formatChoiceKind(entry.feat.choice)}.`);
       }
-      for (const skillId of unique) {
-        if (!allSkillIds.has(skillId)) fail('origin', entry.source, 'Choose valid skills for Skilled.');
-        if (reservedSkills.has(skillId)) fail('origin', entry.source, 'Skilled must choose skills not already granted by background or species.');
+
+      const allowedTools = getToolChoiceOptions(entry.feat.choice, content);
+      const allowedToolIds = new Set(allowedTools.map((tool) => tool.id));
+      const entrySkillChoices = [];
+      const entryToolChoices = [];
+
+      for (const choiceId of unique) {
+        const isSkill = allSkillIds.has(choiceId);
+        const isTool = allToolIds.has(choiceId);
+        if (entry.feat.choice.type === 'skills' && !isSkill) fail('origin', entry.source, `Choose valid skills for ${entry.feat.name}.`);
+        if (entry.feat.choice.type === 'tools' && (!isTool || !allowedToolIds.has(choiceId))) fail('origin', entry.source, `Choose valid tools for ${entry.feat.name}.`);
+        if (entry.feat.choice.type === 'skill_or_tool' && !isSkill && !isTool) fail('origin', entry.source, `Choose valid skills or tools for ${entry.feat.name}.`);
+        if (isSkill) {
+          if (reservedSkills.has(choiceId)) fail('origin', entry.source, `${entry.feat.name} must choose skills not already granted by background, species, or another origin choice.`);
+          entrySkillChoices.push(choiceId);
+        } else if (isTool) {
+          if (entry.feat.choice.type === 'tools' && !allowedToolIds.has(choiceId)) fail('origin', entry.source, `Choose valid tools for ${entry.feat.name}.`);
+          entryToolChoices.push(choiceId);
+        }
       }
-      skillChoices[entry.source] = [...unique];
-      skillProficiencies.push(...unique);
-      for (const skillId of unique) reservedSkills.add(skillId);
+
+      if (entrySkillChoices.length) {
+        skillChoices[entry.source] = entrySkillChoices;
+        skillProficiencies.push(...entrySkillChoices);
+        for (const skillId of entrySkillChoices) reservedSkills.add(skillId);
+      }
+      if (entryToolChoices.length) {
+        toolChoices[entry.source] = entryToolChoices;
+        toolProficiencies.push(...entryToolChoices);
+      }
     }
 
     if (entry.feat.magic_list) {
@@ -464,6 +519,8 @@ function validateOriginChoices(draft, species, background, content, speciesSkill
       const list = entry.feat.magic_list;
       const cantrips = Array.isArray(choice.cantrips) ? choice.cantrips.map(normalizeId) : [];
       const spell = normalizeId(choice.spell);
+      const ability = normalizeId(choice.ability);
+      const abilityOptions = entry.feat.spellcasting_ability_choices || ['int', 'wis', 'cha'];
       const cantripOptions = content.spells.filter((item) => item.level === 0 && item.classes.includes(list));
       const spellOptions = content.spells.filter((item) => item.level === 1 && item.classes.includes(list));
       if (new Set(cantrips).size !== 2) {
@@ -477,7 +534,10 @@ function validateOriginChoices(draft, species, background, content, speciesSkill
       if (!spellOptions.some((item) => item.id === spell)) {
         fail('origin', entry.source, `Choose a valid level 1 ${list} spell.`);
       }
-      magicInitiate[entry.source] = { list, cantrips, spell };
+      if (!abilityOptions.includes(ability)) {
+        fail('origin', entry.source, `${entry.feat.name} must choose Intelligence, Wisdom, or Charisma as its spellcasting ability.`);
+      }
+      magicInitiate[entry.source] = { list, cantrips, spell, ability };
     }
   }
 
@@ -487,9 +547,24 @@ function validateOriginChoices(draft, species, background, content, speciesSkill
     humanSkill: humanSkill || null,
     feats: entries,
     skillProficiencies: [...new Set(skillProficiencies)],
+    toolProficiencies: [...new Set(toolProficiencies)],
     skillChoices,
+    toolChoices,
     magicInitiate,
   };
+}
+
+function formatChoiceKind(choice = {}) {
+  if (choice.type === 'skills') return 'skills';
+  if (choice.type === 'tools') return 'tools';
+  if (choice.type === 'skill_or_tool') return 'skills or tools';
+  return 'choices';
+}
+
+function getToolChoiceOptions(choice = {}, content = {}) {
+  const tools = content.tools || [];
+  if (!choice.category) return tools;
+  return tools.filter((tool) => tool.category === choice.category);
 }
 
 function validateSkills(selectedSkills, characterClass, background, content, originSkills = []) {
@@ -511,10 +586,14 @@ function validateSkills(selectedSkills, characterClass, background, content, ori
 
 function validateClassLevelChoices(draft, characterClass, content, skillSet) {
   const submittedChoices = draft.classChoices && typeof draft.classChoices === 'object' ? draft.classChoices : {};
+  const submittedDetails = draft.classChoiceDetails && typeof draft.classChoiceDetails === 'object' ? draft.classChoiceDetails : {};
   const choices = {};
+  const choiceDetails = {};
+  const choiceSpells = [];
   const features = [];
   const armorProficiencies = [];
   const weaponProficiencies = [];
+  const classLanguages = validateClassLanguages(draft, characterClass, content);
   let extraCantrips = 0;
 
   for (const choice of characterClass.class_choices || []) {
@@ -528,10 +607,15 @@ function validateClassLevelChoices(draft, characterClass, content, skillSet) {
     armorProficiencies.push(...(option.armor || []));
     weaponProficiencies.push(...(option.weapons || []));
     extraCantrips += Number(option.extra_cantrips || 0);
+    const details = validateClassChoiceDetails(submittedDetails[choice.id], choice, option, content);
+    if (Object.keys(details.choices).length > 0) choiceDetails[choice.id] = details.choices;
+    choiceSpells.push(...getOptionGrantedSpells(option, 'at_will_spells', 'at_will'));
+    choiceSpells.push(...getOptionGrantedSpells(option, 'ritual_spells', 'ritual'));
+    choiceSpells.push(...details.spells);
     features.push({
       source: 'class_choice',
       name: `${choice.label}: ${option.name}`,
-      description: option.description,
+      description: details.summary ? `${option.description} ${details.summary}` : option.description,
     });
   }
 
@@ -566,10 +650,118 @@ function validateClassLevelChoices(draft, characterClass, content, skillSet) {
     features,
     armorProficiencies: [...new Set(armorProficiencies)],
     weaponProficiencies: [...new Set(weaponProficiencies)],
+    classLanguages,
     extraCantrips,
+    choiceDetails,
+    choiceSpells,
     weaponMasteries,
     expertiseSkills,
   };
+}
+
+function getOptionGrantedSpells(option, field, type) {
+  return (option[field] || []).map((spellId) => ({
+    id: spellId,
+    source: option.name,
+    source_detail: type === 'at_will' ? 'At-Will Spell' : 'Ritual Spell',
+    type,
+  }));
+}
+
+function validateClassLanguages(draft, characterClass, content) {
+  const automatic = characterClass.class_languages || [];
+  const choiceCount = Number(characterClass.class_language_choice_count || 0);
+  if (choiceCount === 0) return automatic;
+
+  const allLanguages = new Set((content.languages || []).map((language) => language.id));
+  const selected = Array.isArray(draft.classLanguages) ? draft.classLanguages.map(normalizeId).filter(Boolean) : [];
+  const unique = [...new Set(selected)];
+  if (unique.length !== selected.length) fail('class', 'classLanguages', 'Class language choices cannot repeat.');
+  if (unique.length !== choiceCount) {
+    fail('class', 'classLanguages', `${characterClass.name} must choose ${choiceCount} additional language from ${characterClass.class_language_choice_source || 'a class feature'}.`);
+  }
+  for (const languageId of unique) {
+    if (!allLanguages.has(languageId)) fail('class', 'classLanguages', 'Choose a valid class language.');
+    if (automatic.includes(languageId)) fail('class', 'classLanguages', 'Class language choices cannot duplicate automatic class languages.');
+  }
+  return [...automatic, ...unique];
+}
+
+function validateClassChoiceDetails(submitted, choice, option, content) {
+  const raw = submitted && typeof submitted === 'object' ? submitted : {};
+  const choices = {};
+  const spells = [];
+  const summary = [];
+
+  for (const subchoice of option.subchoices || []) {
+    if (subchoice.type === 'weapon') {
+      const value = normalizeId(raw[subchoice.id]);
+      const options = getClassSubchoiceWeaponOptions(subchoice, content);
+      if (subchoice.required && !value) fail('class', choice.id, `${option.name} requires ${subchoice.label}.`);
+      if (value && !options.some((weapon) => weapon.id === value)) fail('class', choice.id, `Choose a valid ${subchoice.label}.`);
+      if (value) {
+        choices[subchoice.id] = value;
+        const weapon = options.find((item) => item.id === value);
+        summary.push(`${subchoice.label}: ${weapon?.name || value}.`);
+      }
+      continue;
+    }
+
+    if (subchoice.type === 'option') {
+      const value = normalizeId(raw[subchoice.id]);
+      const options = subchoice.options || [];
+      if (subchoice.required && !value) fail('class', choice.id, `${option.name} requires ${subchoice.label}.`);
+      if (value && !options.some((item) => item.id === value)) fail('class', choice.id, `Choose a valid ${subchoice.label}.`);
+      if (value) {
+        choices[subchoice.id] = value;
+        const selected = options.find((item) => item.id === value);
+        summary.push(`${subchoice.label}: ${selected?.name || value}.`);
+      }
+      continue;
+    }
+
+    if (subchoice.type === 'spell') {
+      const selected = Array.isArray(raw[subchoice.id]) ? raw[subchoice.id].map(normalizeId).filter(Boolean) : [];
+      const unique = [...new Set(selected)];
+      const count = Number(subchoice.count || 0);
+      if (unique.length !== selected.length) fail('class', choice.id, `${subchoice.label} choices cannot repeat.`);
+      if (subchoice.required && unique.length !== count) fail('class', choice.id, `${option.name} requires ${count} ${subchoice.label}.`);
+      const spellOptions = getClassSubchoiceSpellOptions(subchoice, content);
+      for (const spellId of unique) {
+        if (!spellOptions.some((spell) => spell.id === spellId)) fail('class', choice.id, `Choose valid ${subchoice.label}.`);
+      }
+      if (unique.length > 0) {
+        choices[subchoice.id] = unique;
+        spells.push(...unique.map((spellId) => ({
+          id: spellId,
+          source: option.name,
+          source_detail: subchoice.label,
+          type: Number(subchoice.level || 0) === 0 ? 'cantrip' : subchoice.ritual ? 'ritual' : 'spell',
+        })));
+        summary.push(`${subchoice.label}: ${unique.map((id) => byId(content.spells, id)?.name || id).join(', ')}.`);
+      }
+    }
+  }
+
+  return { choices, spells, summary: summary.join(' ') };
+}
+
+function getClassSubchoiceWeaponOptions(subchoice, content) {
+  return (content.equipment || [])
+    .filter((item) => item.type === 'weapon')
+    .filter((weapon) => {
+      if (subchoice.weapon_filter === 'simple_or_martial_melee') {
+        return ['simple', 'martial'].includes(weapon.weapon_category) && !(weapon.properties || []).includes('ammunition');
+      }
+      return true;
+    });
+}
+
+function getClassSubchoiceSpellOptions(subchoice, content) {
+  return (content.spells || [])
+    .filter((spell) => Number(spell.level || 0) === Number(subchoice.level || 0))
+    .filter((spell) => !subchoice.ritual || Boolean(spell.ritual))
+    .filter((spell) => !subchoice.source || subchoice.source === 'any' || (spell.classes || []).includes(subchoice.source));
 }
 
 function validateWeaponMasteries(submitted, characterClass, content, extraWeaponProficiencies = []) {
@@ -626,6 +818,7 @@ function isWeaponProficient(weapon, proficiencies) {
   if (proficiencies.has(weapon.id)) return true;
   if (weapon.weapon_category && proficiencies.has(weapon.weapon_category)) return true;
   if (proficiencies.has('finesse') && (weapon.properties || []).includes('finesse')) return true;
+  if (proficiencies.has('light_martial') && weapon.weapon_category === 'martial' && (weapon.properties || []).includes('light')) return true;
   return false;
 }
 
@@ -812,15 +1005,29 @@ function buildSpellcasting(draft, characterClass, content, abilityModifiers, cla
       fail('spells', 'spellsKnown', 'Prepared Wizard spells must come from your spellbook.');
     }
   }
+  const classChoiceCantrips = getClassChoiceSpellIds(classData.choiceSpells, 'cantrip');
+  const finalCantrips = [...cantripsKnown, ...classChoiceCantrips];
+  if (new Set(finalCantrips).size !== finalCantrips.length) {
+    fail('spells', 'cantripsKnown', 'Class choice cantrips cannot duplicate class cantrips.');
+  }
+
   return {
     ability: config.ability,
-    cantrips_known: cantripsKnown,
+    cantrips_known: finalCantrips,
     prepared_from_choices: spellsKnown,
     always_prepared_spells: alwaysPrepared,
     spells_prepared: [...spellsKnown, ...alwaysPrepared],
+    class_choice_spells: classData.choiceSpells || [],
+    ritual_spells: getClassChoiceSpellIds(classData.choiceSpells, 'ritual'),
     ...(config.spellbook_spells ? { spellbook_spells: spellbookKnown } : {}),
     slots: config.slots || {},
   };
+}
+
+function getClassChoiceSpellIds(choiceSpells = [], type) {
+  return (choiceSpells || [])
+    .filter((entry) => entry.type === type)
+    .map((entry) => entry.id);
 }
 
 function buildClassResources(characterClass, content) {

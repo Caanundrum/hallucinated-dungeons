@@ -9,8 +9,8 @@ const db                   = require('./db');
 const { UTILITY_MODEL }    = require('./models');
 const { retryWithBackoff } = require('./retryUtils');
 
-const SYSTEM_PROMPT = `You are a world state extractor for a D&D 5.5e (2024) adventure game.
-Given a player action and the DM's narrative response, extract any changes to the world state as a JSON patch.
+const SYSTEM_PROMPT = `You are a world state extractor for a 2024 fantasy d20 adventure game.
+Given a player action and the Game Master's narrative response, extract any changes to the world state as a JSON patch.
 
 Return ONLY the fields that changed. Do not include unchanged fields.
 
@@ -61,7 +61,7 @@ Extract only the fields that changed. Use the HP narration standard "(before →
 - player_stats.ability_scores: object (ability modifiers as integers, only update if established — e.g. {"str": 3, "dex": 1, "con": 2, "int": -1, "wis": 0, "cha": 1}. Use modifier values not raw scores. Key-merge: only include ability keys that changed or were established.)
 
 TIME AND ACTIVE EFFECTS:
-Track practical D&D time when the DM response advances rounds, travel, searching, rests, spell durations, or scene time.
+Track practical d20 game time when the Game Master response advances rounds, travel, searching, rests, spell durations, or scene time.
 In combat, one round is about 6 seconds. Outside combat, estimate elapsed minutes from the narration.
 active_effects schema:
 [

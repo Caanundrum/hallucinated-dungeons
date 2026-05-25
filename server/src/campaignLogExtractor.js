@@ -9,8 +9,8 @@ const db                   = require('./db');
 const { UTILITY_MODEL }    = require('./models');
 const { retryWithBackoff } = require('./retryUtils');
 
-const NOTABILITY_SYSTEM_PROMPT = `You are a campaign historian for a D&D 5.5e (2024) adventure game.
-Given a player action, the DM's narrative response, and the current world state, determine if anything story-defining happened.
+const NOTABILITY_SYSTEM_PROMPT = `You are a campaign historian for a 2024 fantasy d20 adventure game.
+Given a player action, the Game Master's narrative response, and the current world state, determine if anything story-defining happened.
 
 Story-defining events include:
 - A significant decision by the player with lasting consequences
@@ -32,7 +32,7 @@ If nothing notable happened, respond with:
 
 Return ONLY valid JSON. No markdown, no explanation, no code blocks.`;
 
-const COMPRESSION_SYSTEM_PROMPT = `You are a campaign archivist for a D&D 5.5e (2024) adventure game.
+const COMPRESSION_SYSTEM_PROMPT = `You are a campaign archivist for a 2024 fantasy d20 adventure game.
 Given a sequence of campaign log entries, write a concise two-to-three sentence narrative summary that captures the most important story beats, decisions, and events.
 
 Write in past tense, third person. Preserve names, locations, and key outcomes. Do not list every entry — synthesize into a readable summary.
