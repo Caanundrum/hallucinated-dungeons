@@ -19,6 +19,7 @@ const {
   getAttackMode,
   getAttackModeSources,
   getTurnBlockReason,
+  resolveSavingThrow,
 } = require('./conditionEngine');
 
 const DEFAULT_CHECK_DC = 15;
@@ -793,6 +794,11 @@ function resolveInitiative({ pending, result, worldState, characterSheet, rollDi
 function resolveCombatAction({ message, intent, worldState, characterSheet, currentTurn, rollDie }) {
   if (intent.castsSpell) return null;
 
+  const maneuver = getCombatManeuverIntent(message);
+  if (maneuver) {
+    return resolveCombatManeuver({ maneuver, message, worldState, characterSheet, rollDie });
+  }
+
   if (intent.check && shouldPromptCombatCheck(intent)) {
     return promptCheck({ intent, worldState, characterSheet, currentTurn, inCombat: true });
   }
@@ -844,7 +850,7 @@ function resolveCombatAction({ message, intent, worldState, characterSheet, curr
     handled: true,
     logType: 'referee_combat_action_needed',
     worldState,
-    reply: 'Combat is active and initiative is running. What action do you take this turn: **Attack**, **Dodge**, **Disengage**, **Hide**, **Search**, **Study**, **Help**, **Ready**, or a valid spell/action from your sheet?',
+    reply: 'Combat is active and initiative is running. What action do you take this turn: **Attack**, **Shove**, **Grapple**, **Dodge**, **Disengage**, **Hide**, **Search**, **Study**, **Help**, **Ready**, or a valid spell/action from your sheet?',
   };
 }
 
@@ -958,6 +964,123 @@ function resolvePlayerAttack({ worldState, characterSheet, rollDie }) {
     worldState: enemyResult.worldState,
     reply: enemyResult.reply,
   };
+}
+
+function getCombatManeuverIntent(message = '') {
+  const text = String(message || '');
+  if (/\b(?:grapple|grab|seize|wrestle|hold down|pin)\b/i.test(text)) {
+    return { type: 'grapple' };
+  }
+  if (/\b(?:shove|push|knock (?:it|him|her|them|the [a-z' -]+)?\s*(?:down|prone)|trip|shoulder check)\b/i.test(text)) {
+    const prone = /\b(?:prone|trip|knock .*(?:down|over)|floor|ground)\b/i.test(text);
+    return { type: 'shove', mode: prone ? 'prone' : 'push' };
+  }
+  return null;
+}
+
+function resolveCombatManeuver({ maneuver, message, worldState, characterSheet, rollDie }) {
+  const label = maneuver.type === 'grapple' ? 'Grapple' : 'Shove';
+  if (maneuver.type === 'grapple' && !hasFreeHandForGrapple(characterSheet)) {
+    return {
+      handled: true,
+      logType: 'referee_combat_grapple_blocked',
+      worldState,
+      reply: 'Grapple needs a free hand. Stow or drop something first, then the hands can begin their legal argument.',
+    };
+  }
+
+  const spent = spendTurnResource(worldState, 'action', label, characterSheet);
+  if (!spent.ok) {
+    return { handled: true, logType: 'referee_action_unavailable', worldState: spent.worldState, reply: spent.reply };
+  }
+
+  const combat = cloneCombatState(spent.worldState.combat_state);
+  const player = combat.combatants.find((combatant) => combatant.is_player);
+  const target = findCombatTarget(combat, message) || combat.combatants.find((combatant) => !combatant.is_player && Number(combatant.hp) > 0);
+  if (!player || !target) {
+    return endCombat(worldState, 'There is no active enemy left for that maneuver. Combat ends before anyone has to explain the footwork.');
+  }
+
+  const dc = getUnarmedStrikeSaveDc(characterSheet);
+  const saveChoice = chooseBestSave(target, ['str', 'dex']);
+  const save = resolveSavingThrow({ target, ability: saveChoice.ability, dc, rollDie, bonus: saveChoice.bonus });
+  const lines = [
+    `You use the **${label}** option of the Attack action against ${target.name}. ${target.name} makes a ${saveChoice.ability.toUpperCase()} save: ${save.automaticFailure ? save.text : `${save.text} vs DC ${dc}`}.`,
+  ];
+
+  if (save.success) {
+    lines.push(`${target.name} resists the ${label.toLowerCase()}.`);
+  } else if (maneuver.type === 'grapple') {
+    target.conditions = addCondition(target.conditions, 'grappled');
+    target.grapple_escape_dc = dc;
+    lines.push(`${target.name} is **grappled**. Escape DC ${dc}.`);
+  } else if (maneuver.mode === 'prone') {
+    target.conditions = addCondition(target.conditions, 'prone');
+    lines.push(`${target.name} is knocked **prone**.`);
+  } else {
+    lines.push(`${target.name} is shoved 5 feet, assuming there is room in the scene for that movement.`);
+  }
+
+  const result = advanceEnemyTurns({
+    worldState: {
+      ...spent.worldState,
+      combat_state: combat,
+    },
+    characterSheet,
+    rollDie,
+    playerTurnNote: lines.join('\n\n'),
+    playerDodging: false,
+  });
+  return { handled: true, logType: `referee_combat_${maneuver.type}`, ...result };
+}
+
+function hasFreeHandForGrapple(characterSheet = {}) {
+  const equipped = characterSheet.equipped || {};
+  return !(equipped.main_hand && equipped.off_hand);
+}
+
+function getUnarmedStrikeSaveDc(characterSheet = {}) {
+  const strMod = Number(characterSheet.abilities?.modifiers?.str || 0);
+  const pb = Number(characterSheet.derived_stats?.proficiency_bonus || proficiencyBonus(characterSheet.identity?.level || characterSheet.derived_stats?.level || 1));
+  return 8 + strMod + pb;
+}
+
+function chooseBestSave(target = {}, abilities = []) {
+  return abilities
+    .map((ability) => ({ ability, bonus: getCreatureSaveBonus(target, ability) }))
+    .sort((left, right) => right.bonus - left.bonus)[0] || { ability: 'str', bonus: 0 };
+}
+
+function getCreatureSaveBonus(target = {}, ability) {
+  return Number(
+    target.saves?.[ability]
+      ?? target.save_modifiers?.[ability]
+      ?? target.ability_modifiers?.[ability]
+      ?? 0,
+  );
+}
+
+function addCondition(conditions = [], condition) {
+  return [...new Set([...(conditions || []), condition].filter(Boolean))];
+}
+
+function findCombatTarget(combat = {}, message = '') {
+  const enemies = (combat.combatants || []).filter((combatant) => !combatant.is_player && Number(combatant.hp) > 0);
+  if (!enemies.length) return null;
+
+  const normalizedMessage = normalizeTargetPhrase(message);
+  const directMatch = enemies.find((enemy) => {
+    const enemyName = normalizeTargetPhrase(enemy.name);
+    return enemyName && normalizedMessage.includes(enemyName);
+  });
+  if (directMatch) return directMatch;
+
+  const inferred = normalizeTargetPhrase(inferEnemyName({ scene_presence: { present_npcs: [] } }, message));
+  if (!inferred || inferred === 'opponent') return null;
+  return enemies.find((enemy) => {
+    const enemyName = normalizeTargetPhrase(enemy.name);
+    return enemyName === inferred || enemyName.endsWith(` ${inferred}`) || inferred.endsWith(` ${enemyName}`);
+  }) || null;
 }
 
 function advanceEnemyTurns({ worldState, characterSheet, rollDie = defaultRollDie, playerTurnNote, playerDodging = false, advanceRound = true }) {
@@ -1264,19 +1387,43 @@ function buildDefaultEnemy(name = 'Opponent') {
 
 function inferEnemyName(worldState = {}, message = '') {
   const sceneNpcs = worldState.scene_presence?.present_npcs || [];
-  const targetMatch = String(message || '').match(/\b(?:attack|hit|strike|stab|swing at|shoot|charge)\s+(?:the\s+|a\s+|an\s+)?([a-z][a-z' -]{2,40}?)(?:\s+(?:with|using|because|if|when)\b|[.!?]|$)/i);
-  if (targetMatch?.[1]) return titleCase(cleanTarget(targetMatch[1]));
+  const targetMatch = String(message || '').match(/\b(?:attack|hit|strike|stab|swing at|shoot|charge|shove|push|grapple|grab|seize|trip)\s+(?:the\s+|a\s+|an\s+)?([a-z][a-z' -]{2,50}?)(?:\s+(?:with|using|because|if|when|while|as|from|near|beside|behind|emerging|coming|rushing|charging|away|toward|towards|not)\b|[.!?]|$)/i);
+  const cleanedTarget = cleanTarget(targetMatch?.[1]);
+  if (cleanedTarget) return titleCase(cleanedTarget);
+  const explicitHostile = extractHostileTarget(message);
+  if (explicitHostile) return titleCase(explicitHostile);
   const likelyNpc = sceneNpcs.find((name) => /\b(stranger|figure|enemy|guard|creature|bandit|cultist|goblin|orc|thug)\b/i.test(String(name)))
     || sceneNpcs.find(Boolean);
   return likelyNpc ? String(likelyNpc) : 'Opponent';
 }
 
 function cleanTarget(value) {
-  return String(value || '').replace(/\b(with|using|because|if|when)\b.*$/i, '').trim();
+  return String(value || '')
+    .replace(/\b(with|using|because|if|when|while|as|from|near|beside|behind|emerging|coming|rushing|charging|away|toward|towards|not)\b.*$/i, '')
+    .replace(/\b(?:the|a|an)\b/gi, '')
+    .trim();
+}
+
+function extractHostileTarget(message = '') {
+  const match = String(message || '').match(/\b(?:hostile|enemy|attacking|aggressive)\s+([a-z][a-z' -]{1,35}?)(?:\s+(?:emerging|rush(?:es|ing)?|comes?|coming|moves?|moving|charges?|charging|from|near|beside|behind|toward|towards|with|while|that|who|not)\b|[,.!?]|$)/i);
+  return cleanTarget(match?.[1]);
+}
+
+function proficiencyBonus(level) {
+  return Math.floor((Number(level || 1) - 1) / 4) + 2;
 }
 
 function titleCase(value) {
   return String(value || '').replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function normalizeTargetPhrase(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9' -]/g, ' ')
+    .replace(/\b(?:the|a|an|hostile|enemy|aggressive|attacking)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function getPrimaryAttack(characterSheet) {

@@ -261,6 +261,24 @@ test('starts combat by asking for initiative instead of narrating a free attack'
   assert.match(result.reply, /\[ROLL: id=.* 1d20\+1\]/);
 });
 
+test('combat starter preserves explicit hostile target instead of falling back to scene NPCs', () => {
+  const result = adjudicate({
+    message: 'I draw my longsword and attack a hostile shadow emerging from the tree line.',
+    worldState: worldState({
+      scene_presence: {
+        exact_location: 'inn overhang',
+        present_npcs: ['sealed-parchment guards (2)', 'reeve'],
+        present_objects: ['sealed parchment'],
+        available_exits: ['tree line'],
+      },
+    }),
+    characterSheet,
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.pending_roll.enemy.name, 'Hostile Shadow');
+});
+
 test('keeps round 1 when enemies beat player initiative and act first', () => {
   const result = adjudicate({
     message: '[ROLL REQUEST: roll_init]',
@@ -413,6 +431,103 @@ test('blocks a second action in the same combat turn', () => {
   assert.equal(result.handled, true);
   assert.equal(result.worldState.combat_state.round, 1);
   assert.match(result.reply, /Action is already spent/);
+});
+
+test('shove is handled as an Attack action option with target save', () => {
+  const result = adjudicate({
+    message: 'I try to shove the hostile wolf away from the reeve with my shield.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 2,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', hp: 12, max_hp: 12, ac: 16, is_player: true },
+          { name: 'Hostile Guard', hp: 11, max_hp: 11, ac: 14, is_player: false, saves: { str: 3, dex: 1 } },
+          { name: 'Hostile Wolf', hp: 5, max_hp: 8, ac: 12, is_player: false, saves: { str: 0, dex: 1 } },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      derived_stats: {
+        ...characterSheet.derived_stats,
+        proficiency_bonus: 2,
+      },
+    },
+    rollDie: sequenceRolls([4, 2, 2]),
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.combat_state.turn_resources.action_available, true);
+  assert.match(result.reply, /Shove/);
+  assert.match(result.reply, /against Hostile Wolf/);
+  assert.match(result.reply, /DEX save: 4\+1 = 5 vs DC 13/);
+  assert.match(result.reply, /Hostile Wolf is shoved 5 feet/);
+  assert.match(result.reply, /Hostile Wolf uses attack/);
+});
+
+test('shove can knock a target prone and affect its next attack', () => {
+  const result = adjudicate({
+    message: 'I shove the goblin prone.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', hp: 12, max_hp: 12, ac: 16, is_player: true },
+          { name: 'Goblin', hp: 8, max_hp: 8, ac: 12, is_player: false, saves: { str: 0, dex: 0 } },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      derived_stats: {
+        ...characterSheet.derived_stats,
+        proficiency_bonus: 2,
+      },
+    },
+    rollDie: sequenceRolls([3, 12, 6]),
+  });
+
+  const goblin = result.worldState.combat_state.combatants.find((combatant) => combatant.name === 'Goblin');
+  assert.equal(result.handled, true);
+  assert.equal(goblin.conditions.includes('prone'), true);
+  assert.match(result.reply, /knocked \*\*prone\*\*/);
+  assert.match(result.reply, /disadvantage: Prone on attacker/);
+});
+
+test('grapple is handled as an Attack action option and tracks escape DC', () => {
+  const result = adjudicate({
+    message: 'I grab the cultist before he can run.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', hp: 12, max_hp: 12, ac: 16, is_player: true },
+          { name: 'Cultist', hp: 7, max_hp: 7, ac: 12, is_player: false, saves: { str: 0, dex: 1 } },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      derived_stats: {
+        ...characterSheet.derived_stats,
+        proficiency_bonus: 2,
+      },
+    },
+    rollDie: sequenceRolls([4, 2]),
+  });
+
+  const cultist = result.worldState.combat_state.combatants.find((combatant) => combatant.name === 'Cultist');
+  assert.equal(result.handled, true);
+  assert.equal(cultist.conditions.includes('grappled'), true);
+  assert.equal(cultist.grapple_escape_dc, 13);
+  assert.match(result.reply, /Grapple/);
+  assert.match(result.reply, /DEX save: 4\+1 = 5 vs DC 13/);
 });
 
 test('prompts death saves at 0 HP and applies natural 1 as two failures', () => {

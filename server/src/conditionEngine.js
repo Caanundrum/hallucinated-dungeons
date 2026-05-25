@@ -11,6 +11,7 @@ const TURN_BLOCKING_CONDITIONS = new Set([
 const ATTACKER_DISADVANTAGE_CONDITIONS = new Set([
   'blinded',
   'poisoned',
+  'prone',
   'restrained',
 ]);
 
@@ -18,6 +19,7 @@ const TARGET_ADVANTAGE_CONDITIONS = new Set([
   'blinded',
   'paralyzed',
   'petrified',
+  'prone',
   'restrained',
   'stunned',
   'unconscious',
