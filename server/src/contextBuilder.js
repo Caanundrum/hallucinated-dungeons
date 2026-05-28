@@ -6,6 +6,7 @@
 const db             = require('./db');
 const { estimateTokens } = require('./tokenUtils');
 const { getContentBundle, byId } = require('./contentData');
+const { filterActivePartyPresenceRows } = require('./partyPresence');
 
 const TOKEN_BUDGET = 8000; // trim if total estimated input exceeds this
 const CAMPAIGN_LOG_TOKEN_BUDGET = 2000;
@@ -17,9 +18,10 @@ const CAMPAIGN_LOG_TOKEN_BUDGET = 2000;
  * @param {string} opts.sessionId
  * @param {string} opts.dm1Prompt   — contents of dm1.txt
  * @param {string} opts.playerMessage — current player input (not yet saved)
+ * @param {string[]|Set<string>|null} [opts.liveCharacterIds] — connected characters to include in party presence
  * @returns {{ systemPrompt: string, messages: Array<{role,content}> }}
  */
-async function build({ sessionId, dm1Prompt, playerMessage }) {
+async function build({ sessionId, dm1Prompt, playerMessage, liveCharacterIds = null }) {
   // ── Fetch all context components in parallel ──────────────────────────
   const [worldStateRow, campaignLog, chapterSummaries, rollingWindowRows, partyPresence, activeCharacter] =
     await Promise.all([
@@ -55,7 +57,8 @@ async function build({ sessionId, dm1Prompt, playerMessage }) {
   ].join('\n');
   staticSystemPrompt += '\n\n';
 
-  const partyPresenceText = buildPartyPresenceText(partyPresence);
+  const activePartyPresence = filterActivePartyPresenceRows(partyPresence, { liveCharacterIds });
+  const partyPresenceText = buildPartyPresenceText(activePartyPresence);
   if (partyPresenceText) {
     staticSystemPrompt += '## ACTIVE PARTY PRESENCE\n';
     staticSystemPrompt += partyPresenceText + '\n\n';

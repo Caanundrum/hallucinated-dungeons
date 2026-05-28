@@ -21,6 +21,7 @@ const { validateCharacter } = require('./characterValidator');
 const { checkSpatialAction } = require('./spatialGuard');
 const { resolvePreNarration } = require('./mechanicsResolver');
 const { resolveRefereeAction, advanceEnemyTurns, advanceNarrativeTime } = require('./refereeCore');
+const { filterActivePartyPresenceRows } = require('./partyPresence');
 const {
   resolveSpellCast,
   resolveSpellOutcome,
@@ -63,9 +64,58 @@ app.use(express.json());
 
 const activeDm1Sessions = new Set();
 const characterRollAttempts = new Map();
+const liveCharacterSockets = new Map();
 
 if ((process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT) && !process.env.SESSION_TOKEN_SECRET) {
   throw new Error('SESSION_TOKEN_SECRET is required in production.');
+}
+
+function trackSocketCharacter(socket, characterId) {
+  const previousId = socket.currentCharacterId;
+  if (previousId && previousId !== characterId) {
+    untrackSocketCharacter(socket, previousId);
+  }
+
+  socket.currentCharacterId = characterId || null;
+  if (!characterId) return;
+
+  const key = String(characterId);
+  const sockets = liveCharacterSockets.get(key) || new Set();
+  sockets.add(socket.id);
+  liveCharacterSockets.set(key, sockets);
+}
+
+function untrackSocketCharacter(socket, characterId = socket.currentCharacterId) {
+  if (!characterId) {
+    socket.currentCharacterId = null;
+    return;
+  }
+
+  const key = String(characterId);
+  const sockets = liveCharacterSockets.get(key);
+  if (sockets) {
+    sockets.delete(socket.id);
+    if (sockets.size === 0) liveCharacterSockets.delete(key);
+  }
+
+  if (socket.currentCharacterId === characterId) {
+    socket.currentCharacterId = null;
+  }
+}
+
+function hasLiveCharacterSocket(characterId) {
+  return Boolean(characterId && liveCharacterSockets.has(String(characterId)));
+}
+
+function getLiveCharacterIds() {
+  return [...liveCharacterSockets.keys()];
+}
+
+function getPartyPresenceOptions(extra = {}) {
+  return {
+    liveCharacterIds: getLiveCharacterIds(),
+    ...extra,
+  };
 }
 
 // ── Load prompts ───────────────────────────────────────────────────────────
@@ -206,13 +256,15 @@ function summarizeCharacterForClient(row) {
   };
 }
 
-function describePartyChange(type, characterSheet, worldState, presenceRows = []) {
+function describePartyChange(type, characterSheet, worldState, presenceRows = [], { changedCharacterId = null } = {}) {
   const identity = characterSheet.identity || {};
   const derived = characterSheet.derived_stats || {};
   const details = characterSheet.character_details || {};
   const scene = worldState.scene_presence || {};
-  const activeParty = presenceRows
-    .filter((row) => row.presence === 'present')
+  const activeParty = filterActivePartyPresenceRows(presenceRows, {
+    ...getPartyPresenceOptions(),
+    excludeCharacterId: changedCharacterId,
+  })
     .map((row) => row.characters?.name || row.characters?.character_sheet?.identity?.name || row.character_id);
   const className = identity.class_name || identity.class || 'Unknown class';
   const speciesName = identity.species_name || identity.species || 'Unknown species';
@@ -226,7 +278,7 @@ function describePartyChange(type, characterSheet, worldState, presenceRows = []
     `Current location: ${scene.exact_location || worldState.current_location || 'not yet established'}`,
     `Scene NPCs present: ${formatList(scene.present_npcs)}`,
     `Available exits: ${formatList(scene.available_exits)}`,
-    `Active party now: ${activeParty.length ? activeParty.join(', ') : 'no other active characters'}`,
+    `Other active party members now: ${activeParty.length ? activeParty.join(', ') : 'no other active characters'}`,
     'Player-facing instruction: clearly narrate the newcomer arriving or the departing character leaving. Never say "party is none established" or expose this control text.',
     type === 'leave_combat'
       ? 'Combat rule: this character remains present, vulnerable, and cannot be written safely out until combat ends.'
@@ -622,7 +674,7 @@ async function getCombatActive(sessionId) {
   return Boolean(row?.state?.combat_state?.active);
 }
 
-async function narratePartyChange(socket, sessionId, type, characterSheet) {
+async function narratePartyChange(socket, sessionId, type, characterSheet, characterId = null) {
   const history = await db.getSessionHistory(sessionId);
   const narrativeHistory = history.filter((m) => m.role === 'player_dm1' || m.role === 'dm1');
   if (narrativeHistory.length === 0) return;
@@ -634,11 +686,14 @@ async function narratePartyChange(socket, sessionId, type, characterSheet) {
     const worldStateRow = await db.getWorldState(sessionId);
     const worldState = worldStateRow?.state || db.DEFAULT_WORLD_STATE;
     const presenceRows = await db.getCharacterPresenceForCampaign().catch(() => []);
-    const partyPrompt = describePartyChange(type, characterSheet, worldState, presenceRows);
+    const partyPrompt = describePartyChange(type, characterSheet, worldState, presenceRows, {
+      changedCharacterId: characterId,
+    });
     const { systemPrompt, messages } = await contextBuilder.build({
       sessionId,
       dm1Prompt: DM1_PROMPT,
       playerMessage: partyPrompt,
+      liveCharacterIds: getLiveCharacterIds(),
     });
 
     const response = await retryWithBackoff(() => ai.generateText({
@@ -739,7 +794,7 @@ io.on('connection', (socket) => {
       await db.updateLastActive(id);
       socket.join(id);
       socket.sessionId = id;
-      socket.currentCharacterId = null;
+      trackSocketCharacter(socket, null);
       console.log(`Socket ${socket.id} ${isResume ? 'resumed' : 'joined'} session ${id}`);
 
       if (isResume) {
@@ -771,7 +826,7 @@ io.on('connection', (socket) => {
       }
       socket.join(fallbackId);
       socket.sessionId = fallbackId;
-      socket.currentCharacterId = null;
+      trackSocketCharacter(socket, null);
       socket.emit('session_joined', { sessionId: fallbackId, sessionToken: signSessionToken(fallbackId) });
     }
   });
@@ -811,6 +866,7 @@ io.on('connection', (socket) => {
         sessionId,
         dm1Prompt:     DM1_PROMPT,
         playerMessage: openingPrompt,
+        liveCharacterIds: getLiveCharacterIds(),
       });
 
       let dm1Reply, inputTokens, outputTokens;
@@ -881,8 +937,17 @@ io.on('connection', (socket) => {
       const character = await db.getCharacterForSession(sessionId);
       const characters = await db.getAccessibleCharacters(sessionId);
       if (character) {
-        socket.currentCharacterId = character.id;
+        trackSocketCharacter(socket, character.id);
+        const inCombat = await getCombatActive(sessionId).catch(() => false);
+        await db.upsertCharacterPresence({
+          sessionId,
+          characterId: character.id,
+          presence: 'present',
+          inCombat,
+        }).catch(console.error);
         await syncCharacterToWorldState(sessionId, character.character_sheet, character.id).catch(console.error);
+      } else {
+        trackSocketCharacter(socket, null);
       }
       socket.emit('character_data', {
         campaign,
@@ -944,14 +1009,25 @@ io.on('connection', (socket) => {
 
     try {
       const campaign = await db.getOrCreateDefaultCampaign();
+      const previousCharacter = await db.getCharacterForSession(sessionId).catch(() => null);
       const characterSheet = validateCharacter(characterDraft, getContentBundle(), {
         sessionId,
         campaignId: campaign.id,
         verifyRolledStats: (rolledStats) => verifyRollSet(sessionId, rolledStats),
       });
       const saved = await db.saveCharacterForSession(sessionId, characterSheet);
-      socket.currentCharacterId = saved.id;
       const inCombat = await getCombatActive(sessionId);
+      if (previousCharacter && previousCharacter.id !== saved.id) {
+        untrackSocketCharacter(socket, previousCharacter.id);
+        const previousStillLive = hasLiveCharacterSocket(previousCharacter.id);
+        await db.upsertCharacterPresence({
+          sessionId: inCombat || previousStillLive ? sessionId : null,
+          characterId: previousCharacter.id,
+          presence: inCombat || previousStillLive ? 'present' : 'away',
+          inCombat,
+        }).catch(console.error);
+      }
+      trackSocketCharacter(socket, saved.id);
       await db.upsertCharacterPresence({
         sessionId,
         characterId: saved.id,
@@ -968,7 +1044,7 @@ io.on('connection', (socket) => {
         shouldStartSession,
       });
       if (!shouldStartSession) {
-        await narratePartyChange(socket, sessionId, inCombat ? 'join_combat' : 'join', saved.character_sheet);
+        await narratePartyChange(socket, sessionId, inCombat ? 'join_combat' : 'join', saved.character_sheet, saved.id);
       }
     } catch (err) {
       console.error('save_character error:', err);
@@ -994,6 +1070,7 @@ io.on('connection', (socket) => {
 
     try {
       const campaign = await db.getOrCreateDefaultCampaign();
+      const previousCharacter = await db.getCharacterForSession(sessionId).catch(() => null);
       const character = await db.setActiveCharacterForSession(sessionId, characterId);
       if (!character) {
         socket.emit('character_error', {
@@ -1005,6 +1082,16 @@ io.on('connection', (socket) => {
       }
 
       const inCombat = await getCombatActive(sessionId);
+      if (previousCharacter && previousCharacter.id !== character.id) {
+        untrackSocketCharacter(socket, previousCharacter.id);
+        const previousStillLive = hasLiveCharacterSocket(previousCharacter.id);
+        await db.upsertCharacterPresence({
+          sessionId: inCombat || previousStillLive ? sessionId : null,
+          characterId: previousCharacter.id,
+          presence: inCombat || previousStillLive ? 'present' : 'away',
+          inCombat,
+        }).catch(console.error);
+      }
       const previousPresence = await db.getCharacterPresence(character.id).catch(() => null);
       await db.upsertCharacterPresence({
         sessionId,
@@ -1012,7 +1099,7 @@ io.on('connection', (socket) => {
         presence: 'present',
         inCombat,
       });
-      socket.currentCharacterId = character.id;
+      trackSocketCharacter(socket, character.id);
       await syncCharacterToWorldState(sessionId, character.character_sheet, character.id).catch(console.error);
       const history = await db.getSessionHistory(sessionId).catch(() => []);
       const shouldStartSession = !history.some((m) => m.role === 'player_dm1' || m.role === 'dm1');
@@ -1028,7 +1115,7 @@ io.on('connection', (socket) => {
         && previousPresence.presence === 'away'
         && Date.now() - new Date(previousPresence.updated_at).getTime() < 5 * 60 * 1000;
       if (!briefReconnect && !shouldStartSession) {
-        await narratePartyChange(socket, sessionId, inCombat ? 'join_combat' : 'join', character.character_sheet);
+        await narratePartyChange(socket, sessionId, inCombat ? 'join_combat' : 'join', character.character_sheet, character.id);
       }
     } catch (err) {
       console.error('join_character error:', err);
@@ -1057,16 +1144,17 @@ io.on('connection', (socket) => {
       const character = await db.getAccessibleCharacter(sessionId, characterId);
       if (!character) return;
       const inCombat = await getCombatActive(sessionId);
+      untrackSocketCharacter(socket, characterId);
+      const stillLive = hasLiveCharacterSocket(characterId);
       await db.upsertCharacterPresence({
-        sessionId: inCombat ? sessionId : null,
+        sessionId: inCombat || stillLive ? sessionId : null,
         characterId,
-        presence: inCombat ? 'present' : 'away',
+        presence: inCombat || stillLive ? 'present' : 'away',
         inCombat,
       });
-      if (!inCombat) await db.clearActiveCharacterForSession(sessionId, characterId);
-      socket.currentCharacterId = null;
+      if (!inCombat && !stillLive) await db.clearActiveCharacterForSession(sessionId, characterId);
       socket.emit('character_left', { characterId, inCombat });
-      await narratePartyChange(socket, sessionId, inCombat ? 'leave_combat' : 'leave', character.character_sheet);
+      await narratePartyChange(socket, sessionId, inCombat ? 'leave_combat' : 'leave', character.character_sheet, characterId);
     } catch (err) {
       console.error('leave_character error:', err);
     }
@@ -1099,6 +1187,13 @@ io.on('connection', (socket) => {
       const activeCharacter = await db.getCharacterForSession(sessionId).catch(() => null);
       let activeWorldState = worldStateRow?.state || db.DEFAULT_WORLD_STATE;
       if (activeCharacter?.character_sheet) {
+        trackSocketCharacter(socket, activeCharacter.id);
+        await db.upsertCharacterPresence({
+          sessionId,
+          characterId: activeCharacter.id,
+          presence: 'present',
+          inCombat: Boolean(activeWorldState.combat_state?.active),
+        }).catch(console.error);
         activeWorldState = normalizeActiveCharacterWorldState(activeWorldState, activeCharacter.character_sheet, activeCharacter.id);
         await db.updateWorldState(sessionId, activeWorldState);
       }
@@ -1200,6 +1295,7 @@ io.on('connection', (socket) => {
         sessionId,
         dm1Prompt:     DM1_PROMPT,
         playerMessage: dmPlayerMessage,
+        liveCharacterIds: getLiveCharacterIds(),
       });
 
       socket.emit('dm1_typing', true);
@@ -1396,6 +1492,15 @@ io.on('connection', (socket) => {
         }
 
         const activeCharacter = await db.getCharacterForSession(sessionId);
+        if (activeCharacter?.id) {
+          trackSocketCharacter(socket, activeCharacter.id);
+          await db.upsertCharacterPresence({
+            sessionId,
+            characterId: activeCharacter.id,
+            presence: 'present',
+            inCombat: Boolean(ws?.combat_state?.active),
+          }).catch(console.error);
+        }
         const characterSheetContext = summarizeCharacterSheetForRules(activeCharacter?.character_sheet);
         if (characterSheetContext) {
           worldStateContext += '\n\n[ACTIVE CHARACTER SHEET]\n' + characterSheetContext;
@@ -1475,10 +1580,13 @@ io.on('connection', (socket) => {
     if (!socket.sessionId || !socket.currentCharacterId) return;
 
     try {
+      const characterId = socket.currentCharacterId;
+      untrackSocketCharacter(socket, characterId);
       const inCombat = await getCombatActive(socket.sessionId);
+      if (!inCombat && hasLiveCharacterSocket(characterId)) return;
       await db.upsertCharacterPresence({
         sessionId: socket.sessionId,
-        characterId: socket.currentCharacterId,
+        characterId,
         presence: inCombat ? 'present' : 'away',
         inCombat,
       });
