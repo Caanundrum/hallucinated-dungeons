@@ -7,6 +7,7 @@ const db             = require('./db');
 const { estimateTokens } = require('./tokenUtils');
 const { getContentBundle, byId } = require('./contentData');
 const { filterActivePartyPresenceRows } = require('./partyPresence');
+const { buildRulesContext, summarizeRulesContextForPrompt } = require('./rulesContext');
 
 const TOKEN_BUDGET = 8000; // trim if total estimated input exceeds this
 const CAMPAIGN_LOG_TOKEN_BUDGET = 2000;
@@ -58,6 +59,16 @@ async function build({ sessionId, dm1Prompt, playerMessage, liveCharacterIds = n
   staticSystemPrompt += '\n\n';
 
   const activePartyPresence = filterActivePartyPresenceRows(partyPresence, { liveCharacterIds });
+  const rulesContext = buildRulesContext({
+    sessionId,
+    worldState,
+    characterSheet: activeCharacter?.character_sheet,
+    partyPresence: activePartyPresence,
+    liveCharacterIds,
+  });
+  staticSystemPrompt += '## RULES CONTEXT SNAPSHOT\n';
+  staticSystemPrompt += summarizeRulesContextForPrompt(rulesContext) + '\n\n';
+
   const partyPresenceText = buildPartyPresenceText(activePartyPresence);
   if (partyPresenceText) {
     staticSystemPrompt += '## ACTIVE PARTY PRESENCE\n';
