@@ -10,6 +10,53 @@ const RESOURCE_DEFINITIONS = {
     name: 'Luck Points',
     reset: 'long_rest',
   },
+  rage: {
+    name: 'Rage',
+    remaining: 2,
+    max: 2,
+    reset: 'long_rest',
+  },
+  second_wind: {
+    name: 'Second Wind',
+    remaining: 2,
+    max: 2,
+    reset: 'long_rest',
+    recover_on_short_rest: 1,
+  },
+  lay_on_hands: {
+    name: 'Lay on Hands',
+    reset: 'long_rest',
+    unit: 'HP',
+  },
+  bardic_inspiration: {
+    name: 'Bardic Inspiration',
+    reset: 'long_rest',
+    die: '1d6',
+  },
+  innate_sorcery: {
+    name: 'Innate Sorcery',
+    remaining: 2,
+    max: 2,
+    reset: 'long_rest',
+  },
+  arcane_recovery: {
+    name: 'Arcane Recovery',
+    remaining: 1,
+    max: 1,
+    reset: 'long_rest',
+  },
+  healing_hands: {
+    name: 'Healing Hands',
+    remaining: 1,
+    max: 1,
+    reset: 'long_rest',
+  },
+  relentless_endurance: {
+    name: 'Relentless Endurance',
+    remaining: 1,
+    max: 1,
+    reset: 'long_rest',
+  },
 };
 
 function buildResourceState(characterSheet = {}, worldState = {}) {
@@ -40,6 +87,9 @@ function buildResourceState(characterSheet = {}, worldState = {}) {
   if (sheetResources.spell_uses && !resources.spell_uses) {
     resources.spell_uses = cloneResourceBlock(sheetResources.spell_uses);
   }
+
+  applyClassResourceDefaults(resources, characterSheet, worldResources, sheetResources);
+  applySpeciesResourceDefaults(resources, characterSheet, worldResources, sheetResources);
 
   return resources;
 }
@@ -167,6 +217,13 @@ function spendResource({ worldState = {}, characterSheet = {}, resource, amount 
 function completeLongRestResources({ characterSheet = {}, worldState = {} } = {}) {
   const resources = buildResourceState(characterSheet, worldState);
   const notes = [];
+
+  for (const [key, resource] of Object.entries(resources)) {
+    if (isCounterResource(resource) && resource.reset === 'long_rest') {
+      resources[key] = resetResourceUse(resource, 'long_rest');
+    }
+  }
+
   if (hasHumanResourceful(characterSheet)) {
     resources.heroic_inspiration = {
       ...RESOURCE_DEFINITIONS.heroic_inspiration,
@@ -197,6 +254,19 @@ function completeLongRestResources({ characterSheet = {}, worldState = {} } = {}
 function completeShortRestResources({ characterSheet = {}, worldState = {} } = {}) {
   const resources = buildResourceState(characterSheet, worldState);
   const notes = [];
+  for (const [key, resource] of Object.entries(resources)) {
+    if (!isCounterResource(resource)) continue;
+    if (resource.reset === 'short_rest') {
+      resources[key] = resetResourceUse(resource, 'short_rest');
+      notes.push(`${resource.name || titleCase(key)} resets.`);
+    } else if (Number(resource.recover_on_short_rest || 0) > 0) {
+      const before = Number(resource.remaining || 0);
+      const after = Math.min(Number(resource.max || before), before + Number(resource.recover_on_short_rest || 0));
+      resources[key] = { ...resource, remaining: after };
+      if (after > before) notes.push(`${resource.name || titleCase(key)} recovers ${after - before} use.`);
+    }
+  }
+
   if (resources.spell_uses) {
     resources.spell_uses = Object.fromEntries(Object.entries(resources.spell_uses).map(([key, use]) => [
       key,
@@ -212,6 +282,67 @@ function resetResourceUse(use = {}, restType) {
     ...use,
     remaining: Number(use.max ?? 1),
   };
+}
+
+function applyClassResourceDefaults(resources, characterSheet = {}, worldResources = {}, sheetResources = {}) {
+  const classId = normalizeId(characterSheet.identity?.class);
+  const level = getCharacterLevel(characterSheet);
+  const abilityMods = characterSheet.abilities?.modifiers || {};
+  const defaults = {};
+
+  if (classId === 'barbarian') defaults.rage = RESOURCE_DEFINITIONS.rage;
+  if (classId === 'fighter') defaults.second_wind = RESOURCE_DEFINITIONS.second_wind;
+  if (classId === 'paladin') {
+    const max = level * 5;
+    defaults.lay_on_hands = { ...RESOURCE_DEFINITIONS.lay_on_hands, remaining: max, max };
+  }
+  if (classId === 'bard') {
+    const max = Math.max(1, Number(abilityMods.cha || 0));
+    defaults.bardic_inspiration = { ...RESOURCE_DEFINITIONS.bardic_inspiration, remaining: max, max };
+  }
+  if (classId === 'sorcerer') defaults.innate_sorcery = RESOURCE_DEFINITIONS.innate_sorcery;
+  if (classId === 'wizard') defaults.arcane_recovery = RESOURCE_DEFINITIONS.arcane_recovery;
+
+  for (const [key, definition] of Object.entries(defaults)) {
+    if (resources[key]) continue;
+    resources[key] = {
+      ...definition,
+      remaining: Number(worldResources[key]?.remaining ?? sheetResources[key]?.remaining ?? definition.remaining ?? definition.max ?? 0),
+      max: Number(worldResources[key]?.max ?? sheetResources[key]?.max ?? definition.max ?? definition.remaining ?? 0),
+    };
+  }
+}
+
+function applySpeciesResourceDefaults(resources, characterSheet = {}, worldResources = {}, sheetResources = {}) {
+  const speciesId = normalizeId(characterSheet.identity?.species);
+  const proficiency = getProficiencyBonus(characterSheet);
+  const defaults = {};
+
+  if (speciesId === 'celestial_touched') {
+    defaults.healing_hands = { ...RESOURCE_DEFINITIONS.healing_hands, dice: `${proficiency}d4` };
+  }
+  if (speciesId === 'orc') defaults.relentless_endurance = RESOURCE_DEFINITIONS.relentless_endurance;
+
+  for (const [key, definition] of Object.entries(defaults)) {
+    if (resources[key]) continue;
+    resources[key] = {
+      ...definition,
+      remaining: Number(worldResources[key]?.remaining ?? sheetResources[key]?.remaining ?? definition.remaining ?? definition.max ?? 0),
+      max: Number(worldResources[key]?.max ?? sheetResources[key]?.max ?? definition.max ?? definition.remaining ?? 0),
+    };
+  }
+}
+
+function isCounterResource(value = {}) {
+  return value && typeof value === 'object' && !Array.isArray(value) && value.remaining !== undefined && value.max !== undefined;
+}
+
+function getCharacterLevel(characterSheet = {}) {
+  return Number(characterSheet.identity?.level || characterSheet.derived_stats?.level || 1);
+}
+
+function titleCase(value) {
+  return String(value || '').replaceAll('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function addRerollRule(pending = {}, rule) {

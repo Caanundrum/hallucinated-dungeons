@@ -742,3 +742,54 @@ test('target-bound damage dice only apply to their marked target', () => {
   assert.equal(getActiveDamageDice(markedWorld, { name: 'Goblin' }).length, 1);
   assert.equal(getActiveDamageDice(markedWorld, { name: 'Skeleton' }).length, 0);
 });
+
+test('Innate Sorcery active effect affects sorcerer spell attacks and save DCs', () => {
+  const sheet = casterSheet({
+    identity: { name: 'Mira', level: 1, class: 'sorcerer', class_name: 'Sorcerer' },
+    abilities: { modifiers: { cha: 3 } },
+    derived_stats: { spell_attack_bonus: 5, spell_save_dc: 13 },
+    spellcasting: {
+      ability: 'cha',
+      cantrips_known: ['fire_bolt', 'poison_spray'],
+      spells_prepared: [],
+      slots: { 1: 0 },
+    },
+  });
+  const innateEffect = {
+    id: 'innate_sorcery',
+    name: 'Innate Sorcery',
+    rules_effects: [
+      { target: 'spell_save_dc_bonus', class_id: 'sorcerer', value: 1, label: 'Innate Sorcery' },
+      { target: 'spell_attack_advantage', class_id: 'sorcerer', label: 'Innate Sorcery' },
+    ],
+  };
+  const attackCast = resolveSpellCast({
+    message: 'I cast Fire Bolt at the skeleton.',
+    content,
+    characterSheet: sheet,
+    worldState: combatWorld({ active_effects: [innateEffect] }),
+  });
+  const attackOutcome = resolveSpellOutcome({
+    spellCast: attackCast,
+    characterSheet: attackCast.characterSheet,
+    worldState: attackCast.worldState,
+    rollDie: sequenceRolls([2, 17, 4]),
+  });
+  const saveCast = resolveSpellCast({
+    message: 'I cast Poison Spray at the skeleton.',
+    content,
+    characterSheet: sheet,
+    worldState: combatWorld({ active_effects: [innateEffect] }),
+  });
+  const saveOutcome = resolveSpellOutcome({
+    spellCast: saveCast,
+    characterSheet: saveCast.characterSheet,
+    worldState: saveCast.worldState,
+    rollDie: sequenceRolls([12, 4]),
+  });
+
+  assert.match(attackOutcome.reply, /with advantage, using 17/);
+  assert.match(attackOutcome.reply, /Innate Sorcery/);
+  assert.match(saveOutcome.reply, /vs DC 14/);
+  assert.match(saveOutcome.reply, /Save fails/);
+});

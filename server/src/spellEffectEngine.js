@@ -142,7 +142,13 @@ function resolveSpellAttack({ spell, rule, characterSheet, worldState, rollDie }
 
   const attackBonus = Number(characterSheet?.derived_stats?.spell_attack_bonus || 0);
   const attacker = getPlayerCombatant(combat, characterSheet, worldState);
-  const attackMode = getAttackMode({ attacker, target });
+  const conditionMode = getAttackMode({ attacker, target });
+  const activeAdvantageSources = getActiveSpellAttackAdvantageSources(worldState, characterSheet);
+  const attackMode = combineAdvantageModes(conditionMode, activeAdvantageSources.length ? 'advantage' : null);
+  const attackSources = [
+    ...getAttackModeSources({ attacker, target }),
+    ...activeAdvantageSources,
+  ];
   const attackRoll = rollD20WithMode(rollDie, attackMode);
   const natural = attackRoll.natural;
   const total = natural + attackBonus;
@@ -153,7 +159,7 @@ function resolveSpellAttack({ spell, rule, characterSheet, worldState, rollDie }
     `You cast **${spell.name}** at ${target.name}. Spell attack: ${attackRoll.text}${formatSigned(attackBonus)} = ${total} vs AC ${target.ac}.`,
   ];
   if (attackMode) {
-    lines.push(`Spell attack has ${attackMode} from ${formatList(getAttackModeSources({ attacker, target }))}.`);
+    lines.push(`Spell attack has ${attackMode} from ${formatList(attackSources)}.`);
   }
 
   if (hit) {
@@ -195,7 +201,8 @@ function resolveSavingThrowSpell({ spell, rule, characterSheet, worldState, roll
   if (!context?.target) return noSpellTarget(worldState, spell);
   const { combat, target, activeCombat } = context;
 
-  const dc = Number(characterSheet?.derived_stats?.spell_save_dc || 10);
+  const dcBonus = getActiveSpellSaveDcBonus(worldState, characterSheet);
+  const dc = Number(characterSheet?.derived_stats?.spell_save_dc || 10) + dcBonus;
   const saveBonus = getTargetSaveBonus(target, rule.save);
   const save = resolveSavingThrow({ target, ability: rule.save, dc, rollDie, bonus: saveBonus });
   const success = save.success;
@@ -210,6 +217,7 @@ function resolveSavingThrowSpell({ spell, rule, characterSheet, worldState, roll
       ? `Save succeeds.${applied.amount ? ` ${target.name} still takes ${applied.amount} ${rule.damage_type} damage${formatDamageAdjustment(applied.adjustment)}. ${target.name}: (${applied.beforeHp} -> ${target.hp} HP).` : ' No damage is applied.'}`
       : `Save fails. ${target.name} takes ${applied.amount} ${rule.damage_type} damage${formatDamageAdjustment(applied.adjustment)}. ${target.name}: (${applied.beforeHp} -> ${target.hp} HP).`,
   ];
+  if (dcBonus) lines.push(`Spell save DC includes ${formatSigned(dcBonus)} from ${formatList(getActiveSpellSaveDcSources(worldState, characterSheet))}.`);
 
   return finishSpellAction({ spell, worldState, combat, lines, activeCombat });
 }
@@ -219,7 +227,8 @@ function resolveSaveEffectSpell({ spell, rule, characterSheet, worldState, rollD
   if (!context?.target) return noSpellTarget(worldState, spell);
   const { combat, target, activeCombat } = context;
 
-  const dc = Number(characterSheet?.derived_stats?.spell_save_dc || 10);
+  const dcBonus = getActiveSpellSaveDcBonus(worldState, characterSheet);
+  const dc = Number(characterSheet?.derived_stats?.spell_save_dc || 10) + dcBonus;
   const saveBonus = getTargetSaveBonus(target, rule.save);
   const save = resolveSavingThrow({ target, ability: rule.save, dc, rollDie, bonus: saveBonus });
   const success = save.success;
@@ -227,6 +236,7 @@ function resolveSaveEffectSpell({ spell, rule, characterSheet, worldState, rollD
     `You cast **${spell.name}** at ${target.name}. ${target.name} rolls a ${rule.save.toUpperCase()} save: ${save.automaticFailure ? save.text : `${save.text} vs DC ${dc}`}.`,
     success ? 'Save succeeds. The spell does not take hold.' : `Save fails. ${rule.effect}`,
   ];
+  if (dcBonus) lines.push(`Spell save DC includes ${formatSigned(dcBonus)} from ${formatList(getActiveSpellSaveDcSources(worldState, characterSheet))}.`);
   if (!success) {
     target.conditions = addCondition(target.conditions, spell.id);
   }
@@ -983,6 +993,76 @@ function getActiveDamageDice(worldState = {}, target = null) {
     }));
 }
 
+function getActiveDamageBonuses(worldState = {}, context = {}) {
+  const attackAbility = normalizeName(context.attack?.ability);
+  return normalizeEffects(worldState.active_effects || [])
+    .flatMap((effect) => (effect.rules_effects || []).map((rule) => ({ effect, rule })))
+    .filter(({ rule }) => rule.target === 'weapon_damage_bonus')
+    .filter(({ rule }) => !rule.ability || (attackAbility && normalizeName(rule.ability) === attackAbility))
+    .map(({ effect, rule }) => ({
+      effectId: effect.id,
+      value: Number(rule.value || 0),
+      label: rule.label || effect.name || 'Active effect',
+    }))
+    .filter((bonus) => bonus.value !== 0);
+}
+
+function getActiveDamageResistances(worldState = {}) {
+  return normalizeEffects(worldState.active_effects || [])
+    .flatMap((effect) => effect.rules_effects || [])
+    .filter((rule) => rule.target === 'damage_resistance')
+    .flatMap((rule) => rule.damage_types || rule.damage_type || [])
+    .map(normalizeName)
+    .filter(Boolean);
+}
+
+function getActiveD20AdvantageSources(worldState = {}, context = {}) {
+  const ability = normalizeName(context.ability);
+  const testType = normalizeName(context.testType);
+  return normalizeEffects(worldState.active_effects || [])
+    .flatMap((effect) => (effect.rules_effects || []).map((rule) => ({ effect, rule })))
+    .filter(({ rule }) => {
+      if (rule.target === 'ability_check_advantage' && (testType === 'ability_check' || testType === 'skill_check')) {
+        return !rule.ability || normalizeName(rule.ability) === ability;
+      }
+      if (rule.target === 'saving_throw_advantage' && (testType === 'saving_throw' || testType === 'concentration_save')) {
+        return !rule.ability || normalizeName(rule.ability) === ability;
+      }
+      return false;
+    })
+    .map(({ effect, rule }) => rule.label || effect.name || 'Active effect');
+}
+
+function getActiveSpellSaveDcBonus(worldState = {}, characterSheet = {}) {
+  return getActiveSpellSaveDcBonuses(worldState, characterSheet)
+    .reduce((sum, bonus) => sum + Number(bonus.value || 0), 0);
+}
+
+function getActiveSpellSaveDcSources(worldState = {}, characterSheet = {}) {
+  return getActiveSpellSaveDcBonuses(worldState, characterSheet).map((bonus) => bonus.label);
+}
+
+function getActiveSpellSaveDcBonuses(worldState = {}, characterSheet = {}) {
+  const classId = normalizeName(characterSheet.identity?.class || characterSheet.identity?.class_name);
+  return normalizeEffects(worldState.active_effects || [])
+    .flatMap((effect) => (effect.rules_effects || []).map((rule) => ({ effect, rule })))
+    .filter(({ rule }) => rule.target === 'spell_save_dc_bonus')
+    .filter(({ rule }) => !rule.class_id || normalizeName(rule.class_id) === classId)
+    .map(({ effect, rule }) => ({
+      value: Number(rule.value || 0),
+      label: rule.label || effect.name || 'Active effect',
+    }));
+}
+
+function getActiveSpellAttackAdvantageSources(worldState = {}, characterSheet = {}) {
+  const classId = normalizeName(characterSheet.identity?.class || characterSheet.identity?.class_name);
+  return normalizeEffects(worldState.active_effects || [])
+    .flatMap((effect) => (effect.rules_effects || []).map((rule) => ({ effect, rule })))
+    .filter(({ rule }) => rule.target === 'spell_attack_advantage')
+    .filter(({ rule }) => !rule.class_id || normalizeName(rule.class_id) === classId)
+    .map(({ effect, rule }) => rule.label || effect.name || 'Active effect');
+}
+
 function consumeActiveEffects(worldState = {}, effectIds = [], characterSheet = null) {
   const consumeIds = new Set(effectIds.filter(Boolean));
   if (consumeIds.size === 0) return worldState;
@@ -1027,6 +1107,11 @@ function formatBonusDieTag(bonus = null) {
   return ` bonus_die=${bonus.die} bonus_source="${String(bonus.label || 'bonus').replaceAll('"', '')}"`;
 }
 
+function combineAdvantageModes(left = null, right = null) {
+  if (left && right && left !== right) return null;
+  return left || right || null;
+}
+
 module.exports = {
   resolveSpellCast,
   resolveSpellOutcome,
@@ -1038,5 +1123,10 @@ module.exports = {
   consumeActiveEffects,
   getActiveBonusDice,
   getActiveDamageDice,
+  getActiveDamageBonuses,
+  getActiveDamageResistances,
+  getActiveD20AdvantageSources,
+  getActiveSpellAttackAdvantageSources,
+  getActiveSpellSaveDcBonus,
   formatBonusDieTag,
 };

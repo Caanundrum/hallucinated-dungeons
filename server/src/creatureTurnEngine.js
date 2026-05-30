@@ -10,6 +10,7 @@ const {
   getAttackModeSources,
   getTurnBlockReason,
 } = require('./conditionEngine');
+const { getActiveDamageResistances } = require('./spellEffectEngine');
 
 function resolveCreatureTurns({
   worldState = {},
@@ -31,6 +32,8 @@ function resolveCreatureTurns({
       ...activePlayer,
       initiative: combatants[playerIndex].initiative ?? activePlayer.initiative,
     };
+  } else {
+    combatants[playerIndex] = mergeActivePlayerDefenses(combatants[playerIndex], characterSheet, worldState);
   }
 
   let player = combatants[playerIndex];
@@ -205,10 +208,23 @@ function buildPlayerCombatant(characterSheet, worldState) {
     temp_hp: Number(stats.temp_hp ?? derived.temp_hp ?? 0),
     ac: Number(stats.armor_class ?? derived.armor_class ?? 10),
     conditions: uniqueValues([...(derived.conditions || []), ...(stats.conditions || [])]),
-    resistances: uniqueValues([...(characterSheet.resistances || []), ...(stats.resistances || [])]),
+    resistances: uniqueValues([...(characterSheet.resistances || []), ...(stats.resistances || []), ...getActiveDamageResistances(worldState)]),
     vulnerabilities: uniqueValues([...(characterSheet.vulnerabilities || []), ...(stats.vulnerabilities || [])]),
     immunities: uniqueValues([...(characterSheet.immunities || []), ...(stats.immunities || [])]),
     is_player: true,
+  };
+}
+
+function mergeActivePlayerDefenses(player = {}, characterSheet = {}, worldState = {}) {
+  const activePlayer = buildPlayerCombatant(characterSheet, worldState);
+  return {
+    ...player,
+    ac: player.ac ?? activePlayer.ac,
+    temp_hp: player.temp_hp ?? activePlayer.temp_hp,
+    conditions: uniqueValues([...(activePlayer.conditions || []), ...(player.conditions || [])]),
+    resistances: uniqueValues([...(activePlayer.resistances || []), ...(player.resistances || [])]),
+    vulnerabilities: uniqueValues([...(activePlayer.vulnerabilities || []), ...(player.vulnerabilities || [])]),
+    immunities: uniqueValues([...(activePlayer.immunities || []), ...(player.immunities || [])]),
   };
 }
 

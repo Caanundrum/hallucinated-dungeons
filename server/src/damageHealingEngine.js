@@ -1,5 +1,8 @@
 function rollDamageFormula(formula = '1d6', rollDie = defaultRollDie, { crit = false, spellMod = 0 } = {}) {
-  const normalized = String(formula || '1').replace(/spell_mod_min_1/g, String(Math.max(1, Number(spellMod || 0)))).replace(/spell_mod/g, String(spellMod));
+  const normalized = String(formula || '1')
+    .replace(/\s+/g, '')
+    .replace(/spell_mod_min_1/g, String(Math.max(1, Number(spellMod || 0))))
+    .replace(/spell_mod/g, String(spellMod));
   const match = normalized.match(/(\d+)d(\d+)((?:[+-]\d+)*)/i);
   if (!match) return { total: Number(normalized) || 0, rolls: [], modifier: 0 };
 

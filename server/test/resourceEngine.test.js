@@ -9,6 +9,7 @@ const {
   applyPendingRollResourceIntent,
   buildResourceState,
   completeLongRestResources,
+  completeShortRestResources,
   getAutoD20RerollRules,
   spendResource,
 } = require('../src/resourceEngine');
@@ -104,4 +105,49 @@ test('detects automatic d20 reroll features such as Halfling Luck', () => {
 
   assert.equal(rules.length, 1);
   assert.equal(rules[0].id, 'halfling_luck');
+});
+
+test('builds level 1 class feature resources from the character sheet', () => {
+  const fighter = buildResourceState({
+    identity: { class: 'fighter', level: 1 },
+    derived_stats: { proficiency_bonus: 2 },
+  });
+  const paladin = buildResourceState({
+    identity: { class: 'paladin', level: 1 },
+  });
+  const bard = buildResourceState({
+    identity: { class: 'bard', level: 1 },
+    abilities: { modifiers: { cha: 3 } },
+  });
+
+  assert.equal(fighter.second_wind.remaining, 2);
+  assert.equal(paladin.lay_on_hands.max, 5);
+  assert.equal(bard.bardic_inspiration.max, 3);
+});
+
+test('short and long rests recover class feature resources', () => {
+  const shortRest = completeShortRestResources({
+    characterSheet: { identity: { class: 'fighter', level: 1 } },
+    worldState: {
+      player_stats: {
+        resources: {
+          second_wind: { name: 'Second Wind', remaining: 0, max: 2, reset: 'long_rest', recover_on_short_rest: 1 },
+        },
+      },
+    },
+  });
+  const longRest = completeLongRestResources({
+    characterSheet: { identity: { class: 'barbarian', level: 1 } },
+    worldState: {
+      player_stats: {
+        resources: {
+          rage: { name: 'Rage', remaining: 0, max: 2, reset: 'long_rest' },
+        },
+      },
+    },
+  });
+
+  assert.equal(shortRest.resources.second_wind.remaining, 1);
+  assert.match(shortRest.notes.join(' '), /Second Wind recovers 1 use/);
+  assert.equal(longRest.resources.rage.remaining, 2);
 });

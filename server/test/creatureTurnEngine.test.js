@@ -142,3 +142,32 @@ test('creature damage applies player resistance and temporary HP through shared 
   assert.equal(result.player.hp, 12);
   assert.match(result.lines[0], /fire resistance/);
 });
+
+test('active class feature effects can grant damage resistance during creature turns', () => {
+  const result = resolveCreatureTurns({
+    worldState: {
+      active_effects: [{
+        id: 'rage',
+        name: 'Rage',
+        rules_effects: [
+          { target: 'damage_resistance', damage_types: ['bludgeoning', 'piercing', 'slashing'], label: 'Rage' },
+        ],
+      }],
+      player_stats: { hp: 12, max_hp: 12, armor_class: 10 },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', initiative: 18, hp: 12, max_hp: 12, ac: 10, is_player: true, conditions: [] },
+          combatant('Wolf', 8, { attack: { name: 'bite', attack_bonus: 4, damage_formula: '1d6+2', damage_type: 'piercing' } }),
+        ],
+      },
+    },
+    characterSheet,
+    rollDie: sequenceRolls([12, 4]),
+  });
+
+  assert.equal(result.player.hp, 9);
+  assert.match(result.lines[0], /piercing resistance/);
+});

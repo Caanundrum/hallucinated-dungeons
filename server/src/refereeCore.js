@@ -7,6 +7,8 @@ const {
   applyStartOfTurnEffects,
   consumeActiveEffects,
   getActiveBonusDice,
+  getActiveD20AdvantageSources,
+  getActiveDamageBonuses,
   getActiveDamageDice,
   formatBonusDieTag,
 } = require('./spellEffectEngine');
@@ -37,6 +39,7 @@ const {
   getTurnBlockReason,
   resolveSavingThrow,
 } = require('./conditionEngine');
+const { resolveFeatureAction } = require('./classFeatureEngine');
 
 const DEFAULT_CHECK_DC = 15;
 
@@ -80,6 +83,9 @@ function adjudicate({ message, worldState = {}, characterSheet = null, currentTu
   if (timeIntent) {
     return resolveTimePassage({ timeIntent, worldState: state });
   }
+
+  const featureAction = resolveFeatureAction({ message: text, worldState: state, characterSheet: sheet, rollDie });
+  if (featureAction) return featureAction;
 
   if (!state.combat_state?.active && isCombatStarter(text)) {
     const targetIssue = validateCombatStartTarget({ message: text, worldState: state });
@@ -175,6 +181,13 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
     ability: check.ability,
     skill: check.skill,
   });
+  const activeAdvantageSources = getActiveD20AdvantageSources(worldState, {
+    testType: check.skill ? 'skill_check' : 'ability_check',
+    ability: check.ability,
+    skill: check.skill,
+  });
+  const advantageMode = combineAdvantageModes(conditionMode, activeAdvantageSources.length ? 'advantage' : null);
+  const advantageSources = [...conditionSources, ...activeAdvantageSources];
   const pendingRoll = {
     id: `roll_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     kind: check.skill ? 'skill_check' : 'ability_check',
@@ -188,8 +201,8 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
     bonus_source: bonus?.label || null,
     bonus_effect_ids: bonus?.expiresOnUse ? [bonus.effectId] : [],
     reroll_rules: getAutoD20RerollRules(characterSheet),
-    advantage_mode: conditionMode,
-    advantage_sources: conditionSources,
+    advantage_mode: advantageMode,
+    advantage_sources: advantageSources,
     dc,
     dc_source: buildDcSource(dc, intent.raw, inCombat),
     intent: intent.raw,
@@ -207,7 +220,7 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
       ...nextWorldState,
       pending_roll: pendingRoll,
     },
-    reply: `Make a DC ${dc} ${check.label}.${formatAdvantageModeText(conditionMode, conditionSources)}${bonus ? ` Add ${bonus.die} from ${bonus.label}.` : ''}${inCombat ? ' This uses your Action.' : ''} [CHECK: id=${pendingRoll.id}${check.skill ? ` skill=${check.skill}` : ''} ability=${check.ability} modifier=${modifier.total} breakdown="${sanitizeTagValue(modifier.breakdown)}"${formatBonusDieTag(bonus)}]`,
+    reply: `Make a DC ${dc} ${check.label}.${formatAdvantageModeText(advantageMode, advantageSources)}${bonus ? ` Add ${bonus.die} from ${bonus.label}.` : ''}${inCombat ? ' This uses your Action.' : ''} [CHECK: id=${pendingRoll.id}${check.skill ? ` skill=${check.skill}` : ''} ability=${check.ability} modifier=${modifier.total} breakdown="${sanitizeTagValue(modifier.breakdown)}"${formatBonusDieTag(bonus)}]`,
   };
 }
 
@@ -227,6 +240,12 @@ function promptSavingThrow({ intent, worldState, characterSheet, currentTurn = 0
     testType: 'saving_throw',
     ability: save.ability,
   });
+  const activeAdvantageSources = getActiveD20AdvantageSources(worldState, {
+    testType: 'saving_throw',
+    ability: save.ability,
+  });
+  const advantageMode = combineAdvantageModes(conditionMode, activeAdvantageSources.length ? 'advantage' : null);
+  const advantageSources = [...conditionSources, ...activeAdvantageSources];
   const pendingRoll = {
     id: `roll_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     kind: 'saving_throw',
@@ -239,8 +258,8 @@ function promptSavingThrow({ intent, worldState, characterSheet, currentTurn = 0
     bonus_source: bonus?.label || null,
     bonus_effect_ids: bonus?.expiresOnUse ? [bonus.effectId] : [],
     reroll_rules: getAutoD20RerollRules(characterSheet),
-    advantage_mode: conditionMode,
-    advantage_sources: conditionSources,
+    advantage_mode: advantageMode,
+    advantage_sources: advantageSources,
     dc,
     dc_source: buildDcSource(dc, intent.raw, inCombat),
     intent: intent.raw,
@@ -259,7 +278,7 @@ function promptSavingThrow({ intent, worldState, characterSheet, currentTurn = 0
       ...worldState,
       pending_roll: pendingRoll,
     },
-    reply: `Make a DC ${dc} ${save.label}.${formatAdvantageModeText(conditionMode, conditionSources)}${bonus ? ` Add ${bonus.die} from ${bonus.label}.` : ''} [SAVE: id=${pendingRoll.id} ability=${save.ability} modifier=${modifier.total} breakdown="${sanitizeTagValue(modifier.breakdown)}"${formatBonusDieTag(bonus)}]`,
+    reply: `Make a DC ${dc} ${save.label}.${formatAdvantageModeText(advantageMode, advantageSources)}${bonus ? ` Add ${bonus.die} from ${bonus.label}.` : ''} [SAVE: id=${pendingRoll.id} ability=${save.ability} modifier=${modifier.total} breakdown="${sanitizeTagValue(modifier.breakdown)}"${formatBonusDieTag(bonus)}]`,
   };
 }
 
@@ -761,11 +780,17 @@ function completeLongRest(worldState, characterSheet = {}) {
 }
 
 function completeShortRest(worldState, characterSheet = {}, rollDie = defaultRollDie) {
-  const resourceResult = completeShortRestResources({ characterSheet, worldState });
+  let resourceResult = completeShortRestResources({ characterSheet, worldState });
   const classId = characterSheet?.identity?.class;
-  const nextSlots = classId === 'warlock'
+  let nextSlots = classId === 'warlock'
     ? getMaxSpellSlots(characterSheet)
     : worldState.player_stats?.spell_slots;
+  const arcaneRecovery = applyArcaneRecovery({ characterSheet, worldState, resources: resourceResult.resources, spellSlots: nextSlots });
+  resourceResult = {
+    resources: arcaneRecovery.resources,
+    notes: [...resourceResult.notes, ...arcaneRecovery.notes],
+  };
+  nextSlots = arcaneRecovery.spellSlots;
   const hitDice = getHitDiceState(characterSheet, worldState);
   const maxHp = Number(characterSheet?.derived_stats?.max_hp ?? worldState.player_stats?.max_hp ?? worldState.player_stats?.hp ?? 1);
   let hp = Number(worldState.player_stats?.hp ?? characterSheet?.derived_stats?.hp ?? maxHp);
@@ -803,6 +828,39 @@ function completeShortRest(worldState, characterSheet = {}, rollDie = defaultRol
       },
     }, resourceResult.resources),
     note: [note, ...resourceResult.notes].filter(Boolean).join(' '),
+  };
+}
+
+function applyArcaneRecovery({ characterSheet = {}, worldState = {}, resources = {}, spellSlots = {} } = {}) {
+  if (normalizeTargetPhrase(characterSheet.identity?.class) !== 'wizard') {
+    return { resources, spellSlots, notes: [] };
+  }
+  const recovery = resources.arcane_recovery;
+  if (!recovery || Number(recovery.remaining || 0) <= 0) {
+    return { resources, spellSlots, notes: [] };
+  }
+
+  const maxSlots = getMaxSpellSlots(characterSheet);
+  const currentSlots = { ...(spellSlots || worldState.player_stats?.spell_slots || {}) };
+  const maxFirstLevel = Number(maxSlots[1] ?? maxSlots['1'] ?? 0);
+  const currentFirstLevel = Number(currentSlots[1] ?? currentSlots['1'] ?? 0);
+  if (maxFirstLevel <= 0 || currentFirstLevel >= maxFirstLevel) {
+    return { resources, spellSlots: currentSlots, notes: [] };
+  }
+
+  return {
+    resources: {
+      ...resources,
+      arcane_recovery: {
+        ...recovery,
+        remaining: Math.max(0, Number(recovery.remaining || 0) - 1),
+      },
+    },
+    spellSlots: {
+      ...currentSlots,
+      1: Math.min(maxFirstLevel, currentFirstLevel + 1),
+    },
+    notes: ['Arcane Recovery restores one expended level 1 spell slot.'],
   };
 }
 
@@ -1047,10 +1105,19 @@ function resolvePlayerAttack({ worldState, characterSheet, rollDie }) {
   if (hit) {
     const damage = rollDamage(attack.damageFormula, rollDie, isCrit);
     const bonusDamage = rollBonusDice(getActiveDamageDice(spent.worldState, target), rollDie);
-    const totalDamage = damage.total + bonusDamage.total;
+    const flatBonuses = getActiveDamageBonuses(spent.worldState, { attack, characterSheet });
+    const flatBonusTotal = flatBonuses.reduce((sum, bonus) => sum + Number(bonus.value || 0), 0);
+    const sneakAttack = getSneakAttackDamage({ characterSheet, attack, advantageMode, rollDie, crit: isCrit });
+    const totalDamage = damage.total + bonusDamage.total + flatBonusTotal + sneakAttack.total;
     const before = Number(target.hp || 0);
     target.hp = Math.max(0, before - totalDamage);
-    lines.push(`${isCrit ? '**Critical hit.** ' : ''}Hit for ${totalDamage} damage${bonusDamage.total ? ` (${damage.total} weapon + ${bonusDamage.summary})` : ''}. ${target.name}: (${before} -> ${target.hp} HP).`);
+    const damageParts = [
+      `${damage.total} weapon`,
+      bonusDamage.total ? bonusDamage.summary : '',
+      flatBonuses.length ? flatBonuses.map((bonus) => `${bonus.label} ${formatSigned(bonus.value)}`).join(' + ') : '',
+      sneakAttack.total ? `Sneak Attack ${sneakAttack.die}=${sneakAttack.total}` : '',
+    ].filter(Boolean);
+    lines.push(`${isCrit ? '**Critical hit.** ' : ''}Hit for ${totalDamage} damage${damageParts.length > 1 ? ` (${damageParts.join(' + ')})` : ''}. ${target.name}: (${before} -> ${target.hp} HP).`);
     consumeEffectIds.push(...bonusDamage.expireEffectIds);
     if ((target.conditions || []).includes('sleep')) {
       target.conditions = (target.conditions || []).filter((condition) => condition !== 'sleep' && condition !== 'unconscious');
@@ -1313,6 +1380,12 @@ function buildConcentrationPrompt({ worldState, characterSheet = {}, damageEvent
     testType: 'concentration_save',
     ability: 'con',
   });
+  const activeAdvantageSources = getActiveD20AdvantageSources(worldState, {
+    testType: 'concentration_save',
+    ability: 'con',
+  });
+  const advantageMode = combineAdvantageModes(conditionMode, activeAdvantageSources.length ? 'advantage' : null);
+  const advantageSources = [...conditionSources, ...activeAdvantageSources];
   const pendingRoll = {
     id: `roll_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     kind: 'concentration_save',
@@ -1325,8 +1398,8 @@ function buildConcentrationPrompt({ worldState, characterSheet = {}, damageEvent
     bonus_source: bonus?.label || null,
     bonus_effect_ids: bonus?.expiresOnUse ? [bonus.effectId] : [],
     reroll_rules: getAutoD20RerollRules(characterSheet),
-    advantage_mode: conditionMode,
-    advantage_sources: conditionSources,
+    advantage_mode: advantageMode,
+    advantage_sources: advantageSources,
     dc,
     dc_source: `Concentration save after damage from ${source}; DC is max(10, half damage)`,
     effect_ids: concentrationEffects.map((effect) => effect.id),
@@ -1337,7 +1410,7 @@ function buildConcentrationPrompt({ worldState, characterSheet = {}, damageEvent
   };
   return {
     pendingRoll,
-    reply: `Concentration is at risk from ${source}. Make a DC ${dc} Constitution Saving Throw to maintain ${formatList(effectNames)}.${formatAdvantageModeText(conditionMode, conditionSources)}${bonus ? ` Add ${bonus.die} from ${bonus.label}.` : ''} ${rollTagForPending(pendingRoll)}`,
+    reply: `Concentration is at risk from ${source}. Make a DC ${dc} Constitution Saving Throw to maintain ${formatList(effectNames)}.${formatAdvantageModeText(advantageMode, advantageSources)}${bonus ? ` Add ${bonus.die} from ${bonus.label}.` : ''} ${rollTagForPending(pendingRoll)}`,
   };
 }
 
@@ -1586,11 +1659,36 @@ function normalizeTargetPhrase(value) {
 
 function getPrimaryAttack(characterSheet) {
   const attack = characterSheet?.derived_stats?.attack_breakdowns?.[0];
+  const weaponId = attack?.weapon_id || attack?.weaponId || null;
+  const weapon = weaponId
+    ? getContentBundle().equipment.find((item) => item.id === weaponId)
+    : null;
   return {
     name: attack?.name || 'weapon',
+    weaponId,
+    ability: weapon?.ability || attack?.ability || null,
+    properties: weapon?.properties || attack?.properties || [],
+    weaponCategory: weapon?.weapon_category || attack?.weapon_category || null,
     attackBonus: Number(attack?.attack_total ?? 3),
     damageFormula: attack?.damage_formula || '1d8+3',
   };
+}
+
+function getSneakAttackDamage({ characterSheet = {}, attack = {}, advantageMode = null, rollDie = defaultRollDie, crit = false } = {}) {
+  if (normalizeTargetPhrase(characterSheet.identity?.class) !== 'rogue') return { total: 0, die: '1d6' };
+  if (advantageMode !== 'advantage') return { total: 0, die: '1d6' };
+  if (!isSneakAttackWeapon(attack)) return { total: 0, die: '1d6' };
+
+  const damage = rollDamageFormula('1d6', rollDie, { crit });
+  return {
+    total: damage.total,
+    die: crit ? '2d6' : '1d6',
+  };
+}
+
+function isSneakAttackWeapon(attack = {}) {
+  const properties = attack.properties || [];
+  return properties.includes('finesse') || properties.includes('ammunition') || attack.weaponCategory === 'ranged';
 }
 
 function getAttackAdvantageMode(attacker = {}, target = {}) {
@@ -1672,6 +1770,11 @@ function formatAdvantageModeText(mode = null, sources = []) {
   if (!mode) return '';
   const sourceText = sources?.length ? ` from ${formatList(sources)}` : '';
   return ` Roll with ${mode}${sourceText}.`;
+}
+
+function combineAdvantageModes(left = null, right = null) {
+  if (left && right && left !== right) return null;
+  return left || right || null;
 }
 
 function isMovementIntent(message) {

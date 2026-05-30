@@ -1066,3 +1066,93 @@ test('long rest grants Human Resourceful Heroic Inspiration', () => {
   assert.equal(result.worldState.player_stats.resources.heroic_inspiration.remaining, 1);
   assert.match(result.reply, /Human Resourceful grants Heroic Inspiration/);
 });
+
+test('class feature bonus actions resolve during combat without ending the player turn', () => {
+  const result = adjudicate({
+    message: 'I enter Rage.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', hp: 14, max_hp: 14, ac: 14, is_player: true },
+          { name: 'Goblin', hp: 8, max_hp: 8, ac: 12, is_player: false },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      identity: { name: 'Ari', class: 'barbarian', class_name: 'Barbarian', level: 1 },
+      derived_stats: { ...characterSheet.derived_stats, hp: 14, max_hp: 14, armor_class: 14 },
+    },
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.combat_state.round, 1);
+  assert.equal(result.worldState.combat_state.turn_resources.action_available, true);
+  assert.equal(result.worldState.combat_state.turn_resources.bonus_action_available, false);
+  assert.equal(result.worldState.active_effects[0].id, 'rage');
+  assert.doesNotMatch(result.reply, /Goblin uses/);
+});
+
+test('Arcane Recovery restores an expended level 1 wizard slot during a short rest', () => {
+  const result = adjudicate({
+    message: 'We take a short rest.',
+    worldState: worldState({
+      player_stats: {
+        hp: 8,
+        max_hp: 8,
+        armor_class: 12,
+        spell_slots: { 1: 0 },
+        resources: {
+          arcane_recovery: { name: 'Arcane Recovery', remaining: 1, max: 1, reset: 'long_rest' },
+        },
+      },
+    }),
+    characterSheet: {
+      identity: { name: 'Mira', class: 'wizard', class_name: 'Wizard', level: 1 },
+      derived_stats: { hp: 8, max_hp: 8, armor_class: 12 },
+      spellcasting: { ability: 'int', slots: { 1: 2 } },
+      resources: {},
+    },
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.player_stats.spell_slots[1], 1);
+  assert.equal(result.worldState.player_stats.resources.arcane_recovery.remaining, 0);
+  assert.match(result.reply, /Arcane Recovery restores one expended level 1 spell slot/);
+});
+
+test('rogue Sneak Attack adds damage when a finesse attack has advantage', () => {
+  const result = adjudicate({
+    message: 'I attack the goblin.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', hp: 10, max_hp: 10, ac: 14, is_player: true },
+          { name: 'Goblin', hp: 20, max_hp: 20, ac: 12, is_player: false, conditions: ['guiding_bolt_advantage'], attack: { name: 'scimitar', attack_bonus: 3, damage_formula: '1d6+1' } },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      identity: { name: 'Ari', class: 'rogue', class_name: 'Rogue', level: 1 },
+      derived_stats: {
+        ...characterSheet.derived_stats,
+        attack_breakdowns: [
+          { weapon_id: 'shortsword', name: 'Shortsword', attack_total: 5, damage_formula: '1d6 + 3' },
+        ],
+      },
+    },
+    rollDie: sequenceRolls([12, 5, 4, 3, 2]),
+  });
+
+  const goblin = result.worldState.combat_state.combatants.find((combatant) => combatant.name === 'Goblin');
+  assert.equal(result.handled, true);
+  assert.equal(goblin.hp, 10);
+  assert.match(result.reply, /Sneak Attack 1d6=3/);
+});
