@@ -113,6 +113,74 @@ test('resolves an authenticated skill roll against the stored DC', () => {
   assert.match(result.reply, /clerk keeps his motive/);
 });
 
+test('spends Heroic Inspiration to reroll a failed pending d20 test', () => {
+  const prompt = adjudicate({
+    message: "I study the clerk's face.",
+    worldState: worldState({
+      player_stats: {
+        hp: 12,
+        max_hp: 12,
+        armor_class: 16,
+        resources: {
+          heroic_inspiration: { name: 'Heroic Inspiration', remaining: 1, max: 1 },
+        },
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      identity: { ...characterSheet.identity, species: 'human' },
+      features: [
+        { source: 'species', name: 'Resourceful', description: 'Gain Heroic Inspiration whenever you finish a Long Rest.' },
+      ],
+    },
+    currentTurn: 4,
+  });
+  const primed = adjudicate({
+    message: 'Use heroic inspiration.',
+    worldState: prompt.worldState,
+    characterSheet: {
+      ...characterSheet,
+      identity: { ...characterSheet.identity, species: 'human' },
+      features: [
+        { source: 'species', name: 'Resourceful', description: 'Gain Heroic Inspiration whenever you finish a Long Rest.' },
+      ],
+    },
+  });
+  const result = adjudicate({
+    message: `[ROLL REQUEST: ${primed.worldState.pending_roll.id}]`,
+    worldState: primed.worldState,
+    characterSheet,
+    rollDie: sequenceRolls([4, 16]),
+  });
+
+  assert.equal(primed.worldState.player_stats.resources.heroic_inspiration.remaining, 0);
+  assert.equal(result.handled, true);
+  assert.match(result.reply, /Heroic Inspiration reroll 4->16/);
+  assert.match(result.reply, /\*\*success\*\*/);
+});
+
+test('Halfling Luck automatically rerolls a natural 1 on a pending d20 test', () => {
+  const prompt = adjudicate({
+    message: "I study the clerk's face.",
+    worldState: worldState(),
+    characterSheet: {
+      ...characterSheet,
+      identity: { ...characterSheet.identity, species: 'halfling' },
+    },
+    currentTurn: 4,
+  });
+  const result = adjudicate({
+    message: `[ROLL REQUEST: ${prompt.worldState.pending_roll.id}]`,
+    worldState: prompt.worldState,
+    characterSheet,
+    rollDie: sequenceRolls([1, 14]),
+  });
+
+  assert.equal(result.handled, true);
+  assert.match(result.reply, /Halfling Luck rerolled 1->14/);
+  assert.match(result.reply, /\*\*success\*\*/);
+});
+
 test('blocks new actions until a pending roll is resolved', () => {
   const result = adjudicate({
     message: 'I attack the goblin instead.',
@@ -952,4 +1020,31 @@ test('short rest spends available Hit Dice for healing', () => {
   assert.equal(result.worldState.player_stats.hp, 11);
   assert.equal(result.worldState.player_stats.hit_dice.remaining, 0);
   assert.match(result.reply, /Spent 1 Hit Die/);
+});
+
+test('long rest grants Human Resourceful Heroic Inspiration', () => {
+  const result = adjudicate({
+    message: 'We take a long rest.',
+    worldState: worldState({
+      player_stats: {
+        hp: 3,
+        max_hp: 12,
+        armor_class: 16,
+        resources: {
+          heroic_inspiration: { name: 'Heroic Inspiration', remaining: 0, max: 1 },
+        },
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      identity: { ...characterSheet.identity, species: 'human', class: 'fighter', class_name: 'Fighter', level: 1 },
+      features: [
+        { source: 'species', name: 'Resourceful', description: 'Gain Heroic Inspiration whenever you finish a Long Rest.' },
+      ],
+    },
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.player_stats.resources.heroic_inspiration.remaining, 1);
+  assert.match(result.reply, /Human Resourceful grants Heroic Inspiration/);
 });

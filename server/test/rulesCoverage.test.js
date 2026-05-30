@@ -49,9 +49,9 @@ test('matrix flags the foundation gaps that block leveling work', () => {
   const human = matrix.sections.species.entries.find((entry) => entry.id === 'human');
   const resourceful = human.children.find((entry) => entry.id === 'resourceful');
 
-  assert.equal(resources.get('heroic_inspiration').status, STATUS.DEFERRED);
-  assert.equal(feats.get('lucky').status, STATUS.DEFERRED);
-  assert.equal(resourceful.status, STATUS.DEFERRED);
+  assert.equal(resources.get('heroic_inspiration').status, STATUS.PARTIAL);
+  assert.equal(feats.get('lucky').status, STATUS.PARTIAL);
+  assert.equal(resourceful.status, STATUS.IMPLEMENTED);
   assert.equal(classes.get('paladin').status, STATUS.PARTIAL);
   assert.equal(classes.get('wizard').status, STATUS.PARTIAL);
 });

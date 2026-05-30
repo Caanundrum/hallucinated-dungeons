@@ -17,6 +17,16 @@ const {
 const { resolveCreatureTurns } = require('./creatureTurnEngine');
 const { checkSpatialAction } = require('./spatialGuard');
 const {
+  resolveD20Test,
+} = require('./d20RollEngine');
+const {
+  applyPendingRollResourceIntent,
+  completeLongRestResources,
+  completeShortRestResources,
+  getAutoD20RerollRules,
+  mergeWorldResources,
+} = require('./resourceEngine');
+const {
   getAttackMode,
   getAttackModeSources,
   getTurnBlockReason,
@@ -38,12 +48,14 @@ function adjudicate({ message, worldState = {}, characterSheet = null, currentTu
   }
 
   if (state.pending_roll) {
+    const resourceIntent = applyPendingRollResourceIntent({ message: text, worldState: state, characterSheet: sheet });
+    if (resourceIntent) return resourceIntent;
     return remindPendingRoll({ worldState: state });
   }
 
   if (state.combat_state?.active && getCurrentHp(sheet, state) <= 0) {
     const deathStatus = getDeathSaveStatus(state);
-    if (deathStatus === 'dying') return promptDeathSave({ worldState: state, currentTurn });
+    if (deathStatus === 'dying') return promptDeathSave({ worldState: state, characterSheet: sheet, currentTurn });
     return {
       handled: true,
       logType: 'referee_incapacitated',
@@ -157,6 +169,7 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
     bonus_die: bonus?.die || null,
     bonus_source: bonus?.label || null,
     bonus_effect_ids: bonus?.expiresOnUse ? [bonus.effectId] : [],
+    reroll_rules: getAutoD20RerollRules(characterSheet),
     dc,
     dc_source: buildDcSource(dc, intent.raw, inCombat),
     intent: intent.raw,
@@ -194,6 +207,7 @@ function promptSavingThrow({ intent, worldState, characterSheet, currentTurn = 0
     bonus_die: bonus?.die || null,
     bonus_source: bonus?.label || null,
     bonus_effect_ids: bonus?.expiresOnUse ? [bonus.effectId] : [],
+    reroll_rules: getAutoD20RerollRules(characterSheet),
     dc,
     dc_source: buildDcSource(dc, intent.raw, inCombat),
     intent: intent.raw,
@@ -216,7 +230,7 @@ function promptSavingThrow({ intent, worldState, characterSheet, currentTurn = 0
   };
 }
 
-function promptDeathSave({ worldState, currentTurn = 0 }) {
+function promptDeathSave({ worldState, characterSheet = {}, currentTurn = 0 }) {
   if (worldState.pending_roll?.kind === 'death_save') {
     return {
       handled: true,
@@ -233,6 +247,7 @@ function promptDeathSave({ worldState, currentTurn = 0 }) {
     modifier: 0,
     dc: 10,
     dc_source: 'death saving throw: 10 or higher succeeds; natural 1 counts as two failures; natural 20 restores 1 HP',
+    reroll_rules: getAutoD20RerollRules(characterSheet),
     consumes: 'death_save',
     combat: true,
     ends_turn: true,
@@ -308,23 +323,22 @@ function resolvePendingRoll({ message, worldState, characterSheet, rollDie }) {
 }
 
 function rollPendingRequest(pending = {}, rollDie = defaultRollDie) {
-  const natural = rollDie(20);
-  let total = natural + Number(pending.modifier || 0);
-  const parts = [`natural ${natural}`, `1d20${formatSigned(pending.modifier || 0)}=${natural + Number(pending.modifier || 0)}`];
-
-  if (pending.bonus_die) {
-    const bonus = rollDiceExpression(pending.bonus_die, rollDie);
-    if (bonus) {
-      total += bonus.total;
-      parts.push(`${pending.bonus_source || 'bonus'} ${pending.bonus_die}=${bonus.total}`);
-    }
-  }
-
-  return {
-    total,
-    natural,
-    rollText: `${total} (${parts.join('; ')})`,
-  };
+  return resolveD20Test({
+    kind: pending.kind,
+    modifier: Number(pending.modifier || 0),
+    dc: pending.dc ?? null,
+    advantageMode: pending.advantage_mode || null,
+    bonusDice: pending.bonus_die
+      ? [{
+        die: pending.bonus_die,
+        label: pending.bonus_source || 'bonus',
+        effectId: pending.bonus_effect_ids?.[0],
+        expiresOnUse: Boolean(pending.bonus_effect_ids?.length),
+      }]
+      : [],
+    rerollRules: pending.reroll_rules || [],
+    rollDie,
+  });
 }
 
 function remindPendingRoll({ worldState }) {
@@ -629,14 +643,14 @@ function resolveRest({ restIntent, worldState, characterSheet, rollDie = default
   };
 
   const restResult = restIntent.type === 'long'
-    ? { worldState: completeLongRest(baseState, characterSheet), note: '' }
+    ? completeLongRest(baseState, characterSheet)
     : completeShortRest(baseState, characterSheet, rollDie);
   const nextState = restResult.worldState;
   const expired = ticked.expiredEffects.length
     ? ` Expired effects: ${ticked.expiredEffects.map((effect) => effect.name || effect.id).join(', ')}.`
     : '';
   const reply = restIntent.type === 'long'
-    ? `You complete a **long rest**. HP, death saves, spell slots, and once-per-rest spell uses reset.${expired}`
+    ? `You complete a **long rest**. HP, death saves, spell slots, and once-per-rest spell uses reset.${restResult.note ? ` ${restResult.note}` : ''}${expired}`
     : `You complete a **short rest**. Time passes, short-rest resources refresh where your sheet supports them, and active durations tick down.${restResult.note ? ` ${restResult.note}` : ''}${expired}`;
 
   return {
@@ -686,30 +700,35 @@ function completeLongRest(worldState, characterSheet = {}) {
   const maxHp = Number(characterSheet?.derived_stats?.max_hp ?? worldState.player_stats?.max_hp ?? worldState.player_stats?.hp ?? 1);
   const maxSlots = getMaxSpellSlots(characterSheet);
   const hitDice = getHitDiceState(characterSheet, worldState);
+  const resourceResult = completeLongRestResources({ characterSheet, worldState });
   return {
-    ...worldState,
-    active_effects: [],
-    pending_roll: null,
-    player_stats: {
-      ...(worldState.player_stats || {}),
-      hp: maxHp,
-      max_hp: maxHp,
-      temp_hp: 0,
-      death_saves: { successes: 0, failures: 0 },
-      conditions: [],
-      spell_slots: maxSlots,
-      reset_spell_uses: true,
-      hit_dice: {
-        die: hitDice.die,
-        remaining: hitDice.max,
-        max: hitDice.max,
+    worldState: mergeWorldResources({
+      ...worldState,
+      active_effects: [],
+      pending_roll: null,
+      player_stats: {
+        ...(worldState.player_stats || {}),
+        hp: maxHp,
+        max_hp: maxHp,
+        temp_hp: 0,
+        death_saves: { successes: 0, failures: 0 },
+        conditions: [],
+        spell_slots: maxSlots,
+        reset_spell_uses: true,
+        hit_dice: {
+          die: hitDice.die,
+          remaining: hitDice.max,
+          max: hitDice.max,
+        },
+        hit_dice_remaining: hitDice.max,
       },
-      hit_dice_remaining: hitDice.max,
-    },
+    }, resourceResult.resources),
+    note: resourceResult.notes.join(' '),
   };
 }
 
 function completeShortRest(worldState, characterSheet = {}, rollDie = defaultRollDie) {
+  const resourceResult = completeShortRestResources({ characterSheet, worldState });
   const classId = characterSheet?.identity?.class;
   const nextSlots = classId === 'warlock'
     ? getMaxSpellSlots(characterSheet)
@@ -735,7 +754,7 @@ function completeShortRest(worldState, characterSheet = {}, rollDie = defaultRol
       : 'No Hit Dice remain to spend for healing.';
 
   return {
-    worldState: {
+    worldState: mergeWorldResources({
       ...worldState,
       player_stats: {
         ...(worldState.player_stats || {}),
@@ -749,8 +768,8 @@ function completeShortRest(worldState, characterSheet = {}, rollDie = defaultRol
         },
         hit_dice_remaining: remainingHitDice,
       },
-    },
-    note,
+    }, resourceResult.resources),
+    note: [note, ...resourceResult.notes].filter(Boolean).join(' '),
   };
 }
 
@@ -971,18 +990,23 @@ function resolvePlayerAttack({ worldState, characterSheet, rollDie }) {
 
   const attack = getPrimaryAttack(characterSheet);
   const advantageMode = getAttackAdvantageMode(player, target);
-  const attackRoll = rollD20WithMode(rollDie, advantageMode);
+  const attackRoll = resolveD20Test({
+    kind: 'attack',
+    modifier: attack.attackBonus,
+    dc: Number(target.ac || 10),
+    advantageMode,
+    bonusDice: getActiveBonusDice(spent.worldState, 'attack'),
+    rerollRules: getAutoD20RerollRules(characterSheet),
+    rollDie,
+  });
   const natural = attackRoll.natural;
-  const attackBonusDice = rollBonusDice(getActiveBonusDice(spent.worldState, 'attack'), rollDie);
-  const attackTotal = natural + attack.attackBonus + attackBonusDice.total;
+  const attackBonusDice = attackRoll.bonusDice;
+  const attackTotal = attackRoll.total;
   const isCrit = natural === 20;
   const criticalMiss = natural === 1;
   const hit = !criticalMiss && (isCrit || attackTotal >= Number(target.ac || 10));
-  const bonusText = attackBonusDice.total
-    ? ` + ${attackBonusDice.summary}`
-    : '';
   const lines = [
-    `You attack ${target.name} with ${attack.name}. Attack roll: ${attackRoll.text}${formatSigned(attack.attackBonus)}${bonusText} = ${attackTotal} vs AC ${target.ac}.`,
+    `You attack ${target.name} with ${attack.name}. Attack roll: ${attackRoll.rollText} vs AC ${target.ac}.`,
   ];
   if (advantageMode) lines.push(`Attack roll has ${advantageMode} from ${formatList(getAttackAdvantageSources(player, target))}.`);
 
@@ -1256,6 +1280,7 @@ function buildConcentrationPrompt({ worldState, characterSheet = {}, damageEvent
     bonus_die: bonus?.die || null,
     bonus_source: bonus?.label || null,
     bonus_effect_ids: bonus?.expiresOnUse ? [bonus.effectId] : [],
+    reroll_rules: getAutoD20RerollRules(characterSheet),
     dc,
     dc_source: `Concentration save after damage from ${source}; DC is max(10, half damage)`,
     effect_ids: concentrationEffects.map((effect) => effect.id),
@@ -1544,20 +1569,6 @@ function getSpellAttackAdvantageSources(target = {}) {
   if (conditions.includes('guiding_bolt_advantage')) sources.push('Guiding Bolt');
   if (conditions.includes('sleep') || conditions.includes('unconscious')) sources.push('unconscious target');
   return sources;
-}
-
-function rollD20WithMode(rollDie, mode = null) {
-  if (mode === 'advantage' || mode === 'disadvantage') {
-    const first = rollDie(20);
-    const second = rollDie(20);
-    const natural = mode === 'advantage' ? Math.max(first, second) : Math.min(first, second);
-    return {
-      natural,
-      text: `${first}/${second} with ${mode}, using ${natural}`,
-    };
-  }
-  const natural = rollDie(20);
-  return { natural, text: String(natural) };
 }
 
 function rollBonusDice(bonuses = [], rollDie) {

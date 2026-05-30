@@ -595,6 +595,14 @@ async function syncCharacterFromWorldState(socket, sessionId, { forceEmit = fals
     changed = true;
   }
 
+  if (stats.resources && typeof stats.resources === 'object' && !Array.isArray(stats.resources)) {
+    nextSheet = {
+      ...nextSheet,
+      resources: mergeSheetResources(nextSheet.resources || {}, stats.resources),
+    };
+    changed = true;
+  }
+
   if (!changed) {
     if (forceEmit) {
       socket.emit('character_ready', {
@@ -611,6 +619,21 @@ async function syncCharacterFromWorldState(socket, sessionId, { forceEmit = fals
     character: saved.character_sheet,
     shouldStartSession: false,
   });
+}
+
+function mergeSheetResources(current = {}, incoming = {}) {
+  const merged = { ...current };
+  for (const [key, value] of Object.entries(incoming || {})) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      merged[key] = {
+        ...(current[key] && typeof current[key] === 'object' && !Array.isArray(current[key]) ? current[key] : {}),
+        ...value,
+      };
+    } else {
+      merged[key] = value;
+    }
+  }
+  return merged;
 }
 
 async function syncCharacterToWorldState(sessionId, characterSheet, characterId = null) {
