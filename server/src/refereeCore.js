@@ -20,6 +20,9 @@ const {
   resolveD20Test,
 } = require('./d20RollEngine');
 const {
+  rollDamageFormula,
+} = require('./damageHealingEngine');
+const {
   applyPendingRollResourceIntent,
   completeLongRestResources,
   completeShortRestResources,
@@ -29,6 +32,8 @@ const {
 const {
   getAttackMode,
   getAttackModeSources,
+  getD20ConditionMode,
+  getD20ConditionSources,
   getTurnBlockReason,
   resolveSavingThrow,
 } = require('./conditionEngine');
@@ -157,6 +162,19 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
   const modifier = getCheckModifier(characterSheet, check);
   const bonus = getActiveBonusDice(worldState, 'check', { skill: check.skill })[0] || null;
   const dc = chooseDc(intent.raw, check, worldState, inCombat);
+  const conditionSubject = getPlayerConditionSubject(characterSheet, worldState);
+  const conditionMode = getD20ConditionMode({
+    subject: conditionSubject,
+    testType: check.skill ? 'skill_check' : 'ability_check',
+    ability: check.ability,
+    skill: check.skill,
+  });
+  const conditionSources = getD20ConditionSources({
+    subject: conditionSubject,
+    testType: check.skill ? 'skill_check' : 'ability_check',
+    ability: check.ability,
+    skill: check.skill,
+  });
   const pendingRoll = {
     id: `roll_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     kind: check.skill ? 'skill_check' : 'ability_check',
@@ -170,6 +188,8 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
     bonus_source: bonus?.label || null,
     bonus_effect_ids: bonus?.expiresOnUse ? [bonus.effectId] : [],
     reroll_rules: getAutoD20RerollRules(characterSheet),
+    advantage_mode: conditionMode,
+    advantage_sources: conditionSources,
     dc,
     dc_source: buildDcSource(dc, intent.raw, inCombat),
     intent: intent.raw,
@@ -187,7 +207,7 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
       ...nextWorldState,
       pending_roll: pendingRoll,
     },
-    reply: `Make a DC ${dc} ${check.label}.${bonus ? ` Add ${bonus.die} from ${bonus.label}.` : ''}${inCombat ? ' This uses your Action.' : ''} [CHECK: id=${pendingRoll.id}${check.skill ? ` skill=${check.skill}` : ''} ability=${check.ability} modifier=${modifier.total} breakdown="${sanitizeTagValue(modifier.breakdown)}"${formatBonusDieTag(bonus)}]`,
+    reply: `Make a DC ${dc} ${check.label}.${formatAdvantageModeText(conditionMode, conditionSources)}${bonus ? ` Add ${bonus.die} from ${bonus.label}.` : ''}${inCombat ? ' This uses your Action.' : ''} [CHECK: id=${pendingRoll.id}${check.skill ? ` skill=${check.skill}` : ''} ability=${check.ability} modifier=${modifier.total} breakdown="${sanitizeTagValue(modifier.breakdown)}"${formatBonusDieTag(bonus)}]`,
   };
 }
 
@@ -196,6 +216,17 @@ function promptSavingThrow({ intent, worldState, characterSheet, currentTurn = 0
   const modifier = getSavingThrowModifier(characterSheet, save.ability);
   const bonus = getActiveBonusDice(worldState, 'save')[0] || null;
   const dc = chooseDc(intent.raw, save, worldState, inCombat);
+  const conditionSubject = getPlayerConditionSubject(characterSheet, worldState);
+  const conditionMode = getD20ConditionMode({
+    subject: conditionSubject,
+    testType: 'saving_throw',
+    ability: save.ability,
+  });
+  const conditionSources = getD20ConditionSources({
+    subject: conditionSubject,
+    testType: 'saving_throw',
+    ability: save.ability,
+  });
   const pendingRoll = {
     id: `roll_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     kind: 'saving_throw',
@@ -208,6 +239,8 @@ function promptSavingThrow({ intent, worldState, characterSheet, currentTurn = 0
     bonus_source: bonus?.label || null,
     bonus_effect_ids: bonus?.expiresOnUse ? [bonus.effectId] : [],
     reroll_rules: getAutoD20RerollRules(characterSheet),
+    advantage_mode: conditionMode,
+    advantage_sources: conditionSources,
     dc,
     dc_source: buildDcSource(dc, intent.raw, inCombat),
     intent: intent.raw,
@@ -226,7 +259,7 @@ function promptSavingThrow({ intent, worldState, characterSheet, currentTurn = 0
       ...worldState,
       pending_roll: pendingRoll,
     },
-    reply: `Make a DC ${dc} ${save.label}.${bonus ? ` Add ${bonus.die} from ${bonus.label}.` : ''} [SAVE: id=${pendingRoll.id} ability=${save.ability} modifier=${modifier.total} breakdown="${sanitizeTagValue(modifier.breakdown)}"${formatBonusDieTag(bonus)}]`,
+    reply: `Make a DC ${dc} ${save.label}.${formatAdvantageModeText(conditionMode, conditionSources)}${bonus ? ` Add ${bonus.die} from ${bonus.label}.` : ''} [SAVE: id=${pendingRoll.id} ability=${save.ability} modifier=${modifier.total} breakdown="${sanitizeTagValue(modifier.breakdown)}"${formatBonusDieTag(bonus)}]`,
   };
 }
 
@@ -1269,6 +1302,17 @@ function buildConcentrationPrompt({ worldState, characterSheet = {}, damageEvent
   const dc = Math.max(10, Math.floor(highestDamage / 2));
   const source = playerDamage.map((event) => event.source).filter(Boolean).join(', ') || 'damage';
   const effectNames = concentrationEffects.map((effect) => effect.name || effect.id);
+  const conditionSubject = getPlayerConditionSubject(characterSheet, worldState);
+  const conditionMode = getD20ConditionMode({
+    subject: conditionSubject,
+    testType: 'concentration_save',
+    ability: 'con',
+  });
+  const conditionSources = getD20ConditionSources({
+    subject: conditionSubject,
+    testType: 'concentration_save',
+    ability: 'con',
+  });
   const pendingRoll = {
     id: `roll_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     kind: 'concentration_save',
@@ -1281,6 +1325,8 @@ function buildConcentrationPrompt({ worldState, characterSheet = {}, damageEvent
     bonus_source: bonus?.label || null,
     bonus_effect_ids: bonus?.expiresOnUse ? [bonus.effectId] : [],
     reroll_rules: getAutoD20RerollRules(characterSheet),
+    advantage_mode: conditionMode,
+    advantage_sources: conditionSources,
     dc,
     dc_source: `Concentration save after damage from ${source}; DC is max(10, half damage)`,
     effect_ids: concentrationEffects.map((effect) => effect.id),
@@ -1291,7 +1337,7 @@ function buildConcentrationPrompt({ worldState, characterSheet = {}, damageEvent
   };
   return {
     pendingRoll,
-    reply: `Concentration is at risk from ${source}. Make a DC ${dc} Constitution Saving Throw to maintain ${formatList(effectNames)}.${bonus ? ` Add ${bonus.die} from ${bonus.label}.` : ''} ${rollTagForPending(pendingRoll)}`,
+    reply: `Concentration is at risk from ${source}. Make a DC ${dc} Constitution Saving Throw to maintain ${formatList(effectNames)}.${formatAdvantageModeText(conditionMode, conditionSources)}${bonus ? ` Add ${bonus.die} from ${bonus.label}.` : ''} ${rollTagForPending(pendingRoll)}`,
   };
 }
 
@@ -1602,21 +1648,30 @@ function rollDiceExpression(expression, rollDie) {
 }
 
 function rollDamage(formula, rollDie, crit = false) {
-  const parsed = String(formula || '1d6').match(/(\d+)d(\d+)([+-]\d+)?/i);
-  if (!parsed) return { total: 1, rolls: [1] };
-  const diceCount = Number(parsed[1]);
-  const dieSides = Number(parsed[2]);
-  const modifier = parsed[3] ? Number(parsed[3]) : 0;
-  const rollCount = crit ? diceCount * 2 : diceCount;
-  const rolls = Array.from({ length: rollCount }, () => rollDie(dieSides));
-  return {
-    total: rolls.reduce((sum, roll) => sum + roll, 0) + modifier,
-    rolls,
-  };
+  return rollDamageFormula(formula, rollDie, { crit });
 }
 
 function getCurrentHp(characterSheet, worldState) {
   return Number(worldState.player_stats?.hp ?? characterSheet?.derived_stats?.hp ?? characterSheet?.derived_stats?.max_hp ?? 10);
+}
+
+function getPlayerConditionSubject(characterSheet = {}, worldState = {}) {
+  const stats = worldState.player_stats || {};
+  const derived = characterSheet.derived_stats || {};
+  const combatPlayer = (worldState.combat_state?.combatants || []).find((combatant) => combatant.is_player) || {};
+  return {
+    conditions: [
+      ...(derived.conditions || []),
+      ...(stats.conditions || []),
+      ...(combatPlayer.conditions || []),
+    ],
+  };
+}
+
+function formatAdvantageModeText(mode = null, sources = []) {
+  if (!mode) return '';
+  const sourceText = sources?.length ? ` from ${formatList(sources)}` : '';
+  return ` Roll with ${mode}${sourceText}.`;
 }
 
 function isMovementIntent(message) {

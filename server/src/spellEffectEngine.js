@@ -1,5 +1,18 @@
 const crypto = require('crypto');
-const { getSpellActionResource } = require('./actionEconomy');
+const { rollD20WithMode } = require('./d20RollEngine');
+const {
+  applyDamage,
+  applyHealing,
+  formatDamageAdjustment,
+  rollDamageFormula,
+} = require('./damageHealingEngine');
+const {
+  resolveSpellCastLegality,
+  getCastSpellFromMessage,
+  inferGuidanceSkill,
+  formatGuidanceLabel,
+  getSpellActionResource,
+} = require('./spellcastingEngine');
 const {
   getAttackMode,
   getAttackModeSources,
@@ -41,60 +54,14 @@ const BONUS_DIE_RULES = {
   ability_check_bonus_die: 'check',
 };
 
-const GUIDANCE_SKILLS = [
-  ['animal_handling', /\banimal\s+handling\b/i],
-  ['sleight_of_hand', /\bsleight\s+of\s+hand\b/i],
-  ['acrobatics', /\bacrobatics?\b/i],
-  ['arcana', /\barcana\b/i],
-  ['athletics', /\bathletics?\b/i],
-  ['deception', /\bdeception\b/i],
-  ['history', /\bhistory\b/i],
-  ['insight', /\binsight\b/i],
-  ['intimidation', /\bintimidation\b/i],
-  ['investigation', /\binvestigation\b/i],
-  ['medicine', /\bmedicine\b/i],
-  ['nature', /\bnature\b/i],
-  ['perception', /\bperception\b/i],
-  ['performance', /\bperformance\b/i],
-  ['persuasion', /\bpersuasion\b/i],
-  ['religion', /\breligion\b/i],
-  ['stealth', /\bstealth\b/i],
-  ['survival', /\bsurvival\b/i],
-];
-
 function resolveSpellCast({ message, content, characterSheet, worldState = {} }) {
   const castWorldState = clearResolvedCombatState(worldState);
-  const spell = getCastSpellFromMessage(message, content);
-  if (!spell) return null;
+  const legality = resolveSpellCastLegality({ message, content, characterSheet, worldState: castWorldState });
+  if (!legality) return null;
+  if (legality.blocked) return legality;
 
-  const known = getKnownSpellInfo(characterSheet, spell);
-  if (spell.unknown || !known.known) {
-    return {
-      matched: true,
-      blocked: true,
-      reply: `You reach for ${spell.name}, but it is not on your current character sheet. At level ${characterSheet?.identity?.level || 1}, you can work with: ${summarizeKnownSpells(characterSheet, content)}. The magic shelves are not self-service.`,
-    };
-  }
-
-  const timingBlock = validateSpellTiming({ spell, message, worldState: castWorldState, characterSheet });
-  if (timingBlock) {
-    return {
-      matched: true,
-      blocked: true,
-      reply: timingBlock,
-    };
-  }
-
-  const resource = spendSpellResource(characterSheet, spell, known);
-  if (!resource.ok) {
-    return {
-      matched: true,
-      blocked: true,
-      reply: resource.reply,
-    };
-  }
-
-  let nextSheet = resource.characterSheet;
+  const { spell, known } = legality;
+  let nextSheet = legality.characterSheet;
   let nextWorldState = {
     ...castWorldState,
     player_stats: {
@@ -128,7 +95,7 @@ function resolveSpellCast({ message, content, characterSheet, worldState = {} })
     spell,
     characterSheet: nextSheet,
     worldState: nextWorldState,
-    resourceNote: resource.note,
+    resourceNote: legality.resourceNote,
   };
 }
 
@@ -168,26 +135,6 @@ function resolveSpellOutcome({ spellCast, characterSheet, worldState = {}, rollD
   return null;
 }
 
-function validateSpellTiming({ spell, message, worldState = {}, characterSheet = {} }) {
-  if (spell.id === 'mage_armor' && characterSheet?.equipped?.armor) {
-    return 'Mage Armor only works on a creature that is not wearing armor. Your current armor is already doing the job, and it is not interested in being replaced by sparkle math.';
-  }
-
-  if (spell.id === 'guidance' && !inferGuidanceSkill(message)) {
-    return 'Guidance needs a specific skill in 2024 rules. Try something like "I cast Guidance for Stealth" or "Guidance for Persuasion." The gods are helpful, but they do enjoy a form field.';
-  }
-
-  if (worldState.combat_state?.active && /^\s*\d+\s*minute/i.test(spell.casting_time || '')) {
-    return `${spell.name} takes ${spell.casting_time} to cast. That is not a single combat action; you would need to spend the required rounds maintaining the casting. The initiative tracker has opinions about paperwork.`;
-  }
-
-  if (/reaction/i.test(spell.casting_time || '') && !/\b(reaction|trigger|when|being hit|gets hit|am hit|attacked|attack hits|hits me)\b/i.test(message || '')) {
-    return `${spell.name} is a Reaction spell. You can cast it when its trigger happens, not as a casual pre-emptive vibe check.`;
-  }
-
-  return null;
-}
-
 function resolveSpellAttack({ spell, rule, characterSheet, worldState, rollDie }) {
   const context = getSpellTargetContext({ spell, spellCastMessage: worldState.__spell_message, worldState, characterSheet });
   if (!context?.target) return noSpellTarget(worldState, spell);
@@ -211,9 +158,9 @@ function resolveSpellAttack({ spell, rule, characterSheet, worldState, rollDie }
 
   if (hit) {
     const damage = rollFormula(rule.damage, rollDie, { crit: criticalHit });
-    const before = Number(target.hp || 0);
-    target.hp = Math.max(0, before - damage.total);
-    lines.push(`${criticalHit ? '**Critical hit.** ' : ''}Hit for ${damage.total} ${rule.damage_type} damage. ${target.name}: (${before} -> ${target.hp} HP).`);
+    const applied = applyDamage({ target, amount: damage.total, damageType: rule.damage_type, source: spell.name });
+    Object.assign(target, applied.target);
+    lines.push(`${criticalHit ? '**Critical hit.** ' : ''}Hit for ${applied.amount} ${rule.damage_type} damage${formatDamageAdjustment(applied.adjustment)}. ${target.name}: (${applied.beforeHp} -> ${target.hp} HP).`);
     if (rule.condition_on_hit && Number(target.hp) > 0) {
       target.conditions = addCondition(target.conditions, rule.condition_on_hit);
     }
@@ -234,10 +181,10 @@ function resolveAutomaticDamageSpell({ spell, rule, worldState, rollDie }) {
 
   const rolls = Array.from({ length: Number(rule.darts || 1) }, () => rollFormula(rule.damage, rollDie));
   const total = rolls.reduce((sum, roll) => sum + roll.total, 0);
-  const before = Number(target.hp || 0);
-  target.hp = Math.max(0, before - total);
+  const applied = applyDamage({ target, amount: total, damageType: rule.damage_type, source: spell.name });
+  Object.assign(target, applied.target);
   const lines = [
-    `You cast **${spell.name}** at ${target.name}. The spell hits automatically for ${total} ${rule.damage_type} damage. ${target.name}: (${before} -> ${target.hp} HP).`,
+    `You cast **${spell.name}** at ${target.name}. The spell hits automatically for ${applied.amount} ${rule.damage_type} damage${formatDamageAdjustment(applied.adjustment)}. ${target.name}: (${applied.beforeHp} -> ${target.hp} HP).`,
   ];
 
   return finishSpellAction({ spell, worldState, combat, lines, activeCombat });
@@ -254,14 +201,14 @@ function resolveSavingThrowSpell({ spell, rule, characterSheet, worldState, roll
   const success = save.success;
   const damage = rollFormula(rule.damage, rollDie);
   const appliedDamage = success && rule.half_on_success ? Math.floor(damage.total / 2) : success ? 0 : damage.total;
-  const before = Number(target.hp || 0);
-  target.hp = Math.max(0, before - appliedDamage);
+  const applied = applyDamage({ target, amount: appliedDamage, damageType: rule.damage_type, source: spell.name });
+  Object.assign(target, applied.target);
 
   const lines = [
     `You cast **${spell.name}** at ${target.name}. ${target.name} rolls a ${rule.save.toUpperCase()} save: ${save.automaticFailure ? save.text : `${save.text} vs DC ${dc}`}.`,
     success
-      ? `Save succeeds.${appliedDamage ? ` ${target.name} still takes ${appliedDamage} ${rule.damage_type} damage. ${target.name}: (${before} -> ${target.hp} HP).` : ' No damage is applied.'}`
-      : `Save fails. ${target.name} takes ${appliedDamage} ${rule.damage_type} damage. ${target.name}: (${before} -> ${target.hp} HP).`,
+      ? `Save succeeds.${applied.amount ? ` ${target.name} still takes ${applied.amount} ${rule.damage_type} damage${formatDamageAdjustment(applied.adjustment)}. ${target.name}: (${applied.beforeHp} -> ${target.hp} HP).` : ' No damage is applied.'}`
+      : `Save fails. ${target.name} takes ${applied.amount} ${rule.damage_type} damage${formatDamageAdjustment(applied.adjustment)}. ${target.name}: (${applied.beforeHp} -> ${target.hp} HP).`,
   ];
 
   return finishSpellAction({ spell, worldState, combat, lines, activeCombat });
@@ -362,22 +309,28 @@ function resolveHealingSpell({ spell, rule, characterSheet, worldState, rollDie 
   const spellMod = getSpellcastingModifier(characterSheet);
   const healing = rollFormula(rule.healing, rollDie, { spellMod });
   const stats = worldState.player_stats || {};
-  const before = Number(player?.hp ?? stats.hp ?? characterSheet?.derived_stats?.hp ?? 0);
-  const maxHp = Number(player?.max_hp ?? stats.max_hp ?? characterSheet?.derived_stats?.max_hp ?? before);
-  const after = Math.min(maxHp, before + healing.total);
-  if (player) player.hp = after;
+  const healingTarget = player || {
+    hp: stats.hp ?? characterSheet?.derived_stats?.hp ?? 0,
+    max_hp: stats.max_hp ?? characterSheet?.derived_stats?.max_hp ?? stats.hp ?? 0,
+  };
+  const healed = applyHealing({
+    target: healingTarget,
+    amount: healing.total,
+    maxHp: player?.max_hp ?? stats.max_hp ?? characterSheet?.derived_stats?.max_hp,
+  });
+  if (player) player.hp = healed.target.hp;
 
   const nextState = {
     ...stripInternalState(worldState),
     combat_state: combat.active ? combat : worldState.combat_state,
     player_stats: {
       ...stats,
-      hp: after,
-      max_hp: maxHp,
+      hp: healed.target.hp,
+      max_hp: healed.target.max_hp,
     },
   };
   const lines = [
-    `You cast **${spell.name}** and restore ${healing.total} HP. HP: (${before} -> ${after}).`,
+    `You cast **${spell.name}** and restore ${healing.total} HP. HP: (${healed.beforeHp} -> ${healed.afterHp}).`,
   ];
 
   return {
@@ -521,6 +474,9 @@ function buildSceneTargetCombatant(name, worldState = {}) {
     max_hp: Number(existing.max_hp ?? existing.hp ?? 8),
     ac: Number(existing.ac ?? 10),
     conditions: Array.isArray(existing.conditions) ? existing.conditions : [],
+    resistances: existing.resistances || existing.damage_resistances || [],
+    vulnerabilities: existing.vulnerabilities || existing.damage_vulnerabilities || [],
+    immunities: existing.immunities || existing.damage_immunities || [],
     saves: existing.saves || { dex: 1, con: 1, wis: 0, str: 1, int: 0, cha: 0 },
     is_player: false,
     scene_target: true,
@@ -531,7 +487,8 @@ function getPlayerCombatant(combat, characterSheet = {}, worldState = {}) {
   return (combat.combatants || []).find((combatant) => combatant.is_player) || {
     character_id: worldState.player_stats?.character_id || characterSheet?.derived_stats?.character_id || null,
     name: characterSheet?.identity?.name || worldState.player_stats?.name || 'You',
-    conditions: worldState.player_stats?.conditions || characterSheet?.derived_stats?.conditions || [],
+    conditions: uniqueValues([...(characterSheet?.derived_stats?.conditions || []), ...(worldState.player_stats?.conditions || [])]),
+    resistances: uniqueValues([...(characterSheet.resistances || []), ...(worldState.player_stats?.resistances || [])]),
     is_player: true,
   };
 }
@@ -551,6 +508,9 @@ function persistSceneTargetStates(worldState = {}, combat = {}) {
       max_hp: Number(target.max_hp || target.hp || 0),
       ac: Number(target.ac || 10),
       conditions: target.conditions || [],
+      resistances: target.resistances || [],
+      vulnerabilities: target.vulnerabilities || [],
+      immunities: target.immunities || [],
       saves: target.saves || {},
     });
   }
@@ -603,18 +563,8 @@ function comparableTargetNames(value) {
   return [...new Set([normalized, stripped].filter(Boolean))];
 }
 
-function rollD20WithMode(rollDie, mode = null) {
-  if (mode === 'advantage' || mode === 'disadvantage') {
-    const first = rollDie(20);
-    const second = rollDie(20);
-    const natural = mode === 'advantage' ? Math.max(first, second) : Math.min(first, second);
-    return {
-      natural,
-      text: `${first}/${second} with ${mode}, using ${natural}`,
-    };
-  }
-  const natural = rollDie(20);
-  return { natural, text: String(natural) };
+function uniqueValues(values = []) {
+  return [...new Set((values || []).filter(Boolean))];
 }
 
 function stripInternalState(worldState = {}) {
@@ -637,165 +587,6 @@ function noSpellTarget(worldState, spell) {
     worldState: stripInternalState(worldState),
     reply: `${spell.name} needs a valid target in the current scene. Name who or what you are targeting before the magic gets ideas above its station.`,
     consumesTurn: false,
-  };
-}
-
-function getCastSpellFromMessage(message, content) {
-  const match = String(message || '').match(/\bcast\s+(?:the\s+)?([a-z][a-z' -]{2,40})/i);
-  if (!match) return null;
-  const spoken = normalizeSpellName(match[1].replace(/\b(on|at|toward|towards|to|for|with|and)\b.*$/i, ''));
-  if (!spoken) return null;
-  const spell = content.spells.find((item) => normalizeSpellName(item.name) === spoken || normalizeSpellName(item.id) === spoken);
-  return spell || { id: spoken.replaceAll(' ', '_'), name: spoken.replace(/\b\w/g, (char) => char.toUpperCase()), unknown: true };
-}
-
-function normalizeSpellName(value) {
-  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-}
-
-function getKnownSpellInfo(characterSheet = {}, spell = {}) {
-  if (!spell || spell.unknown) return { known: false };
-  const cantrips = new Set(characterSheet.spellcasting?.cantrips_known || []);
-  const alwaysPrepared = new Set(characterSheet.spellcasting?.always_prepared_spells || []);
-  const classSpells = new Set(characterSheet.spellcasting?.spells_prepared || []);
-  const classChoiceSpell = [
-    ...(characterSheet.class_choice_spells || []),
-    ...(characterSheet.spellcasting?.class_choice_spells || []),
-  ].find((entry) => entry.id === spell.id);
-  const speciesSpell = (characterSheet.species_spells || []).find((entry) => (entry.id || entry) === spell.id);
-  const originEntry = Object.entries(characterSheet.origin?.magic_initiate || {})
-    .find(([, choice]) => (choice.cantrips || []).includes(spell.id) || choice.spell === spell.id);
-
-  if (cantrips.has(spell.id)) return { known: true, type: 'class_cantrip', label: 'class cantrip' };
-  if (alwaysPrepared.has(spell.id)) {
-    const resourceEntry = Object.entries(characterSheet.resources?.spell_uses || {})
-      .find(([, use]) => use.spell_id === spell.id);
-    return {
-      known: true,
-      type: 'class_feature_spell',
-      source: resourceEntry?.[1]?.source || 'class_feature',
-      label: resourceEntry?.[1]?.source_name || 'class feature',
-    };
-  }
-  if (classSpells.has(spell.id)) return { known: true, type: 'class_spell', label: 'prepared class spell' };
-  if (classChoiceSpell) {
-    return {
-      known: true,
-      type: 'class_choice_spell',
-      choiceType: classChoiceSpell.type,
-      label: `${classChoiceSpell.source || 'class choice'} spell`,
-    };
-  }
-  if (speciesSpell) return { known: true, type: 'species_spell', label: `${speciesSpell.source || 'species'} spell` };
-  if (originEntry) {
-    const [source, choice] = originEntry;
-    const isCantrip = (choice.cantrips || []).includes(spell.id);
-    return {
-      known: true,
-      type: isCantrip ? 'origin_cantrip' : 'origin_spell',
-      source,
-      label: isCantrip ? 'Origin feat cantrip' : 'Origin feat spell',
-    };
-  }
-  return { known: false };
-}
-
-function getKnownSpellIds(characterSheet = {}) {
-  const ids = new Set([
-    ...(characterSheet.spellcasting?.cantrips_known || []),
-    ...(characterSheet.spellcasting?.spells_prepared || []),
-    ...(characterSheet.class_choice_spells || []).map((spell) => spell.id || spell),
-    ...(characterSheet.spellcasting?.class_choice_spells || []).map((spell) => spell.id || spell),
-    ...(characterSheet.species_spells || []).map((spell) => spell.id || spell),
-  ]);
-  for (const choice of Object.values(characterSheet.origin?.magic_initiate || {})) {
-    for (const cantrip of choice.cantrips || []) ids.add(cantrip);
-    if (choice.spell) ids.add(choice.spell);
-  }
-  return ids;
-}
-
-function summarizeKnownSpells(characterSheet, content) {
-  const ids = [...getKnownSpellIds(characterSheet)];
-  return ids.map((id) => content.spells.find((spell) => spell.id === id)?.name || id).join(', ') || 'no spells';
-}
-
-function spendSpellResource(characterSheet = {}, spell = {}, known = {}) {
-  if (Number(spell.level || 0) <= 0) {
-    return { ok: true, characterSheet, note: 'cantrip/no slot' };
-  }
-  if (known.type === 'class_choice_spell' && ['ritual', 'at_will'].includes(known.choiceType)) {
-    return { ok: true, characterSheet, note: `${known.choiceType} class choice spell/no slot` };
-  }
-
-  let limitedFailure = null;
-  if (known.type === 'origin_spell' || known.type === 'species_spell' || known.type === 'class_feature_spell') {
-    const limited = spendLimitedSpellUse(characterSheet, spell, known);
-    if (limited.ok) return limited;
-    limitedFailure = limited;
-  }
-
-  const slotKey = String(spell.level);
-  const currentSlots = characterSheet.spellcasting?.slots || {};
-  const remainingSlots = Number(currentSlots[slotKey] || 0);
-  if (remainingSlots > 0) {
-    return {
-      ok: true,
-      note: `spent level ${slotKey} spell slot`,
-      characterSheet: {
-        ...characterSheet,
-        spellcasting: {
-          ...(characterSheet.spellcasting || {}),
-          slots: {
-            ...currentSlots,
-            [slotKey]: remainingSlots - 1,
-          },
-        },
-      },
-    };
-  }
-
-  if (limitedFailure) return limitedFailure;
-
-  return {
-    ok: false,
-    reply: `You know ${spell.name}, but you do not have a level ${slotKey} spell slot left to cast it. Even magic keeps receipts.`,
-  };
-}
-
-function spendLimitedSpellUse(characterSheet, spell, known) {
-  const resourceType = known.type === 'class_feature_spell' ? 'class_feature' : known.type;
-  const resourceKey = `${resourceType}:${known.source || 'default'}:${spell.id}`;
-  const spellUses = characterSheet.resources?.spell_uses || {};
-  const currentUse = spellUses[resourceKey] || {
-    name: spell.name,
-    remaining: 1,
-    max: 1,
-    reset: 'long_rest',
-  };
-  if (Number(currentUse.remaining || 0) <= 0) {
-    const resetText = String(currentUse.reset || 'rest').replaceAll('_', ' ');
-    return {
-      ok: false,
-      reply: `${spell.name} is available through ${known.label}, but that limited use is already spent until your next ${resetText}. The spell politely refuses to be double-booked.`,
-    };
-  }
-  return {
-    ok: true,
-    note: `spent ${known.label}`,
-    characterSheet: {
-      ...characterSheet,
-      resources: {
-        ...(characterSheet.resources || {}),
-        spell_uses: {
-          ...spellUses,
-          [resourceKey]: {
-            ...currentUse,
-            remaining: Number(currentUse.remaining || 0) - 1,
-          },
-        },
-      },
-    },
   };
 }
 
@@ -828,17 +619,6 @@ function buildSpellEffect(characterSheet, spell, known, message = '', worldState
 
 function isSelfTargetedSpellMessage(message = '') {
   return /\b(?:myself|self|me)\b/i.test(message || '');
-}
-
-function inferGuidanceSkill(message = '') {
-  const text = String(message || '');
-  const match = GUIDANCE_SKILLS.find(([, pattern]) => pattern.test(text));
-  return match?.[0] || null;
-}
-
-function formatGuidanceLabel(skill = null) {
-  if (!skill) return 'Guidance';
-  return `Guidance (${skill.replaceAll('_', ' ')})`;
 }
 
 function spellHasDuration(spell) {
@@ -1021,22 +801,7 @@ function consumesCombatTurn(spell = {}) {
 }
 
 function rollFormula(formula, rollDie, { crit = false, spellMod = 0 } = {}) {
-  const normalized = String(formula || '1').replace(/spell_mod/g, String(spellMod));
-  const match = normalized.match(/(\d+)d(\d+)((?:[+-]\d+)*)/i);
-  if (!match) return { total: Number(normalized) || 0, rolls: [] };
-
-  const diceCount = Number(match[1]);
-  const dieSides = Number(match[2]);
-  const modifierText = match[3] || '';
-  const modifier = (modifierText.match(/[+-]\d+/g) || [])
-    .reduce((sum, value) => sum + Number(value), 0);
-  const rollCount = crit ? diceCount * 2 : diceCount;
-  const rolls = Array.from({ length: rollCount }, () => rollDie(dieSides));
-  return {
-    total: rolls.reduce((sum, roll) => sum + roll, 0) + modifier,
-    rolls,
-    modifier,
-  };
+  return rollDamageFormula(formula, rollDie, { crit, spellMod });
 }
 
 function defaultRollDie(sides) {

@@ -73,6 +73,24 @@ test('creates a server-owned pending skill check with a DC', () => {
   assert.match(result.reply, /\[CHECK: id=.*skill=insight ability=wis/);
 });
 
+test('condition modes are stored on pending checks and saves for the server roller', () => {
+  const poisonedCheck = adjudicate({
+    message: "I study the clerk's face.",
+    worldState: worldState({ player_stats: { hp: 12, max_hp: 12, armor_class: 16, conditions: ['poisoned'] } }),
+    characterSheet,
+  });
+  const restrainedSave = adjudicate({
+    message: 'I dodge the falling stones with a dex save.',
+    worldState: worldState({ player_stats: { hp: 12, max_hp: 12, armor_class: 16, conditions: ['restrained'] } }),
+    characterSheet,
+  });
+
+  assert.equal(poisonedCheck.worldState.pending_roll.advantage_mode, 'disadvantage');
+  assert.match(poisonedCheck.reply, /Roll with disadvantage/);
+  assert.equal(restrainedSave.worldState.pending_roll.advantage_mode, 'disadvantage');
+  assert.match(restrainedSave.reply, /Restrained condition/);
+});
+
 test('ignores player-authored difficulty and DC claims', () => {
   const result = adjudicate({
     message: "I easily study the clerk's face, DC 5.",

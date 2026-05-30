@@ -1,4 +1,10 @@
 const crypto = require('crypto');
+const { rollD20WithMode } = require('./d20RollEngine');
+const {
+  applyDamage,
+  formatDamageAdjustment,
+  rollDamageFormula,
+} = require('./damageHealingEngine');
 const {
   getAttackMode,
   getAttackModeSources,
@@ -55,7 +61,15 @@ function resolveCreatureTurns({
   combat.turn_index = playerIndex;
   combat.combatants = combatants.map((combatant, index) => (
     index === playerIndex
-      ? { ...combatant, hp: player.hp, temp_hp: player.temp_hp, conditions: clearPlayerTurnConditions(combatant.conditions) }
+      ? {
+          ...combatant,
+          hp: player.hp,
+          temp_hp: player.temp_hp,
+          conditions: clearPlayerTurnConditions(player.conditions || combatant.conditions),
+          resistances: player.resistances || combatant.resistances,
+          vulnerabilities: player.vulnerabilities || combatant.vulnerabilities,
+          immunities: player.immunities || combatant.immunities,
+        }
       : combatant
   ));
 
@@ -105,9 +119,15 @@ function resolveCreatureAction({ actor, player, characterSheet, worldState, roll
   const criticalMiss = natural === 1;
 
   if (!criticalMiss && (criticalHit || attackTotal >= ac)) {
-    const damage = rollDamage(attack.damage_formula || '1d6+1', rollDie, criticalHit);
+    const damage = rollDamage(attack.damage_formula || '1d6+1', rollDie, { crit: criticalHit });
     const before = Number(player.hp ?? getCurrentHp(characterSheet, worldState));
-    const applied = applyDamageToPlayer({ player, characterSheet, worldState, damage: damage.total });
+    const applied = applyDamageToPlayer({
+      player,
+      characterSheet,
+      worldState,
+      damage: damage.total,
+      damageType: attack.damage_type || attack.damageType || null,
+    });
     const retaliation = getMeleeRetaliation(worldState, applied.beforeTempHp);
     const nextActor = retaliation
       ? { ...actor, hp: Math.max(0, Number(actor.hp || 0) - retaliation.damage) }
@@ -118,7 +138,7 @@ function resolveCreatureAction({ actor, player, characterSheet, worldState, roll
     return {
       actor: nextActor,
       player: applied.player,
-      lines: [`${actor.name} uses ${attack.name}: rolls ${rollText} vs AC ${ac}${modeText}. ${criticalHit ? '**Critical hit.** ' : ''}Hit for ${damage.total} damage${applied.absorbed ? ` (${applied.absorbed} absorbed by temporary HP)` : ''}. ${player.name}: (${before} -> ${applied.player.hp} HP).${retaliationLine}`],
+      lines: [`${actor.name} uses ${attack.name}: rolls ${rollText} vs AC ${ac}${modeText}. ${criticalHit ? '**Critical hit.** ' : ''}Hit for ${applied.amount} damage${formatDamageAdjustment(applied.adjustment)}${applied.absorbed ? ` (${applied.absorbed} absorbed by temporary HP)` : ''}. ${player.name}: (${before} -> ${applied.player.hp} HP).${retaliationLine}`],
       damageEvents: [{
         target: 'player',
         source: actor.name,
@@ -184,7 +204,10 @@ function buildPlayerCombatant(characterSheet, worldState) {
     max_hp: Number(stats.max_hp ?? derived.max_hp ?? hp),
     temp_hp: Number(stats.temp_hp ?? derived.temp_hp ?? 0),
     ac: Number(stats.armor_class ?? derived.armor_class ?? 10),
-    conditions: derived.conditions || stats.conditions || [],
+    conditions: uniqueValues([...(derived.conditions || []), ...(stats.conditions || [])]),
+    resistances: uniqueValues([...(characterSheet.resistances || []), ...(stats.resistances || [])]),
+    vulnerabilities: uniqueValues([...(characterSheet.vulnerabilities || []), ...(stats.vulnerabilities || [])]),
+    immunities: uniqueValues([...(characterSheet.immunities || []), ...(stats.immunities || [])]),
     is_player: true,
   };
 }
@@ -197,20 +220,22 @@ function combatantMatchesCharacter(combatant = {}, characterSheet = {}, worldSta
   return true;
 }
 
-function applyDamageToPlayer({ player, characterSheet, worldState, damage }) {
-  const beforeTempHp = Number(player.temp_hp ?? worldState.player_stats?.temp_hp ?? characterSheet.derived_stats?.temp_hp ?? 0);
-  const absorbed = Math.min(beforeTempHp, Number(damage || 0));
-  const hpDamage = Math.max(0, Number(damage || 0) - absorbed);
-  const beforeHp = Number(player.hp ?? getCurrentHp(characterSheet, worldState));
+function applyDamageToPlayer({ player, characterSheet, worldState, damage, damageType = null }) {
+  const target = {
+    ...player,
+    hp: player.hp ?? getCurrentHp(characterSheet, worldState),
+    temp_hp: player.temp_hp ?? worldState.player_stats?.temp_hp ?? characterSheet.derived_stats?.temp_hp ?? 0,
+    resistances: player.resistances || worldState.player_stats?.resistances || characterSheet.resistances || [],
+    vulnerabilities: player.vulnerabilities || worldState.player_stats?.vulnerabilities || characterSheet.vulnerabilities || [],
+    immunities: player.immunities || worldState.player_stats?.immunities || characterSheet.immunities || [],
+  };
+  const applied = applyDamage({ target, amount: damage, damageType });
   return {
-    beforeTempHp,
-    absorbed,
-    hpDamage,
-    player: {
-      ...player,
-      temp_hp: Math.max(0, beforeTempHp - absorbed),
-      hp: Math.max(0, beforeHp - hpDamage),
-    },
+    ...applied,
+    beforeTempHp: applied.beforeTempHp,
+    absorbed: applied.absorbed,
+    hpDamage: applied.hpDamage,
+    player: applied.target,
   };
 }
 
@@ -231,32 +256,8 @@ function getMeleeRetaliation(worldState = {}, beforeTempHp = 0) {
   return null;
 }
 
-function rollD20WithMode(rollDie, mode = null) {
-  if (mode === 'advantage' || mode === 'disadvantage') {
-    const first = rollDie(20);
-    const second = rollDie(20);
-    const natural = mode === 'advantage' ? Math.max(first, second) : Math.min(first, second);
-    return {
-      natural,
-      text: `${first}/${second} with ${mode}, using ${natural}`,
-    };
-  }
-  const natural = rollDie(20);
-  return { natural, text: String(natural) };
-}
-
-function rollDamage(formula, rollDie, crit = false) {
-  const parsed = String(formula || '1d6').match(/(\d+)d(\d+)([+-]\d+)?/i);
-  if (!parsed) return { total: 1, rolls: [1] };
-  const diceCount = Number(parsed[1]);
-  const dieSides = Number(parsed[2]);
-  const modifier = parsed[3] ? Number(parsed[3]) : 0;
-  const rollCount = crit ? diceCount * 2 : diceCount;
-  const rolls = Array.from({ length: rollCount }, () => rollDie(dieSides));
-  return {
-    total: rolls.reduce((sum, roll) => sum + roll, 0) + modifier,
-    rolls,
-  };
+function rollDamage(formula, rollDie, { crit = false } = {}) {
+  return rollDamageFormula(formula, rollDie, { crit });
 }
 
 function cloneCombatState(combatState) {
@@ -278,6 +279,10 @@ function defaultRollDie(sides) {
 function formatSigned(value) {
   const number = Number(value || 0);
   return number >= 0 ? `+${number}` : String(number);
+}
+
+function uniqueValues(values = []) {
+  return [...new Set((values || []).filter(Boolean))];
 }
 
 module.exports = {

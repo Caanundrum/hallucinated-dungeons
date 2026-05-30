@@ -119,3 +119,26 @@ test('acting indexes support player-middle and enemy-first initiative flows', ()
   assert.deepEqual(getActingIndexes([{}, {}, {}], 1, 1, true), [2, 0]);
   assert.deepEqual(getActingIndexes([{}, {}, {}], 0, 1, false), [0]);
 });
+
+test('creature damage applies player resistance and temporary HP through shared damage math', () => {
+  const result = resolveCreatureTurns({
+    worldState: {
+      player_stats: { hp: 12, max_hp: 12, armor_class: 10, temp_hp: 3, resistances: ['fire'] },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', initiative: 18, hp: 12, max_hp: 12, ac: 10, temp_hp: 3, is_player: true, conditions: [] },
+          combatant('Ember Imp', 8, { attack: { name: 'spark', attack_bonus: 4, damage_formula: '1d6+2', damage_type: 'fire' } }),
+        ],
+      },
+    },
+    characterSheet: { ...characterSheet, resistances: ['fire'] },
+    rollDie: sequenceRolls([12, 4]),
+  });
+
+  assert.equal(result.player.temp_hp, 0);
+  assert.equal(result.player.hp, 12);
+  assert.match(result.lines[0], /fire resistance/);
+});

@@ -31,6 +31,15 @@ const TARGET_DISADVANTAGE_CONDITIONS = new Set([
   'invisible',
 ]);
 
+const CHECK_DISADVANTAGE_CONDITIONS = new Set([
+  'poisoned',
+  'frightened',
+]);
+
+const SAVE_DISADVANTAGE_BY_ABILITY = {
+  dex: new Set(['restrained']),
+};
+
 const AUTO_FAIL_STR_DEX_SAVE_CONDITIONS = new Set([
   'paralyzed',
   'petrified',
@@ -89,6 +98,56 @@ function getAttackMode({ attacker = {}, target = {}, defenderDodging = false } =
   if (advantage) return 'advantage';
   if (disadvantage) return 'disadvantage';
   return null;
+}
+
+function getD20ConditionMode({ subject = {}, target = {}, testType = 'ability_check', ability = null, skill = null, defenderDodging = false } = {}) {
+  if (testType === 'attack') return getAttackMode({ attacker: subject, target, defenderDodging });
+
+  const conditions = new Set(getConditions(subject));
+  const normalizedAbility = normalizeCondition(ability);
+  let advantage = false;
+  let disadvantage = false;
+
+  if (testType === 'ability_check' || testType === 'skill_check') {
+    for (const condition of CHECK_DISADVANTAGE_CONDITIONS) {
+      if (conditions.has(condition)) disadvantage = true;
+    }
+    if (conditions.has('grappled') && normalizedAbility === 'str') disadvantage = true;
+  }
+
+  if (testType === 'saving_throw' || testType === 'concentration_save') {
+    for (const condition of SAVE_DISADVANTAGE_BY_ABILITY[normalizedAbility] || []) {
+      if (conditions.has(condition)) disadvantage = true;
+    }
+  }
+
+  if (conditions.has('invisible') && (testType === 'stealth_check' || normalizeCondition(skill) === 'stealth')) advantage = true;
+
+  return combineAdvantageMode({ advantage, disadvantage });
+}
+
+function getD20ConditionSources({ subject = {}, target = {}, testType = 'ability_check', ability = null, skill = null, defenderDodging = false } = {}) {
+  if (testType === 'attack') return getAttackModeSources({ attacker: subject, target, defenderDodging });
+
+  const conditions = new Set(getConditions(subject));
+  const normalizedAbility = normalizeCondition(ability);
+  const sources = [];
+
+  if (testType === 'ability_check' || testType === 'skill_check') {
+    for (const condition of CHECK_DISADVANTAGE_CONDITIONS) {
+      if (conditions.has(condition)) sources.push(`${formatCondition(condition)} condition`);
+    }
+    if (conditions.has('grappled') && normalizedAbility === 'str') sources.push('Grappled condition');
+  }
+
+  if (testType === 'saving_throw' || testType === 'concentration_save') {
+    for (const condition of SAVE_DISADVANTAGE_BY_ABILITY[normalizedAbility] || []) {
+      if (conditions.has(condition)) sources.push(`${formatCondition(condition)} condition`);
+    }
+  }
+
+  if (conditions.has('invisible') && (testType === 'stealth_check' || normalizeCondition(skill) === 'stealth')) sources.push('Invisible condition');
+  return sources;
 }
 
 function getAttackModeSources({ attacker = {}, target = {}, defenderDodging = false } = {}) {
@@ -160,9 +219,20 @@ function formatSigned(value) {
   return number >= 0 ? `+${number}` : String(number);
 }
 
+function combineAdvantageMode({ advantage = false, disadvantage = false } = {}) {
+  if (advantage && disadvantage) return null;
+  if (advantage) return 'advantage';
+  if (disadvantage) return 'disadvantage';
+  return null;
+}
+
 module.exports = {
+  getConditions,
+  hasCondition,
   getTurnBlockReason,
   getAttackMode,
   getAttackModeSources,
+  getD20ConditionMode,
+  getD20ConditionSources,
   resolveSavingThrow,
 };
