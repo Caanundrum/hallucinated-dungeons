@@ -63,6 +63,17 @@ const WEAPON_PROPERTY_RULES = [
   'versatile',
 ];
 
+const WEAPON_MASTERY_RULES = [
+  'cleave',
+  'graze',
+  'nick',
+  'push',
+  'sap',
+  'slow',
+  'topple',
+  'vex',
+];
+
 function buildRulesCoverageMatrix({ content = getContentBundle(), catalog = DEFAULT_CATALOG } = {}) {
   const matrix = {
     version: catalog.version || '4C.6-A',
@@ -78,6 +89,7 @@ function buildRulesCoverageMatrix({ content = getContentBundle(), catalog = DEFA
       spells: buildSection('spells', (content.spells || []).map((item) => spellEntry(item, catalog))),
       equipment: buildSection('equipment', (content.equipment || []).map((item) => equipmentEntry(item, catalog))),
       equipment_rules: buildSection('equipment_rules', buildEquipmentRuleEntries(content, catalog)),
+      weapon_masteries: buildSection('weapon_masteries', buildWeaponMasteryEntries(catalog)),
     },
   };
 
@@ -201,6 +213,16 @@ function buildEquipmentRuleEntries(content, catalog) {
     { description: 'Weapon property rule coverage.' },
   ));
   return [...effectRules, ...propertyRules];
+}
+
+function buildWeaponMasteryEntries(catalog) {
+  return WEAPON_MASTERY_RULES.map((id) => simpleEntry(
+    'weapon_mastery',
+    id,
+    titleCase(id),
+    statusFrom(catalog.weapon_masteries?.[id] || STATUS.DEFERRED),
+    { description: 'Weapon mastery rule coverage.' },
+  ));
 }
 
 function buildSection(id, entries) {

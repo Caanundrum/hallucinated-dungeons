@@ -15,6 +15,7 @@ const {
   buildResourceState,
   spendResource,
 } = require('./resourceEngine');
+const { consumeSapAfterAttack } = require('./weaponRulesEngine');
 
 function resolveCreatureTurns({
   worldState = {},
@@ -152,11 +153,12 @@ function resolveCreatureAction({ actor, player, characterSheet, worldState, roll
     const nextActor = retaliation
       ? { ...actor, hp: Math.max(0, Number(actor.hp || 0) - retaliation.damage) }
       : actor;
+    const resolvedActor = consumeSapAfterAttack(nextActor);
     const retaliationLine = retaliation
       ? ` ${retaliation.label} lashes back for ${retaliation.damage} ${retaliation.damageType} damage. ${actor.name}: (${actor.hp} -> ${nextActor.hp} HP).`
       : '';
     return {
-      actor: nextActor,
+      actor: resolvedActor,
       player: endurance.player,
       worldState: endurance.worldState === worldState ? nextWorldState : {
         ...endurance.worldState,
@@ -176,7 +178,7 @@ function resolveCreatureAction({ actor, player, characterSheet, worldState, roll
 
   if (criticalMiss) {
     return {
-      actor,
+      actor: consumeSapAfterAttack(actor),
       player,
       worldState: nextWorldState,
       lines: [`${actor.name} uses ${attack.name}: rolls ${rollText} vs AC ${ac}${modeText}. **Critical miss.** Even the initiative tracker winces.`],
@@ -184,7 +186,7 @@ function resolveCreatureAction({ actor, player, characterSheet, worldState, roll
   }
 
   return {
-    actor,
+    actor: consumeSapAfterAttack(actor),
     player,
     worldState: nextWorldState,
     lines: [`${actor.name} uses ${attack.name}: rolls ${rollText} vs AC ${ac}${modeText}. Miss.`],

@@ -51,6 +51,16 @@ const {
   resolveOriginFeatAction,
   rollWeaponDamage,
 } = require('./originFeatEngine');
+const {
+  applyWeaponMasteryOnHit,
+  applyWeaponMasteryOnMiss,
+  consumeVexAdvantage,
+  expireMasteryEffects,
+  getWeaponDamageFormula,
+  getWeaponMasteryAdvantageSources,
+  getWeaponPropertyAttackMode,
+  getWeaponPropertyAttackSources,
+} = require('./weaponRulesEngine');
 
 const DEFAULT_CHECK_DC = 15;
 
@@ -1105,12 +1115,14 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
   }
 
   const attack = getPrimaryAttack(characterSheet, message);
+  const propertyMode = getWeaponPropertyAttackMode({ attack, characterSheet });
+  const propertySources = getWeaponPropertyAttackSources({ attack, characterSheet });
   const lucky = applyLuckyToImmediateD20({
     message,
     worldState: spent.worldState,
     characterSheet,
-    advantageMode: getAttackAdvantageMode(player, target),
-    sources: getAttackAdvantageSources(player, target),
+    advantageMode: combineAdvantageModes(getAttackAdvantageMode(player, target), propertyMode),
+    sources: [...getAttackAdvantageSources(player, target), ...propertySources],
   });
   const attackState = lucky.worldState;
   const advantageMode = lucky.advantageMode;
@@ -1136,8 +1148,9 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
   if (lucky.note) lines.push(lucky.note);
 
   const consumeEffectIds = [];
+  Object.assign(target, consumeVexAdvantage(target));
   if (hit) {
-    const damage = rollWeaponDamage({ formula: attack.damageFormula, characterSheet, rollDie, crit: isCrit, attack });
+    const damage = rollWeaponDamage({ formula: getWeaponDamageFormula({ attack, message }), characterSheet, rollDie, crit: isCrit, attack });
     const bonusDamage = rollBonusDice(getActiveDamageDice(attackState, target), rollDie);
     const flatBonuses = getActiveDamageBonuses(attackState, { attack, characterSheet });
     const flatBonusTotal = flatBonuses.reduce((sum, bonus) => sum + Number(bonus.value || 0), 0);
@@ -1163,10 +1176,13 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
       consumeEffectIds.push('sleep');
       if (Number(target.hp) > 0) lines.push(`${target.name} wakes as the damage lands. Extremely rude alarm clock, but effective.`);
     }
+    lines.push(...applyWeaponMasteryOnHit({ attack, target, combat, characterSheet, damageDealt: totalDamage, rollDie }).lines);
   } else if (criticalMiss) {
     lines.push('**Critical miss.** The attack fails no matter how pretty the math looked in the margins.');
+    lines.push(...applyWeaponMasteryOnMiss({ attack, target, characterSheet }).lines);
   } else {
     lines.push('Miss. The attack fails to connect, which is rude but rules-compliant.');
+    lines.push(...applyWeaponMasteryOnMiss({ attack, target, characterSheet }).lines);
   }
   consumeEffectIds.push(...attackBonusDice.expireEffectIds);
   if ((target.conditions || []).includes('guiding_bolt_advantage')) {
@@ -1330,14 +1346,24 @@ function findCombatTarget(combat = {}, message = '') {
 }
 
 function advanceEnemyTurns({ worldState, characterSheet, rollDie = defaultRollDie, playerTurnNote, playerDodging = false, advanceRound = true }) {
+  const playerTurnEnded = {
+    ...worldState,
+    combat_state: expireMasteryEffects(worldState.combat_state, {
+      timing: 'end_of_player_turn',
+      round: worldState.combat_state?.round,
+    }),
+  };
   const creatureTurns = resolveCreatureTurns({
-    worldState,
+    worldState: playerTurnEnded,
     characterSheet,
     rollDie,
     playerDodging,
     advanceRound,
   });
-  const combat = creatureTurns.combat;
+  const combat = expireMasteryEffects(creatureTurns.combat, {
+    timing: 'start_of_player_turn',
+    round: creatureTurns.combat.round,
+  });
   const player = creatureTurns.player;
   const lines = [playerTurnNote, ...creatureTurns.lines].filter(Boolean);
 
@@ -1735,11 +1761,15 @@ function getPrimaryAttack(characterSheet, message = '') {
   return {
     name: attack?.name || 'weapon',
     weaponId,
-    ability: weapon?.ability || attack?.ability || null,
+    ability: attack?.ability || weapon?.ability || null,
     properties: weapon?.properties || attack?.properties || [],
     weaponCategory: weapon?.weapon_category || attack?.weapon_category || null,
+    attackKind: weapon?.attack_kind || attack?.attack_kind || 'melee',
     attackBonus: Number(attack?.attack_total ?? 3),
     damageFormula: attack?.damage_formula || '1d8+3',
+    damageType: weapon?.damage_type || attack?.damage_type || null,
+    mastery: weapon?.mastery || attack?.mastery || null,
+    versatileDamage: weapon?.versatile_damage || attack?.versatile_damage || null,
     isWeapon: true,
   };
 }
@@ -1763,7 +1793,7 @@ function isSneakAttackWeapon(attack = {}) {
 
 function getAttackAdvantageMode(attacker = {}, target = {}) {
   const conditionMode = getAttackMode({ attacker, target });
-  const spellAdvantage = getSpellAttackAdvantageSources(target).length > 0;
+  const spellAdvantage = [...getSpellAttackAdvantageSources(target), ...getWeaponMasteryAdvantageSources(target)].length > 0;
   if (conditionMode === 'disadvantage' && spellAdvantage) return null;
   if (conditionMode) return conditionMode;
   return spellAdvantage ? 'advantage' : null;
@@ -1773,6 +1803,7 @@ function getAttackAdvantageSources(attacker = {}, target = {}) {
   return [
     ...getAttackModeSources({ attacker, target }),
     ...getSpellAttackAdvantageSources(target),
+    ...getWeaponMasteryAdvantageSources(target),
   ];
 }
 

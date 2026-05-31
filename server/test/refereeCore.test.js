@@ -1310,3 +1310,68 @@ test('Lucky can be spent explicitly on an immediate weapon attack roll', () => {
   assert.match(result.reply, /advantage from Lucky/);
   assert.match(result.reply, /Lucky spends 1 Luck Point/);
 });
+
+test('selected Graze mastery applies through the referee attack loop on a miss', () => {
+  const result = adjudicate({
+    message: 'Attack the Cultist with my greatsword.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', initiative: 18, hp: 12, max_hp: 12, ac: 16, is_player: true, conditions: [] },
+          { name: 'Cultist', initiative: 8, hp: 8, max_hp: 8, ac: 20, is_player: false, conditions: [], attack: { name: 'dagger', attack_bonus: 2, damage_formula: '1d4+1' } },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      weapon_masteries: [{ weapon_id: 'greatsword', mastery: 'graze' }],
+      derived_stats: {
+        ...characterSheet.derived_stats,
+        attack_breakdowns: [
+          { weapon_id: 'greatsword', name: 'Greatsword', ability: 'str', attack_total: 5, damage_formula: '2d6+3' },
+        ],
+      },
+    },
+    rollDie: sequenceRolls([2, 1]),
+  });
+  const cultist = result.worldState.combat_state.combatants.find((entry) => entry.name === 'Cultist');
+
+  assert.equal(cultist.hp, 5);
+  assert.match(result.reply, /Graze mastery/);
+});
+
+test('selected Sap mastery gives the enemy next attack disadvantage and then clears', () => {
+  const result = adjudicate({
+    message: 'Attack the Cultist with my longsword.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', initiative: 18, hp: 12, max_hp: 12, ac: 16, is_player: true, conditions: [] },
+          { name: 'Cultist', initiative: 8, hp: 20, max_hp: 20, ac: 12, is_player: false, conditions: [], attack: { name: 'dagger', attack_bonus: 2, damage_formula: '1d4+1' } },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      weapon_masteries: [{ weapon_id: 'longsword', mastery: 'sap' }],
+      derived_stats: {
+        ...characterSheet.derived_stats,
+        attack_breakdowns: [
+          { weapon_id: 'longsword', name: 'Longsword', ability: 'str', attack_total: 5, damage_formula: '1d8+3' },
+        ],
+      },
+    },
+    rollDie: sequenceRolls([10, 3, 18, 2]),
+  });
+  const cultist = result.worldState.combat_state.combatants.find((entry) => entry.name === 'Cultist');
+
+  assert.equal(cultist.conditions.includes('sapped'), false);
+  assert.match(result.reply, /Sap mastery/);
+  assert.match(result.reply, /disadvantage: Sapped on attacker/);
+});

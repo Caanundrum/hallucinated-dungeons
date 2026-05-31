@@ -13,6 +13,7 @@ const ATTACKER_DISADVANTAGE_CONDITIONS = new Set([
   'poisoned',
   'prone',
   'restrained',
+  'sapped',
 ]);
 
 const TARGET_ADVANTAGE_CONDITIONS = new Set([

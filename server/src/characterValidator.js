@@ -942,7 +942,7 @@ function buildSaveModifiers(saveProficiencies, abilityModifiers, pb) {
 function buildAttackBreakdowns(equipped, content, abilityModifiers, pb, activeEffects) {
   const weapon = byId(content.equipment, equipped.main_hand);
   if (!weapon || weapon.type !== 'weapon') return [];
-  const ability = weapon.ability || 'str';
+  const ability = getWeaponAttackAbility(weapon, abilityModifiers);
   const attackBonus = activeEffects
     .filter((effect) => effect.target === 'weapon_attack_bonus' && effect.source_item_id === weapon.id)
     .reduce((sum, effect) => sum + Number(effect.value || 0), 0);
@@ -952,6 +952,13 @@ function buildAttackBreakdowns(equipped, content, abilityModifiers, pb, activeEf
   return [{
     weapon_id: weapon.id,
     name: weapon.name,
+    ability,
+    properties: weapon.properties || [],
+    weapon_category: weapon.weapon_category || null,
+    attack_kind: weapon.attack_kind || 'melee',
+    damage_type: weapon.damage_type || null,
+    mastery: weapon.mastery || null,
+    versatile_damage: weapon.versatile_damage || null,
     attack_total: (abilityModifiers[ability] || 0) + pb + attackBonus,
     attack_parts: [
       { label: ability.toUpperCase(), value: abilityModifiers[ability] || 0 },
@@ -965,6 +972,13 @@ function buildAttackBreakdowns(equipped, content, abilityModifiers, pb, activeEf
       ...(damageBonus ? [{ label: 'Weapon magic', value: damageBonus }] : []),
     ],
   }];
+}
+
+function getWeaponAttackAbility(weapon, abilityModifiers) {
+  if ((weapon.properties || []).includes('finesse')) {
+    return Number(abilityModifiers.dex || 0) > Number(abilityModifiers.str || 0) ? 'dex' : 'str';
+  }
+  return weapon.ability || 'str';
 }
 
 function buildSpellcasting(draft, characterClass, content, abilityModifiers, classData = {}) {
