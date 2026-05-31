@@ -3,6 +3,7 @@ const {
   getFightingStyleArmorBonus,
   getFightingStyleAttackBonus,
 } = require('./fightingStyleEngine');
+const { buildStartingAmmunitionItems } = require('./ammunitionEngine');
 
 const ABILITIES = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
 const STANDARD_ARRAY = [15, 14, 13, 12, 10, 8];
@@ -831,10 +832,11 @@ function buildInventory(characterClass, content, equipmentChoice, background, ba
   if (equipmentChoice === 'gold') {
     inventory.push({ id: 'class_starting_gold', name: 'Class Starting Gold', type: 'currency', quantity: 1, description: 'Class gold option selected. Purchase flow is deferred.' });
   } else {
-    inventory.push(...(characterClass.equipment_pack || []).map((id) => {
-    const item = byId(content.equipment, id);
-    return item ? { ...item, quantity: 1 } : { id, name: id, type: 'item', quantity: 1, description: 'Starting item.' };
-    }));
+    const classItems = (characterClass.equipment_pack || []).map((id) => {
+      const item = byId(content.equipment, id);
+      return item ? { ...item, quantity: 1 } : { id, name: id, type: 'item', quantity: 1, description: 'Starting item.' };
+    });
+    inventory.push(...classItems, ...buildStartingAmmunitionItems(classItems, content));
   }
   if (backgroundEquipmentChoice === 'gold') {
     inventory.push({ id: 'background_50_gp', name: '50 GP', type: 'currency', quantity: 50, description: 'Background gold alternative selected.' });
@@ -982,6 +984,7 @@ function buildAttackBreakdown(weapon, abilityModifiers, pb, activeEffects, class
     damage_type: weapon.damage_type || null,
     mastery: weapon.mastery || null,
     versatile_damage: weapon.versatile_damage || null,
+    ammunition_type: weapon.ammunition_type || null,
     attack_total: (abilityModifiers[ability] || 0) + pb + attackBonus + fightingStyleAttackBonus,
     fighting_style_attack_bonus: fightingStyleAttackBonus,
     attack_parts: [

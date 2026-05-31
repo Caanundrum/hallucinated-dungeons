@@ -1,5 +1,5 @@
 {
-  "version": "4C.6-H7",
+  "version": "4C.6-H8",
   "status_definitions": {
     "implemented": "Exposed and mechanically enforced for the current supported level/scope.",
     "partial": "Exposed and partially enforced, but missing at least one meaningful rules interaction.",
@@ -185,11 +185,11 @@
     "initiative_bonus": "implemented",
     "spell_attack_bonus": "partial",
     "spell_save_dc_bonus": "partial",
-    "ammunition": "deferred",
+    "ammunition": "implemented",
     "finesse": "implemented",
     "heavy": "implemented",
     "light": "implemented",
-    "loading": "deferred",
+    "loading": "implemented",
     "reach": "partial",
     "thrown": "partial",
     "two_handed": "implemented",

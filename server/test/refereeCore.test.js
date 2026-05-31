@@ -1785,3 +1785,134 @@ test('referee routes a declared javelin throw through ranged long-range disadvan
   assert.match(result.reply, /disadvantage from Long range/);
   assert.match(result.reply, /Attack roll: 9 \(natural 4; 18\/4 with disadvantage, using 4\+5=9\)/);
 });
+
+test('referee spends ammunition when a ranged weapon attack misses', () => {
+  const result = adjudicate({
+    message: 'Attack the Cultist with my longbow.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', initiative: 18, hp: 14, max_hp: 14, ac: 16, is_player: true },
+          { name: 'Cultist', initiative: 8, hp: 20, max_hp: 20, ac: 30, is_player: false, attack: { name: 'dagger', attack_bonus: 2, damage_formula: '1d4+1' } },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      equipped: { main_hand: 'longbow', off_hand: null },
+      inventory: [{ id: 'arrows', name: 'Arrows', type: 'ammunition', quantity: 20 }],
+      derived_stats: {
+        ...characterSheet.derived_stats,
+        attack_breakdowns: [
+          { weapon_id: 'longbow', name: 'Longbow', ability: 'dex', attack_total: 5, damage_formula: '1d8 + 1' },
+        ],
+      },
+    },
+    rollDie: sequenceRolls([2, 1]),
+  });
+
+  assert.equal(result.worldState.player_stats.ammunition.arrows.remaining, 19);
+  assert.equal(result.worldState.player_stats.ammunition_spent_since_recovery.arrows, 1);
+  assert.match(result.reply, /Ammunition.*19 Arrows remain/);
+});
+
+test('referee blocks an empty ranged weapon without spending the player turn', () => {
+  const result = adjudicate({
+    message: 'Attack the Cultist with my longbow.',
+    worldState: worldState({
+      player_stats: {
+        hp: 12,
+        max_hp: 12,
+        armor_class: 16,
+        ammunition: { arrows: { id: 'arrows', name: 'Arrows', remaining: 0 } },
+      },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', initiative: 18, hp: 14, max_hp: 14, ac: 16, is_player: true },
+          { name: 'Cultist', initiative: 8, hp: 20, max_hp: 20, ac: 10, is_player: false },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      equipped: { main_hand: 'longbow', off_hand: null },
+      derived_stats: {
+        ...characterSheet.derived_stats,
+        attack_breakdowns: [
+          { weapon_id: 'longbow', name: 'Longbow', ability: 'dex', attack_total: 5, damage_formula: '1d8 + 1' },
+        ],
+      },
+    },
+  });
+
+  assert.equal(result.logType, 'referee_weapon_attack_unavailable');
+  assert.equal(result.worldState.combat_state.turn_resources, undefined);
+  assert.match(result.reply, /out of Arrows/);
+});
+
+test('referee recovers half of spent ammunition after a one-minute battlefield search', () => {
+  const result = adjudicate({
+    message: 'I spend 1 minute searching the battlefield for my arrows.',
+    worldState: worldState({
+      active_effects: [{
+        id: 'guidance',
+        name: 'Guidance',
+        remaining_minutes: 1,
+        rules_effects: [],
+      }],
+      player_stats: {
+        hp: 12,
+        max_hp: 12,
+        armor_class: 16,
+        ammunition: { arrows: { id: 'arrows', name: 'Arrows', remaining: 13 } },
+        ammunition_spent_since_recovery: { arrows: 7 },
+      },
+    }),
+    characterSheet,
+  });
+
+  assert.equal(result.worldState.player_stats.ammunition.arrows.remaining, 16);
+  assert.equal(result.worldState.time_state.elapsed_minutes, 1);
+  assert.deepEqual(result.worldState.active_effects, []);
+  assert.match(result.reply, /recover 3 arrows/);
+  assert.match(result.reply, /Expired effects: Guidance/);
+});
+
+test('blocked Light ammunition follow-up leaves the Bonus Action available', () => {
+  const result = adjudicate({
+    message: 'Attack the Cultist with my shortsword and hand crossbow.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', initiative: 18, hp: 14, max_hp: 14, ac: 16, is_player: true },
+          { name: 'Cultist', initiative: 8, hp: 30, max_hp: 30, ac: 10, is_player: false, attack: { name: 'dagger', attack_bonus: 2, damage_formula: '1d4+1' } },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      equipped: { main_hand: 'shortsword', off_hand: 'hand_crossbow' },
+      inventory: [{ id: 'bolts', name: 'Bolts', type: 'ammunition', quantity: 20 }],
+      derived_stats: {
+        ...characterSheet.derived_stats,
+        attack_breakdowns: [
+          { weapon_id: 'shortsword', name: 'Shortsword', ability: 'dex', attack_total: 5, damage_formula: '1d6 + 3' },
+          { weapon_id: 'hand_crossbow', name: 'Hand Crossbow', ability: 'dex', attack_total: 5, damage_formula: '1d6 + 3' },
+        ],
+      },
+    },
+    rollDie: sequenceRolls([10, 4, 1]),
+  });
+
+  assert.equal(result.worldState.combat_state.turn_resources.bonus_action_available, true);
+  assert.match(result.reply, /Light property.*needs a free hand/s);
+});

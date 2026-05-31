@@ -74,6 +74,11 @@ const {
   getCleaveExtraAttack,
   markCleaveUsed,
 } = require('./cleaveMasteryEngine');
+const {
+  checkAmmunitionAttack,
+  recoverSpentAmmunition,
+  spendAmmunitionForAttack,
+} = require('./ammunitionEngine');
 
 const DEFAULT_CHECK_DC = 15;
 
@@ -111,6 +116,10 @@ function adjudicate({ message, worldState = {}, characterSheet = null, currentTu
   const restIntent = getRestIntent(text);
   if (restIntent) {
     return resolveRest({ restIntent, worldState: state, characterSheet: sheet, rollDie });
+  }
+
+  if (wantsAmmunitionRecovery(text)) {
+    return resolveAmmunitionRecovery({ worldState: state });
   }
 
   const timeIntent = getTimePassageIntent(text);
@@ -722,6 +731,42 @@ function getTimePassageIntent(text) {
   return { minutes: amount, label: `${amount} minute${amount === 1 ? '' : 's'}` };
 }
 
+function wantsAmmunitionRecovery(text) {
+  return /\b(?:recover|retrieve|collect|gather|search(?:ing)?(?: the battlefield)? for|pick up)\b.*\b(?:ammunition|arrows?|bolts?|needles?|sling bullets?)\b/i
+    .test(String(text || ''));
+}
+
+function resolveAmmunitionRecovery({ worldState }) {
+  const recovered = recoverSpentAmmunition(worldState);
+  if (!recovered.ok) {
+    return {
+      handled: true,
+      logType: 'referee_ammunition_recovery_blocked',
+      worldState,
+      reply: recovered.reply,
+    };
+  }
+  const timed = resolveTimePassage({
+    timeIntent: { minutes: 1, label: '1 minute' },
+    worldState: recovered.worldState,
+  });
+  const timeNote = timed.reply.replace(/^You let \*\*1 minute\*\* pass\. /, '');
+  const summary = recovered.recoveries.length
+    ? recovered.recoveries.map((entry) => `${entry.quantity} ${formatRecoveredAmmunition(entry.id, entry.quantity)}`).join(', ')
+    : 'no usable ammunition';
+  return {
+    handled: true,
+    logType: 'referee_ammunition_recovery',
+    worldState: timed.worldState,
+    reply: `You spend **1 minute** searching the battlefield and recover ${summary}. Bent shafts, vanished shots, and dramatic shrubbery claim the rest. ${timeNote}`,
+  };
+}
+
+function formatRecoveredAmmunition(id, quantity) {
+  const name = String(id || 'ammunition').replaceAll('_', ' ');
+  return Number(quantity) === 1 && name.endsWith('s') ? name.slice(0, -1) : name;
+}
+
 function resolveRest({ restIntent, worldState, characterSheet, rollDie = defaultRollDie }) {
   if (worldState.combat_state?.active) {
     return {
@@ -1112,8 +1157,8 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
   }
 
   let combat = cloneCombatState(spent.worldState.combat_state);
-  const player = combat.combatants.find((combatant) => combatant.is_player);
-  const target = findCombatTarget(combat, message) || getLivingEnemy(combat);
+  let player = combat.combatants.find((combatant) => combatant.is_player);
+  let target = findCombatTarget(combat, message) || getLivingEnemy(combat);
   if (!player || !target) {
     return endCombat(worldState, 'There is no active enemy left to attack. Combat ends before the initiative tracker has to file a complaint.');
   }
@@ -1143,6 +1188,29 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
       reply: preparedAttack.reply,
     };
   }
+  const ammunitionCheck = checkAmmunitionAttack({
+    attack: preparedAttack.attack,
+    worldState: spent.worldState,
+    characterSheet,
+    actionResource: 'action',
+  });
+  if (!ammunitionCheck.ok) {
+    return {
+      handled: true,
+      logType: 'referee_weapon_attack_unavailable',
+      worldState,
+      reply: ammunitionCheck.reply,
+    };
+  }
+  const ammunitionSpent = spendAmmunitionForAttack({
+    attack: preparedAttack.attack,
+    worldState: spent.worldState,
+    characterSheet,
+    actionResource: 'action',
+  });
+  combat = cloneCombatState(ammunitionSpent.worldState.combat_state);
+  player = combat.combatants.find((combatant) => combatant.is_player);
+  target = findCombatTarget(combat, message) || getLivingEnemy(combat);
   const attack = applyFightingStyleToAttack({
     attack: preparedAttack.attack,
     characterSheet,
@@ -1153,12 +1221,12 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
   const propertySources = getWeaponPropertyAttackSources({ attack, characterSheet, player, target, combat });
   const lucky = applyLuckyToImmediateD20({
     message,
-    worldState: spent.worldState,
+    worldState: ammunitionSpent.worldState,
     characterSheet,
     advantageMode: combineAdvantageModes(getAttackAdvantageMode(player, target), propertyMode),
     sources: [...getAttackAdvantageSources(player, target), ...propertySources],
   });
-  const attackState = lucky.worldState;
+  let attackState = lucky.worldState;
   const advantageMode = lucky.advantageMode;
   const attackRoll = resolveD20Test({
     kind: 'attack',
@@ -1177,6 +1245,7 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
   const hit = !criticalMiss && (isCrit || attackTotal >= Number(target.ac || 10));
   const lines = [
     `You attack ${target.name} with ${attack.name}. Attack roll: ${attackRoll.rollText} vs AC ${target.ac}.`,
+    ...ammunitionSpent.lines,
   ];
   if (advantageMode) lines.push(`Attack roll has ${advantageMode} from ${formatList(lucky.sources)}.`);
   if (lucky.note) lines.push(lucky.note);
@@ -1250,7 +1319,10 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
       applyMastery: false,
       sneakAttackAvailable: false,
       savageAttackerAvailable: false,
+      actionResource: 'action',
     });
+    combat = cleaveResult.combat;
+    attackState = cleaveResult.worldState;
     lines.push(...cleaveResult.lines);
     consumeEffectIds.push(...cleaveResult.consumeEffectIds);
   } else if (cleaveExtra) {
@@ -1258,34 +1330,60 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
   }
 
   if (lightExtra && getLivingEnemy(combat)) {
-    const extraSpent = lightExtra.usesBonusAction
-      ? spendTurnResource({ ...attackState, combat_state: combat }, 'bonus_action', 'Light weapon extra attack', characterSheet)
-      : { ok: true, worldState: { ...attackState, combat_state: combat } };
-    if (!extraSpent.ok) {
-      lines.push(extraSpent.reply);
+    const lightActionResource = lightExtra.usesBonusAction ? 'bonus_action' : 'action';
+    const lightAttack = applyFightingStyleToAttack({
+      attack: lightExtra.attack,
+      characterSheet,
+      message,
+    });
+    const lightTarget = getLivingEnemy(combat);
+    const lightPlayer = combat.combatants.find((combatant) => combatant.is_player);
+    const lightPrepared = prepareWeaponAttack({
+      attack: lightAttack,
+      message,
+      characterSheet,
+      player: lightPlayer,
+      target: lightTarget,
+    });
+    const lightAmmunition = lightPrepared.ok
+      ? checkAmmunitionAttack({
+          attack: lightPrepared.attack,
+          worldState: { ...attackState, combat_state: combat },
+          characterSheet,
+          actionResource: lightActionResource,
+        })
+      : lightPrepared;
+    if (!lightAmmunition.ok) {
+      lines.push(`**Light property:** ${lightAmmunition.reply}`);
     } else {
-      combat = cloneCombatState(extraSpent.worldState.combat_state);
-      const extraTarget = getLivingEnemy(combat);
-      lines.push(lightExtra.usesBonusAction
-        ? '**Light property:** you spend your Bonus Action to make one extra attack with a different Light weapon.'
-        : '**Nick mastery:** your Light-property extra attack folds into the Attack action, leaving your Bonus Action available.');
-      const extraResult = resolveExtraWeaponAttackRoll({
-        attack: applyFightingStyleToAttack({
-          attack: lightExtra.attack,
+      const extraSpent = lightExtra.usesBonusAction
+        ? spendTurnResource({ ...attackState, combat_state: combat }, 'bonus_action', 'Light weapon extra attack', characterSheet)
+        : { ok: true, worldState: { ...attackState, combat_state: combat } };
+      if (!extraSpent.ok) {
+        lines.push(extraSpent.reply);
+      } else {
+        combat = cloneCombatState(extraSpent.worldState.combat_state);
+        const extraTarget = getLivingEnemy(combat);
+        lines.push(lightExtra.usesBonusAction
+          ? '**Light property:** you spend your Bonus Action to make one extra attack with a different Light weapon.'
+          : '**Nick mastery:** your Light-property extra attack folds into the Attack action, leaving your Bonus Action available.');
+        const extraResult = resolveExtraWeaponAttackRoll({
+          attack: lightPrepared.attack,
+          target: extraTarget,
+          combat,
+          worldState: extraSpent.worldState,
           characterSheet,
           message,
-        }),
-        target: extraTarget,
-        combat,
-        worldState: extraSpent.worldState,
-        characterSheet,
-        message,
-        rollDie,
-        sneakAttackAvailable: !sneakAttackUsed,
-        savageAttackerAvailable: !savageAttackerUsed,
-      });
-      lines.push(...extraResult.lines);
-      consumeEffectIds.push(...extraResult.consumeEffectIds);
+          rollDie,
+          sneakAttackAvailable: !sneakAttackUsed,
+          savageAttackerAvailable: !savageAttackerUsed,
+          actionResource: lightActionResource,
+        });
+        combat = extraResult.combat;
+        attackState = extraResult.worldState;
+        lines.push(...extraResult.lines);
+        consumeEffectIds.push(...extraResult.consumeEffectIds);
+      }
     }
   }
 
@@ -1342,10 +1440,45 @@ function resolveExtraWeaponAttackRoll({
   applyMastery = true,
   attackLabel = 'extra attack',
   resultLabel = 'Extra attack',
+  actionResource = 'action',
 }) {
-  if (!target) return { lines: [], consumeEffectIds: [] };
+  if (!target) return { lines: [], consumeEffectIds: [], combat, worldState };
 
-  const player = combat.combatants.find((combatant) => combatant.is_player);
+  let player = combat.combatants.find((combatant) => combatant.is_player);
+  const preparedAttack = prepareWeaponAttack({
+    attack,
+    message,
+    characterSheet,
+    player,
+    target,
+  });
+  if (!preparedAttack.ok) {
+    return {
+      lines: [`**${resultLabel}:** ${preparedAttack.reply}`],
+      consumeEffectIds: [],
+      combat,
+      worldState,
+    };
+  }
+  const ammunitionSpent = spendAmmunitionForAttack({
+    attack: preparedAttack.attack,
+    worldState: { ...worldState, combat_state: combat },
+    characterSheet,
+    actionResource,
+  });
+  if (!ammunitionSpent.ok) {
+    return {
+      lines: [`**${resultLabel}:** ${ammunitionSpent.reply}`],
+      consumeEffectIds: [],
+      combat,
+      worldState,
+    };
+  }
+  attack = preparedAttack.attack;
+  worldState = ammunitionSpent.worldState;
+  combat = cloneCombatState(worldState.combat_state);
+  player = combat.combatants.find((combatant) => combatant.is_player);
+  target = findCombatTarget(combat, target.name) || target;
   const propertyMode = getWeaponPropertyAttackMode({ attack, characterSheet, player, target, combat });
   const advantageMode = combineAdvantageModes(getAttackAdvantageMode(player, target), propertyMode);
   const sources = [
@@ -1367,6 +1500,7 @@ function resolveExtraWeaponAttackRoll({
   const hit = !criticalMiss && (isCrit || attackRoll.total >= Number(target.ac || 10));
   const lines = [
     `You make the ${attackLabel} against ${target.name} with ${attack.name}. Attack roll: ${attackRoll.rollText} vs AC ${target.ac}.`,
+    ...ammunitionSpent.lines,
   ];
   if (advantageMode) lines.push(`${resultLabel} has ${advantageMode} from ${formatList(sources)}.`);
 
@@ -1418,7 +1552,7 @@ function resolveExtraWeaponAttackRoll({
   }
   if (Number(target.hp) <= 0) lines.push(`${target.name} falls.`);
 
-  return { lines, consumeEffectIds };
+  return { lines, consumeEffectIds, combat, worldState };
 }
 
 function getLivingEnemy(combat = {}) {
@@ -1983,6 +2117,8 @@ function buildAttackFromBreakdown(attack = {}) {
     damageType: weapon?.damage_type || attack?.damage_type || null,
     mastery: weapon?.mastery || attack?.mastery || null,
     versatileDamage: weapon?.versatile_damage || attack?.versatile_damage || null,
+    ammunitionType: weapon?.ammunition_type || attack?.ammunition_type || null,
+    ammunitionBundleQuantity: getContentBundle().equipment.find((item) => item.id === (weapon?.ammunition_type || attack?.ammunition_type))?.bundle_quantity || null,
     range: weapon?.range || attack?.range || null,
     isWeapon: true,
   };

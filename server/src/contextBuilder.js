@@ -232,7 +232,7 @@ function buildActiveCharacterText(characterSheet) {
     lines.push(`Active spell effects: ${formatActiveEffects(derived.active_spell_effects)}`);
   }
   if (inventory.length) {
-    lines.push(`Equipment: ${inventory.map((item) => item.name).join(', ')}`);
+    lines.push(`Equipment: ${inventory.map((item) => Number(item.quantity || 0) > 1 ? `${item.name} x${item.quantity}` : item.name).join(', ')}`);
   }
   if (spellcasting.ability) {
     const content = getContentBundle();

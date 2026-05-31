@@ -228,6 +228,7 @@ function characterSheetToWorldStats(characterSheet, characterId = null) {
     conditions: stats.conditions || [],
     spell_slots: characterSheet.spellcasting?.slots || {},
     hit_dice: characterSheet.resources?.hit_dice || null,
+    ammunition: buildCharacterAmmunitionState(characterSheet),
     weapon_name: primaryAttack?.name || '',
     ability_scores: modifiers,
   };
@@ -348,7 +349,7 @@ function summarizeCharacterSheetForRules(characterSheet) {
     lines.push(`Features: ${features.map((feature) => `${feature.name} (${feature.source || 'feature'})`).join('; ')}`);
   }
   if (inventory.length) {
-    lines.push(`Equipment: ${inventory.map((item) => item.name).join(', ')}`);
+    lines.push(`Equipment: ${inventory.map((item) => Number(item.quantity || 0) > 1 ? `${item.name} x${item.quantity}` : item.name).join(', ')}`);
   }
   if (spellcasting.ability) {
     const cantrips = spellcasting.cantrips_known || [];
@@ -644,9 +645,17 @@ async function syncCharacterToWorldState(sessionId, characterSheet, characterId 
 
 function normalizeActiveCharacterWorldState(worldState, characterSheet, characterId = null) {
   const stats = characterSheetToWorldStats(characterSheet, characterId);
+  const currentPlayerStats = worldState.player_stats || db.DEFAULT_WORLD_STATE.player_stats;
+  const sameCharacter = Boolean(stats.character_id && currentPlayerStats.character_id === stats.character_id);
   const nextPlayerStats = {
-    ...(worldState.player_stats || db.DEFAULT_WORLD_STATE.player_stats),
+    ...currentPlayerStats,
     ...stats,
+    ammunition: sameCharacter && currentPlayerStats.ammunition
+      ? currentPlayerStats.ammunition
+      : stats.ammunition,
+    ammunition_spent_since_recovery: sameCharacter
+      ? currentPlayerStats.ammunition_spent_since_recovery || {}
+      : {},
   };
   return {
     ...worldState,
@@ -654,6 +663,16 @@ function normalizeActiveCharacterWorldState(worldState, characterSheet, characte
     player_stats: nextPlayerStats,
     combat_state: alignCombatPlayerToCharacter(worldState.combat_state, characterSheet, nextPlayerStats),
   };
+}
+
+function buildCharacterAmmunitionState(characterSheet = {}) {
+  return Object.fromEntries((characterSheet.inventory || [])
+    .filter((item) => item.type === 'ammunition')
+    .map((item) => [item.id, {
+      id: item.id,
+      name: item.name,
+      remaining: Number(item.quantity || 0),
+    }]));
 }
 
 function alignCombatPlayerToCharacter(combatState, characterSheet, playerStats) {
@@ -1499,6 +1518,9 @@ io.on('connection', (socket) => {
               if (originSpellText.length) statParts.push(`Origin magic: ${originSpellText.join(', ')}`);
             }
             if (ps.conditions?.length) statParts.push(`Conditions: ${ps.conditions.join(', ')}`);
+            if (ps.ammunition && Object.keys(ps.ammunition).length > 0) {
+              statParts.push(`Ammunition: ${Object.values(ps.ammunition).map((item) => `${item.name || item.id} ${item.remaining}`).join(', ')}`);
+            }
             // Include weapon and ability scores so DM2 can answer damage/attack questions without asking.
             if (ps.weapon_name) statParts.push(`Weapon: ${ps.weapon_name}`);
             if (ps.ability_scores && Object.keys(ps.ability_scores).length > 0) {

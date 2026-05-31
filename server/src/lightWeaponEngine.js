@@ -54,6 +54,8 @@ function buildLightExtraAttack({ characterSheet = {}, weapon = {} } = {}) {
     damageType: weapon.damage_type || breakdown?.damage_type || null,
     mastery: weapon.mastery || breakdown?.mastery || null,
     versatileDamage: weapon.versatile_damage || breakdown?.versatile_damage || null,
+    ammunitionType: weapon.ammunition_type || breakdown?.ammunition_type || null,
+    ammunitionBundleQuantity: getContentBundle().equipment.find((item) => item.id === (weapon.ammunition_type || breakdown?.ammunition_type))?.bundle_quantity || null,
     isWeapon: true,
     isLightExtraAttack: true,
     includesLightAttackAbilityModifier: includeAbilityModifier,

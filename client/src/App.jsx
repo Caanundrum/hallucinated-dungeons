@@ -1112,7 +1112,7 @@ function CharacterSheetModal({ character, content, onClose }) {
             <h3>Equipment</h3>
             {inventory.map((item) => (
               <div key={item.id} className="sheet-line">
-                <strong>{item.name}</strong>
+                <strong>{Number(item.quantity || 0) > 1 ? `${item.name} x${item.quantity}` : item.name}</strong>
                 <span>{item.description}</span>
               </div>
             ))}

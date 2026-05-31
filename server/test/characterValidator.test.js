@@ -726,3 +726,11 @@ test('equips and calculates a second Light weapon without filling a two-handed w
   assert.equal(barbarian.equipped.main_hand, 'greataxe');
   assert.equal(barbarian.equipped.off_hand, null);
 });
+
+test('starting ranged equipment includes the matching ammunition bundle', () => {
+  const ranger = validateCharacter(classDraftFor('ranger'), getContentBundle());
+  const arrows = ranger.inventory.find((item) => item.id === 'arrows');
+
+  assert.equal(arrows.type, 'ammunition');
+  assert.equal(arrows.quantity, 20);
+});

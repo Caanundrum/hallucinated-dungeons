@@ -122,9 +122,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
   const requiredCantrips = (selectedClass?.spellcasting?.cantrips || 0) + classExtraCantrips;
   const requiredSpells = requiredSpellCount(selectedClass);
   const requiredSpellbookSpells = selectedClass?.spellcasting?.spellbook_spells || 0;
-  const equipmentItems = (selectedClass?.equipment_pack || [])
-    .map((id) => content.equipment.find((item) => item.id === id))
-    .filter(Boolean);
+  const equipmentItems = getStartingEquipmentItems(selectedClass, content);
   const armorItem = equipmentItems.find((item) => item.type === 'armor');
   const shieldItem = equipmentItems.find((item) => item.type === 'shield');
   const hasCompleteScores = ABILITIES.every((ability) => isFilledInteger(draft.abilityScores[ability]));
@@ -720,7 +718,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
               </div>
               {draft.equipmentChoice === 'pack' ? (
                 <div className="equipment-list">
-                  {equipmentItems.map((item) => <InfoRow key={item.id} title={item.name} body={item.description} meta={item.type} />)}
+                  {equipmentItems.map((item) => <InfoRow key={item.id} title={formatEquipmentName(item)} body={item.description} meta={item.type} />)}
                 </div>
               ) : <p className="helper-text">Gold purchasing is saved as a choice for now. The full shop economy is not Phase 4A.</p>}
               <h3>Background Equipment</h3>
@@ -1369,7 +1367,7 @@ function ReviewPanel({ draft, content, finalScores, abilityMods, backgroundBonus
       <InfoRow title="Languages" meta={`${knownLanguages.length} known`} body={knownLanguages.map((id) => languageMap[id]?.name).filter(Boolean).join(', ')} />
       <InfoRow title="Details" meta={draft.characterDetails?.alignment || 'Unaligned'} body={[draft.characterDetails?.appearance, draft.characterDetails?.personality, draft.characterDetails?.backstory].filter(Boolean).join(' ')} />
       <InfoRow title="Equipment" meta={`${draft.equipmentChoice} / ${draft.backgroundEquipmentChoice}`} body={[
-        draft.equipmentChoice === 'pack' ? equipmentItems.map((item) => item.name).join(', ') : 'Class starting gold',
+        draft.equipmentChoice === 'pack' ? equipmentItems.map(formatEquipmentName).join(', ') : 'Class starting gold',
         draft.backgroundEquipmentChoice === 'equipment' ? `${selectedBackground?.name} background package` : '50 GP background alternative',
       ].filter(Boolean).join('; ')} />
       {selectedClass?.spellcasting && <InfoRow title="Class Spells" meta={selectedClass.spellcasting.ability.toUpperCase()} body={classSpellBody} />}
@@ -1481,7 +1479,7 @@ function CharacterSummary({
         <DetailBlock
           title="Equipment"
           body={[
-            draft.equipmentChoice === 'pack' ? equipmentItems.map((item) => item.name).join(', ') : 'Class starting gold',
+            draft.equipmentChoice === 'pack' ? equipmentItems.map(formatEquipmentName).join(', ') : 'Class starting gold',
             draft.backgroundEquipmentChoice === 'equipment' ? `${selectedBackground?.name} background package` : '50 GP background alternative',
           ].filter(Boolean).join('; ')}
         />
@@ -2072,4 +2070,25 @@ function stepsForClass(isCaster) {
   if (isCaster) steps.push('Spells');
   steps.push('Review');
   return steps;
+}
+
+function getStartingEquipmentItems(selectedClass, content) {
+  const classItems = (selectedClass?.equipment_pack || [])
+    .map((id) => content.equipment.find((item) => item.id === id))
+    .filter(Boolean);
+  const ammunitionIds = [...new Set(classItems
+    .filter((item) => item.type === 'weapon')
+    .map((item) => item.ammunition_type)
+    .filter(Boolean))];
+  return [
+    ...classItems,
+    ...ammunitionIds
+      .map((id) => content.equipment.find((item) => item.id === id))
+      .filter(Boolean)
+      .map((item) => ({ ...item, quantity: Number(item.bundle_quantity || 0) })),
+  ];
+}
+
+function formatEquipmentName(item = {}) {
+  return Number(item.quantity || 0) > 1 ? `${item.name} x${item.quantity}` : item.name;
 }
