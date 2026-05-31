@@ -1,4 +1,4 @@
-function rollDamageFormula(formula = '1d6', rollDie = defaultRollDie, { crit = false, spellMod = 0 } = {}) {
+function rollDamageFormula(formula = '1d6', rollDie = defaultRollDie, { crit = false, spellMod = 0, rerollOnes = false } = {}) {
   const normalized = String(formula || '1')
     .replace(/\s+/g, '')
     .replace(/spell_mod_min_1/g, String(Math.max(1, Number(spellMod || 0))))
@@ -12,11 +12,19 @@ function rollDamageFormula(formula = '1d6', rollDie = defaultRollDie, { crit = f
   const modifier = (modifierText.match(/[+-]\d+/g) || [])
     .reduce((sum, value) => sum + Number(value), 0);
   const rollCount = crit ? diceCount * 2 : diceCount;
-  const rolls = Array.from({ length: rollCount }, () => rollDie(dieSides));
+  const rerolls = [];
+  const rolls = Array.from({ length: rollCount }, () => {
+    const first = rollDie(dieSides);
+    if (!rerollOnes || first !== 1) return first;
+    const replacement = rollDie(dieSides);
+    rerolls.push({ from: first, to: replacement });
+    return replacement;
+  });
   return {
     total: rolls.reduce((sum, roll) => sum + roll, 0) + modifier,
     rolls,
     modifier,
+    rerolls,
   };
 }
 

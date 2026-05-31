@@ -60,3 +60,11 @@ test('healing caps at max HP and temporary HP keeps the higher value', () => {
   assert.equal(temp.target.temp_hp, 4);
   assert.equal(temp.applied, 0);
 });
+
+test('dice formulas can reroll results of 1 once for Healer and Tavern Brawler hooks', () => {
+  const result = rollDamageFormula('2d4+2', sequenceRolls([1, 3, 1, 4]), { rerollOnes: true });
+
+  assert.deepEqual(result.rolls, [3, 4]);
+  assert.equal(result.total, 9);
+  assert.deepEqual(result.rerolls, [{ from: 1, to: 3 }, { from: 1, to: 4 }]);
+});

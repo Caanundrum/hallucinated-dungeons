@@ -388,6 +388,37 @@ test('Fire Bolt uses spell attack bonus and can consume a combat turn', () => {
   assert.match(outcome.reply, /12\+5 = 17 vs AC 12/);
 });
 
+test('Lucky can be spent explicitly on an immediate spell attack roll', () => {
+  const sheet = casterSheet({
+    origin: { background_feat: 'lucky' },
+  });
+  const cast = resolveSpellCast({
+    message: 'I cast Fire Bolt at the Skeleton using Lucky.',
+    content,
+    characterSheet: sheet,
+    worldState: combatWorld({
+      player_stats: {
+        hp: 10,
+        max_hp: 10,
+        armor_class: 12,
+        resources: {
+          luck_points: { name: 'Luck Points', remaining: 1, max: 2, reset: 'long_rest' },
+        },
+      },
+    }),
+  });
+  const outcome = resolveSpellOutcome({
+    spellCast: cast,
+    characterSheet: cast.characterSheet,
+    worldState: cast.worldState,
+    rollDie: sequenceRolls([2, 15, 5]),
+  });
+
+  assert.equal(outcome.worldState.player_stats.resources.luck_points.remaining, 0);
+  assert.match(outcome.reply, /advantage from Lucky/);
+  assert.match(outcome.reply, /Lucky spends 1 Luck Point/);
+});
+
 test('action spell outcome can advance enemy turns through the referee', () => {
   const cast = resolveSpellCast({
     message: 'I cast Fire Bolt at the skeleton.',
@@ -482,6 +513,46 @@ test('Healing Word restores HP and does not consume the combat action', () => {
   assert.equal(outcome.worldState.player_stats.hp, 12);
   assert.equal(outcome.consumesTurn, false);
   assert.match(outcome.reply, /restore 11 HP/);
+});
+
+test('Healer feat rerolls healing spell dice results of 1 once', () => {
+  const sheet = casterSheet({
+    identity: { name: 'Mira', level: 1, class: 'bard', class_name: 'Bard' },
+    origin: { background_feat: 'healer' },
+    abilities: { modifiers: { cha: 3 } },
+    spellcasting: {
+      ability: 'cha',
+      cantrips_known: [],
+      spells_prepared: ['healing_word'],
+      slots: { 1: 1 },
+    },
+  });
+  const cast = resolveSpellCast({
+    message: 'I cast Healing Word on myself.',
+    content,
+    characterSheet: sheet,
+    worldState: combatWorld({
+      player_stats: { hp: 1, max_hp: 20, armor_class: 12 },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Mira', hp: 1, max_hp: 20, ac: 12, is_player: true },
+          { name: 'Skeleton', hp: 10, max_hp: 10, ac: 12, is_player: false },
+        ],
+      },
+    }),
+  });
+  const outcome = resolveSpellOutcome({
+    spellCast: cast,
+    characterSheet: cast.characterSheet,
+    worldState: cast.worldState,
+    rollDie: sequenceRolls([1, 4, 1, 3]),
+  });
+
+  assert.equal(outcome.worldState.player_stats.hp, 11);
+  assert.match(outcome.reply, /restore 10 HP/);
 });
 
 test('blocks proactive Reaction spell casting before spending a slot', () => {

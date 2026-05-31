@@ -178,6 +178,14 @@ function primeHeroicInspiration({ worldState = {}, characterSheet = {} } = {}) {
 }
 
 function primeLuckyReroll({ worldState = {}, characterSheet = {} } = {}) {
+  if (!hasOriginFeat(characterSheet, 'lucky')) {
+    return {
+      handled: true,
+      logType: 'referee_resource_unavailable',
+      worldState,
+      reply: 'Lucky is not on this character sheet. Fate checks the feat list and declines to accept a resource left behind by somebody else.',
+    };
+  }
   const spent = spendResource({ worldState, characterSheet, resource: 'luck_points' });
   if (!spent.ok) {
     return {
@@ -188,12 +196,7 @@ function primeLuckyReroll({ worldState = {}, characterSheet = {} } = {}) {
     };
   }
 
-  const pending = addRerollRule(worldState.pending_roll, {
-    id: 'lucky',
-    source: 'Lucky',
-    trigger: 'failed_total',
-    consumed_resource: 'luck_points',
-  });
+  const pending = addAdvantageSource(worldState.pending_roll, 'Lucky');
 
   return {
     handled: true,
@@ -202,7 +205,17 @@ function primeLuckyReroll({ worldState = {}, characterSheet = {} } = {}) {
       ...spent.worldState,
       pending_roll: pending,
     },
-    reply: `Lucky is primed for this ${pending.label || pending.kind || 'roll'}. If the d20 test fails, the server will reroll the d20 and use the new roll. ${rollTagForPendingResource(pending)}`,
+    reply: `Lucky is applied to this ${pending.label || pending.kind || 'roll'}. Roll with ${pending.advantage_mode || 'normal resolution'}${pending.advantage_mode ? '' : ' because existing Disadvantage cancels the Advantage'}. ${rollTagForPendingResource(pending)}`,
+  };
+}
+
+function addAdvantageSource(pending = {}, source) {
+  const current = pending.advantage_mode || null;
+  const mode = current === 'disadvantage' ? null : 'advantage';
+  return {
+    ...pending,
+    advantage_mode: mode,
+    advantage_sources: [...new Set([...(pending.advantage_sources || []), source])],
   };
 }
 

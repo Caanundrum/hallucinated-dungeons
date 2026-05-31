@@ -18,6 +18,10 @@ const {
   getAttackModeSources,
   resolveSavingThrow,
 } = require('./conditionEngine');
+const {
+  applyLuckyToImmediateD20,
+  hasOriginFeat,
+} = require('./originFeatEngine');
 
 const CONCENTRATION_DURATIONS = {
   bless: 'Concentration, up to 1 minute',
@@ -144,11 +148,18 @@ function resolveSpellAttack({ spell, rule, characterSheet, worldState, rollDie }
   const attacker = getPlayerCombatant(combat, characterSheet, worldState);
   const conditionMode = getAttackMode({ attacker, target });
   const activeAdvantageSources = getActiveSpellAttackAdvantageSources(worldState, characterSheet);
-  const attackMode = combineAdvantageModes(conditionMode, activeAdvantageSources.length ? 'advantage' : null);
   const attackSources = [
     ...getAttackModeSources({ attacker, target }),
     ...activeAdvantageSources,
   ];
+  const lucky = applyLuckyToImmediateD20({
+    message: worldState.__spell_message,
+    worldState,
+    characterSheet,
+    advantageMode: combineAdvantageModes(conditionMode, activeAdvantageSources.length ? 'advantage' : null),
+    sources: attackSources,
+  });
+  const attackMode = lucky.advantageMode;
   const attackRoll = rollD20WithMode(rollDie, attackMode);
   const natural = attackRoll.natural;
   const total = natural + attackBonus;
@@ -159,8 +170,9 @@ function resolveSpellAttack({ spell, rule, characterSheet, worldState, rollDie }
     `You cast **${spell.name}** at ${target.name}. Spell attack: ${attackRoll.text}${formatSigned(attackBonus)} = ${total} vs AC ${target.ac}.`,
   ];
   if (attackMode) {
-    lines.push(`Spell attack has ${attackMode} from ${formatList(attackSources)}.`);
+    lines.push(`Spell attack has ${attackMode} from ${formatList(lucky.sources)}.`);
   }
+  if (lucky.note) lines.push(lucky.note);
 
   if (hit) {
     const damage = rollFormula(rule.damage, rollDie, { crit: criticalHit });
@@ -177,7 +189,7 @@ function resolveSpellAttack({ spell, rule, characterSheet, worldState, rollDie }
     lines.push('Miss.');
   }
 
-  return finishSpellAction({ spell, worldState, combat, lines, activeCombat });
+  return finishSpellAction({ spell, worldState: lucky.worldState, combat, lines, activeCombat });
 }
 
 function resolveAutomaticDamageSpell({ spell, rule, worldState, rollDie }) {
@@ -317,7 +329,10 @@ function resolveHealingSpell({ spell, rule, characterSheet, worldState, rollDie 
   const combat = cloneCombatState(worldState.combat_state);
   const player = combat.combatants.find((combatant) => combatant.is_player) || null;
   const spellMod = getSpellcastingModifier(characterSheet);
-  const healing = rollFormula(rule.healing, rollDie, { spellMod });
+  const healing = rollFormula(rule.healing, rollDie, {
+    spellMod,
+    rerollOnes: hasOriginFeat(characterSheet, 'healer'),
+  });
   const stats = worldState.player_stats || {};
   const healingTarget = player || {
     hp: stats.hp ?? characterSheet?.derived_stats?.hp ?? 0,
@@ -810,8 +825,8 @@ function consumesCombatTurn(spell = {}) {
   return getSpellActionResource(spell) === 'action';
 }
 
-function rollFormula(formula, rollDie, { crit = false, spellMod = 0 } = {}) {
-  return rollDamageFormula(formula, rollDie, { crit, spellMod });
+function rollFormula(formula, rollDie, { crit = false, spellMod = 0, rerollOnes = false } = {}) {
+  return rollDamageFormula(formula, rollDie, { crit, spellMod, rerollOnes });
 }
 
 function defaultRollDie(sides) {

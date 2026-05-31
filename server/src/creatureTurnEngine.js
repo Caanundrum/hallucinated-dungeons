@@ -114,7 +114,8 @@ function resolveCreatureAction({ actor, player, characterSheet, worldState, roll
   }
 
   const attack = actor.attack || { name: 'attack', attack_bonus: 3, damage_formula: '1d6+1' };
-  const attackMode = getAttackMode({ attacker: actor, target: player, defenderDodging: playerDodging });
+  const luckyDefensePrimed = Boolean(worldState.player_stats?.lucky_defense_primed);
+  const attackMode = getAttackMode({ attacker: actor, target: player, defenderDodging: playerDodging || luckyDefensePrimed });
   const attackRoll = rollD20WithMode(rollDie, attackMode);
   const natural = attackRoll.natural;
   const attackBonus = Number(attack.attack_bonus || 0);
@@ -123,8 +124,12 @@ function resolveCreatureAction({ actor, player, characterSheet, worldState, roll
   const rollText = playerDodging
     ? `${attackRoll.text}${formatSigned(attackBonus)} = ${attackTotal}`
     : `${attackRoll.text}${formatSigned(attackBonus)} = ${attackTotal}`;
-  const conditionSources = getAttackModeSources({ attacker: actor, target: player, defenderDodging: playerDodging });
+  const conditionSources = [
+    ...getAttackModeSources({ attacker: actor, target: player, defenderDodging: playerDodging }),
+    ...(luckyDefensePrimed ? ['Lucky'] : []),
+  ];
   const modeText = attackMode ? ` (${attackMode}: ${conditionSources.join(', ')})` : '';
+  const nextWorldState = consumeLuckyDefense(worldState, luckyDefensePrimed);
   const criticalHit = natural === 20;
   const criticalMiss = natural === 1;
 
@@ -153,7 +158,13 @@ function resolveCreatureAction({ actor, player, characterSheet, worldState, roll
     return {
       actor: nextActor,
       player: endurance.player,
-      worldState: endurance.worldState,
+      worldState: endurance.worldState === worldState ? nextWorldState : {
+        ...endurance.worldState,
+        player_stats: {
+          ...(endurance.worldState.player_stats || {}),
+          lucky_defense_primed: false,
+        },
+      },
       lines: [`${actor.name} uses ${attack.name}: rolls ${rollText} vs AC ${ac}${modeText}. ${criticalHit ? '**Critical hit.** ' : ''}Hit for ${applied.amount} damage${formatDamageAdjustment(applied.adjustment)}${applied.absorbed ? ` (${applied.absorbed} absorbed by temporary HP)` : ''}. ${player.name}: (${before} -> ${endurance.player.hp} HP).${endurance.line}${retaliationLine}`],
       damageEvents: [{
         target: 'player',
@@ -167,6 +178,7 @@ function resolveCreatureAction({ actor, player, characterSheet, worldState, roll
     return {
       actor,
       player,
+      worldState: nextWorldState,
       lines: [`${actor.name} uses ${attack.name}: rolls ${rollText} vs AC ${ac}${modeText}. **Critical miss.** Even the initiative tracker winces.`],
     };
   }
@@ -174,7 +186,19 @@ function resolveCreatureAction({ actor, player, characterSheet, worldState, roll
   return {
     actor,
     player,
+    worldState: nextWorldState,
     lines: [`${actor.name} uses ${attack.name}: rolls ${rollText} vs AC ${ac}${modeText}. Miss.`],
+  };
+}
+
+function consumeLuckyDefense(worldState = {}, shouldConsume = false) {
+  if (!shouldConsume) return worldState;
+  return {
+    ...worldState,
+    player_stats: {
+      ...(worldState.player_stats || {}),
+      lucky_defense_primed: false,
+    },
   };
 }
 

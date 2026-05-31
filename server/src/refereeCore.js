@@ -44,6 +44,13 @@ const {
   getSpeciesD20AdvantageSources,
   resolveSpeciesFeatureAction,
 } = require('./speciesFeatureEngine');
+const {
+  applyLuckyToImmediateD20,
+  buildUnarmedAttack,
+  isUnarmedAttackIntent,
+  resolveOriginFeatAction,
+  rollWeaponDamage,
+} = require('./originFeatEngine');
 
 const DEFAULT_CHECK_DC = 15;
 
@@ -95,6 +102,9 @@ function adjudicate({ message, worldState = {}, characterSheet = null, currentTu
   if (speciesFeatureAction) {
     return finishSpeciesFeatureAction({ result: speciesFeatureAction, characterSheet: sheet, rollDie });
   }
+
+  const originFeatAction = resolveOriginFeatAction({ message: text, worldState: state, characterSheet: sheet, rollDie });
+  if (originFeatAction) return originFeatAction;
 
   if (!state.combat_state?.active && isCombatStarter(text)) {
     const targetIssue = validateCombatStartTarget({ message: text, worldState: state });
@@ -583,7 +593,7 @@ function buildCheckResolutionReply(pending, result, outcome) {
 }
 
 function isCombatStarter(text) {
-  return /\b(?:attack|hit|strike|stab|swing at|shoot|charge|start (?:a )?fight)\b/i.test(text);
+  return /\b(?:attack|hit|strike|stab|swing at|shoot|charge|punch|kick|headbutt|elbow|start (?:a )?fight)\b/i.test(text);
 }
 
 function validateCombatStartTarget({ message, worldState }) {
@@ -1002,7 +1012,7 @@ function resolveInitiative({ pending, result, worldState, characterSheet, rollDi
 function resolveCombatAction({ message, intent, worldState, characterSheet, currentTurn, rollDie }) {
   if (intent.castsSpell) return null;
 
-  const maneuver = getCombatManeuverIntent(message);
+  const maneuver = isUnarmedAttackIntent(message) ? null : getCombatManeuverIntent(message);
   if (maneuver) {
     return resolveCombatManeuver({ maneuver, message, worldState, characterSheet, rollDie });
   }
@@ -1041,8 +1051,8 @@ function resolveCombatAction({ message, intent, worldState, characterSheet, curr
     return { handled: true, logType: 'referee_combat_disengage', ...result };
   }
 
-  if (isCombatStarter(message) || /\battack\b/i.test(message)) {
-    return resolvePlayerAttack({ worldState, characterSheet, rollDie });
+  if (isCombatStarter(message) || /\battack\b/i.test(message) || isUnarmedAttackIntent(message)) {
+    return resolvePlayerAttack({ message, worldState, characterSheet, rollDie });
   }
 
   if (isMovementIntent(message)) {
@@ -1066,7 +1076,7 @@ function shouldPromptCombatCheck(intent) {
   return ['hide', 'search', 'study', 'influence'].includes(intent.ruleAction) || Boolean(intent.check);
 }
 
-function resolvePlayerAttack({ worldState, characterSheet, rollDie }) {
+function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie }) {
   const spent = spendTurnResource(worldState, 'action', 'Attack', characterSheet);
   if (!spent.ok) {
     return {
@@ -1094,14 +1104,22 @@ function resolvePlayerAttack({ worldState, characterSheet, rollDie }) {
     };
   }
 
-  const attack = getPrimaryAttack(characterSheet);
-  const advantageMode = getAttackAdvantageMode(player, target);
+  const attack = getPrimaryAttack(characterSheet, message);
+  const lucky = applyLuckyToImmediateD20({
+    message,
+    worldState: spent.worldState,
+    characterSheet,
+    advantageMode: getAttackAdvantageMode(player, target),
+    sources: getAttackAdvantageSources(player, target),
+  });
+  const attackState = lucky.worldState;
+  const advantageMode = lucky.advantageMode;
   const attackRoll = resolveD20Test({
     kind: 'attack',
     modifier: attack.attackBonus,
     dc: Number(target.ac || 10),
     advantageMode,
-    bonusDice: getActiveBonusDice(spent.worldState, 'attack'),
+    bonusDice: getActiveBonusDice(attackState, 'attack'),
     rerollRules: getAutoD20RerollRules(characterSheet),
     rollDie,
   });
@@ -1114,25 +1132,31 @@ function resolvePlayerAttack({ worldState, characterSheet, rollDie }) {
   const lines = [
     `You attack ${target.name} with ${attack.name}. Attack roll: ${attackRoll.rollText} vs AC ${target.ac}.`,
   ];
-  if (advantageMode) lines.push(`Attack roll has ${advantageMode} from ${formatList(getAttackAdvantageSources(player, target))}.`);
+  if (advantageMode) lines.push(`Attack roll has ${advantageMode} from ${formatList(lucky.sources)}.`);
+  if (lucky.note) lines.push(lucky.note);
 
   const consumeEffectIds = [];
   if (hit) {
-    const damage = rollDamage(attack.damageFormula, rollDie, isCrit);
-    const bonusDamage = rollBonusDice(getActiveDamageDice(spent.worldState, target), rollDie);
-    const flatBonuses = getActiveDamageBonuses(spent.worldState, { attack, characterSheet });
+    const damage = rollWeaponDamage({ formula: attack.damageFormula, characterSheet, rollDie, crit: isCrit, attack });
+    const bonusDamage = rollBonusDice(getActiveDamageDice(attackState, target), rollDie);
+    const flatBonuses = getActiveDamageBonuses(attackState, { attack, characterSheet });
     const flatBonusTotal = flatBonuses.reduce((sum, bonus) => sum + Number(bonus.value || 0), 0);
     const sneakAttack = getSneakAttackDamage({ characterSheet, attack, advantageMode, rollDie, crit: isCrit });
     const totalDamage = damage.total + bonusDamage.total + flatBonusTotal + sneakAttack.total;
     const before = Number(target.hp || 0);
     target.hp = Math.max(0, before - totalDamage);
     const damageParts = [
-      `${damage.total} weapon`,
+      `${damage.total} ${attack.isWeapon ? 'weapon' : 'unarmed'}`,
       bonusDamage.total ? bonusDamage.summary : '',
       flatBonuses.length ? flatBonuses.map((bonus) => `${bonus.label} ${formatSigned(bonus.value)}`).join(' + ') : '',
       sneakAttack.total ? `Sneak Attack ${sneakAttack.die}=${sneakAttack.total}` : '',
     ].filter(Boolean);
     lines.push(`${isCrit ? '**Critical hit.** ' : ''}Hit for ${totalDamage} damage${damageParts.length > 1 ? ` (${damageParts.join(' + ')})` : ''}. ${target.name}: (${before} -> ${target.hp} HP).`);
+    if (damage.note) lines.push(damage.note);
+    if (attack.tavernBrawlerPush && Number(target.hp) > 0) {
+      target.forced_movement = { feet: 5, direction: 'away_from_player', source: 'Tavern Brawler' };
+      lines.push(`**Tavern Brawler** pushes ${target.name} 5 feet away, subject to available space in the scene.`);
+    }
     consumeEffectIds.push(...bonusDamage.expireEffectIds);
     if ((target.conditions || []).includes('sleep')) {
       target.conditions = (target.conditions || []).filter((condition) => condition !== 'sleep' && condition !== 'unconscious');
@@ -1151,7 +1175,7 @@ function resolvePlayerAttack({ worldState, characterSheet, rollDie }) {
 
   if (Number(target.hp) <= 0) {
     let nextState = {
-      ...spent.worldState,
+      ...attackState,
       combat_state: null,
       pending_roll: null,
     };
@@ -1167,7 +1191,7 @@ function resolvePlayerAttack({ worldState, characterSheet, rollDie }) {
   }
 
   let nextState = {
-    ...spent.worldState,
+    ...attackState,
     combat_state: combat,
   };
   if (consumeEffectIds.length) {
@@ -1667,13 +1691,13 @@ function inferEnemyName(worldState = {}, message = '') {
 }
 
 function extractCombatStartTarget(message = '') {
-  const targetMatch = String(message || '').match(/\b(?:attack|hit|strike|stab|swing at|shoot|charge|shove|push|grapple|grab|seize|trip)\s+(?:the\s+|a\s+|an\s+)?([a-z][a-z' -]{2,50}?)(?:\s+(?:with|using|because|if|when|while|as|from|near|beside|behind|emerging|coming|rushing|charging|away|toward|towards|not)\b|[.!?]|$)/i);
+  const targetMatch = String(message || '').match(/\b(?:attack|hit|strike|stab|swing at|shoot|charge|punch|kick|headbutt|elbow|shove|push|grapple|grab|seize|trip)\s+(?:the\s+|a\s+|an\s+)?([a-z][a-z' -]{2,50}?)(?:\s+(?:and|with|using|because|if|when|while|as|from|near|beside|behind|emerging|coming|rushing|charging|away|toward|towards|not)\b|[.!?]|$)/i);
   return cleanTarget(targetMatch?.[1]);
 }
 
 function cleanTarget(value) {
   return String(value || '')
-    .replace(/\b(with|using|because|if|when|while|as|from|near|beside|behind|emerging|coming|rushing|charging|away|toward|towards|not)\b.*$/i, '')
+    .replace(/\b(and|with|using|because|if|when|while|as|from|near|beside|behind|emerging|coming|rushing|charging|away|toward|towards|not)\b.*$/i, '')
     .replace(/\b(?:the|a|an)\b/gi, '')
     .trim();
 }
@@ -1700,7 +1724,9 @@ function normalizeTargetPhrase(value) {
     .trim();
 }
 
-function getPrimaryAttack(characterSheet) {
+function getPrimaryAttack(characterSheet, message = '') {
+  const unarmed = buildUnarmedAttack({ characterSheet, message });
+  if (unarmed) return unarmed;
   const attack = characterSheet?.derived_stats?.attack_breakdowns?.[0];
   const weaponId = attack?.weapon_id || attack?.weaponId || null;
   const weapon = weaponId
@@ -1714,6 +1740,7 @@ function getPrimaryAttack(characterSheet) {
     weaponCategory: weapon?.weapon_category || attack?.weapon_category || null,
     attackBonus: Number(attack?.attack_total ?? 3),
     damageFormula: attack?.damage_formula || '1d8+3',
+    isWeapon: true,
   };
 }
 

@@ -1,5 +1,5 @@
 {
-  "version": "4C.6-H1",
+  "version": "4C.6-H2",
   "status_definitions": {
     "implemented": "Exposed and mechanically enforced for the current supported level/scope.",
     "partial": "Exposed and partially enforced, but missing at least one meaningful rules interaction.",
@@ -61,7 +61,7 @@
     "arcane_recovery": "implemented",
     "sorcery_points": "not_exposed",
     "species_feature_uses": "partial",
-    "feat_uses": "deferred",
+    "feat_uses": "partial",
     "item_charges": "not_exposed"
   },
   "class_features": {
@@ -88,17 +88,17 @@
     "arcane_recovery": "implemented"
   },
   "origin_feats": {
-    "alert": "implemented",
+    "alert": "partial",
     "crafter": "partial",
-    "healer": "deferred",
+    "healer": "partial",
     "lucky": "partial",
     "magic_initiate_cleric": "partial",
     "magic_initiate_druid": "partial",
     "magic_initiate_wizard": "partial",
-    "musician": "deferred",
-    "savage_attacker": "deferred",
+    "musician": "partial",
+    "savage_attacker": "implemented",
     "skilled": "implemented",
-    "tavern_brawler": "deferred",
+    "tavern_brawler": "partial",
     "tough": "implemented"
   },
   "species_traits": {

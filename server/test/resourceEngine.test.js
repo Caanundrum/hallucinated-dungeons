@@ -98,6 +98,54 @@ test('primes Heroic Inspiration on a pending roll as a failed-total reroll', () 
   assert.equal(result.worldState.pending_roll.reroll_rules[0].trigger, 'failed_total');
 });
 
+test('Lucky spends a point to grant Advantage before the pending d20 test', () => {
+  const result = applyPendingRollResourceIntent({
+    message: 'Use lucky.',
+    characterSheet: humanSheet(),
+    worldState: {
+      player_stats: {
+        resources: {
+          luck_points: { name: 'Luck Points', remaining: 2, max: 2, reset: 'long_rest' },
+        },
+      },
+      pending_roll: {
+        id: 'roll_lucky',
+        kind: 'skill_check',
+        label: 'Wisdom (Insight)',
+        ability: 'wis',
+        modifier: 2,
+        dc: 15,
+      },
+    },
+  });
+
+  assert.equal(result.worldState.player_stats.resources.luck_points.remaining, 1);
+  assert.equal(result.worldState.pending_roll.advantage_mode, 'advantage');
+  assert.deepEqual(result.worldState.pending_roll.advantage_sources, ['Lucky']);
+  assert.equal(result.worldState.pending_roll.reroll_rules, undefined);
+});
+
+test('stale Luck Point state cannot grant Lucky to a character without the feat', () => {
+  const result = applyPendingRollResourceIntent({
+    message: 'Use lucky.',
+    characterSheet: { identity: { species: 'orc' } },
+    worldState: {
+      player_stats: {
+        resources: {
+          luck_points: { name: 'Luck Points', remaining: 2, max: 2, reset: 'long_rest' },
+        },
+      },
+      pending_roll: {
+        id: 'roll_stale_lucky',
+        kind: 'skill_check',
+      },
+    },
+  });
+
+  assert.equal(result.worldState.player_stats.resources.luck_points.remaining, 2);
+  assert.match(result.reply, /not on this character sheet/);
+});
+
 test('detects automatic d20 reroll features such as Halfling Luck', () => {
   const rules = getAutoD20RerollRules({
     identity: { species: 'halfling' },

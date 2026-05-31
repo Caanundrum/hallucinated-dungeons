@@ -398,6 +398,27 @@ test('starts combat by asking for initiative instead of narrating a free attack'
   assert.match(result.reply, /\[ROLL: id=.* 1d20\+1\]/);
 });
 
+test('starts unarmed combat without folding a Tavern Brawler push rider into the target name', () => {
+  const result = adjudicate({
+    message: 'Punch the cultist and push him back.',
+    worldState: worldState({
+      scene_presence: {
+        exact_location: 'town square',
+        present_npcs: ['cultist'],
+        present_objects: [],
+        available_exits: ['gate'],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      origin: { background_feat: 'tavern_brawler' },
+    },
+  });
+
+  assert.equal(result.worldState.pending_roll.kind, 'initiative');
+  assert.equal(result.worldState.pending_roll.enemy.name, 'Cultist');
+});
+
 test('combat starter preserves explicit hostile target instead of falling back to scene NPCs', () => {
   const result = adjudicate({
     message: 'I draw my longsword and attack a hostile shadow emerging from the tree line.',
@@ -1200,4 +1221,92 @@ test('rogue Sneak Attack adds damage when a finesse attack has advantage', () =>
   assert.equal(result.handled, true);
   assert.equal(goblin.hp, 10);
   assert.match(result.reply, /Sneak Attack 1d6=3/);
+});
+
+test('Tavern Brawler unarmed strike rerolls damage die results of 1 and records a requested push', () => {
+  const result = adjudicate({
+    message: 'Punch the Cultist and push him back.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', initiative: 18, hp: 12, max_hp: 12, ac: 16, is_player: true, conditions: [] },
+          { name: 'Cultist', initiative: 8, hp: 12, max_hp: 12, ac: 10, is_player: false, conditions: [], attack: { name: 'dagger', attack_bonus: 2, damage_formula: '1d4+1' } },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      origin: { background_feat: 'tavern_brawler' },
+    },
+    rollDie: sequenceRolls([10, 1, 3, 1]),
+  });
+  const cultist = result.worldState.combat_state.combatants.find((entry) => entry.name === 'Cultist');
+
+  assert.equal(cultist.hp, 6);
+  assert.deepEqual(cultist.forced_movement, { feet: 5, direction: 'away_from_player', source: 'Tavern Brawler' });
+  assert.match(result.reply, /Unarmed Strike/);
+  assert.match(result.reply, /Tavern Brawler/);
+});
+
+test('Savage Attacker uses the better of two weapon damage rolls', () => {
+  const result = adjudicate({
+    message: 'Attack the Cultist.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', initiative: 18, hp: 12, max_hp: 12, ac: 16, is_player: true, conditions: [] },
+          { name: 'Cultist', initiative: 8, hp: 20, max_hp: 20, ac: 10, is_player: false, conditions: [], attack: { name: 'dagger', attack_bonus: 2, damage_formula: '1d4+1' } },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      origin: { background_feat: 'savage_attacker' },
+    },
+    rollDie: sequenceRolls([10, 2, 7, 1]),
+  });
+  const cultist = result.worldState.combat_state.combatants.find((entry) => entry.name === 'Cultist');
+
+  assert.equal(cultist.hp, 10);
+  assert.match(result.reply, /Savage Attacker rolled weapon damage twice \(5\/10\) and used 10/);
+});
+
+test('Lucky can be spent explicitly on an immediate weapon attack roll', () => {
+  const result = adjudicate({
+    message: 'Attack the Cultist using Lucky.',
+    worldState: worldState({
+      player_stats: {
+        hp: 12,
+        max_hp: 12,
+        armor_class: 16,
+        resources: {
+          luck_points: { name: 'Luck Points', remaining: 2, max: 2, reset: 'long_rest' },
+        },
+      },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', initiative: 18, hp: 12, max_hp: 12, ac: 16, is_player: true, conditions: [] },
+          { name: 'Cultist', initiative: 8, hp: 20, max_hp: 20, ac: 12, is_player: false, conditions: [], attack: { name: 'dagger', attack_bonus: 2, damage_formula: '1d4+1' } },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      origin: { background_feat: 'lucky' },
+    },
+    rollDie: sequenceRolls([2, 15, 4, 1]),
+  });
+
+  assert.equal(result.worldState.player_stats.resources.luck_points.remaining, 1);
+  assert.match(result.reply, /advantage from Lucky/);
+  assert.match(result.reply, /Lucky spends 1 Luck Point/);
 });
