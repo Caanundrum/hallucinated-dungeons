@@ -66,6 +66,9 @@ const {
   getFightingStyleDamageBonus,
   getRuntimeArmorClass,
 } = require('./fightingStyleEngine');
+const {
+  getLightExtraAttack,
+} = require('./lightWeaponEngine');
 
 const DEFAULT_CHECK_DC = 15;
 
@@ -1103,7 +1106,7 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
     };
   }
 
-  const combat = cloneCombatState(spent.worldState.combat_state);
+  let combat = cloneCombatState(spent.worldState.combat_state);
   const player = combat.combatants.find((combatant) => combatant.is_player);
   const target = combat.combatants.find((combatant) => !combatant.is_player && Number(combatant.hp) > 0);
   if (!player || !target) {
@@ -1125,6 +1128,7 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
     characterSheet,
     message,
   });
+  const lightExtra = getLightExtraAttack({ characterSheet, primaryAttack: attack, message });
   const propertyMode = getWeaponPropertyAttackMode({ attack, characterSheet });
   const propertySources = getWeaponPropertyAttackSources({ attack, characterSheet });
   const lucky = applyLuckyToImmediateD20({
@@ -1158,6 +1162,7 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
   if (lucky.note) lines.push(lucky.note);
 
   const consumeEffectIds = [];
+  let sneakAttackUsed = false;
   Object.assign(target, consumeVexAdvantage(target));
   if (hit) {
     const damage = rollWeaponDamage({ formula: getWeaponDamageFormula({ attack, message, characterSheet }), characterSheet, rollDie, crit: isCrit, attack });
@@ -1166,6 +1171,7 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
     const fightingStyleBonus = getFightingStyleDamageBonus({ characterSheet, attack, message });
     const flatBonusTotal = flatBonuses.reduce((sum, bonus) => sum + Number(bonus.value || 0), 0) + fightingStyleBonus.total;
     const sneakAttack = getSneakAttackDamage({ characterSheet, attack, advantageMode, rollDie, crit: isCrit });
+    sneakAttackUsed = sneakAttack.total > 0;
     const totalDamage = damage.total + bonusDamage.total + flatBonusTotal + sneakAttack.total;
     const before = Number(target.hp || 0);
     target.hp = Math.max(0, before - totalDamage);
@@ -1201,7 +1207,40 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
     target.conditions = (target.conditions || []).filter((condition) => condition !== 'guiding_bolt_advantage');
   }
 
-  if (Number(target.hp) <= 0) {
+  if (Number(target.hp) <= 0) lines.push(`${target.name} falls.`);
+
+  if (lightExtra && getLivingEnemy(combat)) {
+    const extraSpent = lightExtra.usesBonusAction
+      ? spendTurnResource({ ...attackState, combat_state: combat }, 'bonus_action', 'Light weapon extra attack', characterSheet)
+      : { ok: true, worldState: { ...attackState, combat_state: combat } };
+    if (!extraSpent.ok) {
+      lines.push(extraSpent.reply);
+    } else {
+      combat = cloneCombatState(extraSpent.worldState.combat_state);
+      const extraTarget = getLivingEnemy(combat);
+      lines.push(lightExtra.usesBonusAction
+        ? '**Light property:** you spend your Bonus Action to make one extra attack with a different Light weapon.'
+        : '**Nick mastery:** your Light-property extra attack folds into the Attack action, leaving your Bonus Action available.');
+      const extraResult = resolveLightExtraAttackRoll({
+        attack: applyFightingStyleToAttack({
+          attack: lightExtra.attack,
+          characterSheet,
+          message,
+        }),
+        target: extraTarget,
+        combat,
+        worldState: extraSpent.worldState,
+        characterSheet,
+        message,
+        rollDie,
+        sneakAttackAvailable: !sneakAttackUsed,
+      });
+      lines.push(...extraResult.lines);
+      consumeEffectIds.push(...extraResult.consumeEffectIds);
+    }
+  }
+
+  if (!getLivingEnemy(combat)) {
     let nextState = {
       ...attackState,
       combat_state: null,
@@ -1214,7 +1253,7 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
       handled: true,
       logType: 'referee_combat_attack',
       worldState: nextState,
-      reply: `${lines.join('\n\n')}\n\n${target.name} falls. **Combat ends.**`,
+      reply: `${lines.join('\n\n')}\n\n**Combat ends.**`,
     };
   }
 
@@ -1238,6 +1277,93 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
     worldState: enemyResult.worldState,
     reply: enemyResult.reply,
   };
+}
+
+function resolveLightExtraAttackRoll({
+  attack,
+  target,
+  combat,
+  worldState,
+  characterSheet,
+  message,
+  rollDie,
+  sneakAttackAvailable = true,
+}) {
+  if (!target) return { lines: [], consumeEffectIds: [] };
+
+  const advantageMode = getAttackAdvantageMode(
+    combat.combatants.find((combatant) => combatant.is_player),
+    target,
+  );
+  const sources = getAttackAdvantageSources(
+    combat.combatants.find((combatant) => combatant.is_player),
+    target,
+  );
+  const attackRoll = resolveD20Test({
+    kind: 'attack',
+    modifier: attack.attackBonus,
+    dc: Number(target.ac || 10),
+    advantageMode,
+    bonusDice: getActiveBonusDice(worldState, 'attack'),
+    rerollRules: getAutoD20RerollRules(characterSheet),
+    rollDie,
+  });
+  const natural = attackRoll.natural;
+  const isCrit = natural === 20;
+  const criticalMiss = natural === 1;
+  const hit = !criticalMiss && (isCrit || attackRoll.total >= Number(target.ac || 10));
+  const lines = [
+    `You make the extra attack against ${target.name} with ${attack.name}. Attack roll: ${attackRoll.rollText} vs AC ${target.ac}.`,
+  ];
+  if (advantageMode) lines.push(`Extra attack has ${advantageMode} from ${formatList(sources)}.`);
+
+  const consumeEffectIds = [...attackRoll.bonusDice.expireEffectIds];
+  Object.assign(target, consumeVexAdvantage(target));
+  if (hit) {
+    const damage = rollWeaponDamage({ formula: attack.damageFormula, characterSheet, rollDie, crit: isCrit, attack });
+    const bonusDamage = rollBonusDice(getActiveDamageDice(worldState, target), rollDie);
+    const flatBonuses = getActiveDamageBonuses(worldState, { attack, characterSheet });
+    const fightingStyleBonus = getFightingStyleDamageBonus({ characterSheet, attack, message });
+    const flatBonusTotal = flatBonuses.reduce((sum, bonus) => sum + Number(bonus.value || 0), 0) + fightingStyleBonus.total;
+    const sneakAttack = sneakAttackAvailable
+      ? getSneakAttackDamage({ characterSheet, attack, advantageMode, rollDie, crit: isCrit })
+      : { total: 0, die: '1d6' };
+    const totalDamage = damage.total + bonusDamage.total + flatBonusTotal + sneakAttack.total;
+    const before = Number(target.hp || 0);
+    target.hp = Math.max(0, before - totalDamage);
+    const damageParts = [
+      `${damage.total} weapon`,
+      bonusDamage.total ? bonusDamage.summary : '',
+      flatBonuses.length ? flatBonuses.map((bonus) => `${bonus.label} ${formatSigned(bonus.value)}`).join(' + ') : '',
+      fightingStyleBonus.total ? `${fightingStyleBonus.label} ${formatSigned(fightingStyleBonus.total)}` : '',
+      sneakAttack.total ? `Sneak Attack ${sneakAttack.die}=${sneakAttack.total}` : '',
+    ].filter(Boolean);
+    lines.push(`${isCrit ? '**Critical hit.** ' : ''}Extra attack hits for ${totalDamage} damage${damageParts.length > 1 ? ` (${damageParts.join(' + ')})` : ''}. ${target.name}: (${before} -> ${target.hp} HP).`);
+    if (damage.note) lines.push(damage.note);
+    consumeEffectIds.push(...bonusDamage.expireEffectIds);
+    if ((target.conditions || []).includes('sleep')) {
+      target.conditions = (target.conditions || []).filter((condition) => condition !== 'sleep' && condition !== 'unconscious');
+      consumeEffectIds.push('sleep');
+      if (Number(target.hp) > 0) lines.push(`${target.name} wakes as the damage lands. Apparently paired weapons are not a soothing bedtime routine.`);
+    }
+    lines.push(...applyWeaponMasteryOnHit({ attack, target, combat, characterSheet, damageDealt: totalDamage, rollDie }).lines);
+  } else if (criticalMiss) {
+    lines.push('**Critical miss.** The extra attack fails no matter how determinedly the second weapon joined the meeting.');
+    lines.push(...applyWeaponMasteryOnMiss({ attack, target, characterSheet }).lines);
+  } else {
+    lines.push('The extra attack misses.');
+    lines.push(...applyWeaponMasteryOnMiss({ attack, target, characterSheet }).lines);
+  }
+  if ((target.conditions || []).includes('guiding_bolt_advantage')) {
+    target.conditions = (target.conditions || []).filter((condition) => condition !== 'guiding_bolt_advantage');
+  }
+  if (Number(target.hp) <= 0) lines.push(`${target.name} falls.`);
+
+  return { lines, consumeEffectIds };
+}
+
+function getLivingEnemy(combat = {}) {
+  return (combat.combatants || []).find((combatant) => !combatant.is_player && Number(combatant.hp) > 0) || null;
 }
 
 function getCombatManeuverIntent(message = '') {
@@ -1772,7 +1898,13 @@ function normalizeTargetPhrase(value) {
 function getPrimaryAttack(characterSheet, message = '') {
   const unarmed = buildUnarmedAttack({ characterSheet, message });
   if (unarmed) return unarmed;
-  const attack = characterSheet?.derived_stats?.attack_breakdowns?.[0];
+  const attackBreakdowns = characterSheet?.derived_stats?.attack_breakdowns || [];
+  const attack = attackBreakdowns.find((entry) => attackNameAppearsInMessage(entry, message))
+    || attackBreakdowns[0];
+  return buildAttackFromBreakdown(attack);
+}
+
+function buildAttackFromBreakdown(attack = {}) {
   const weaponId = attack?.weapon_id || attack?.weaponId || null;
   const weapon = weaponId
     ? getContentBundle().equipment.find((item) => item.id === weaponId)
@@ -1792,6 +1924,13 @@ function getPrimaryAttack(characterSheet, message = '') {
     versatileDamage: weapon?.versatile_damage || attack?.versatile_damage || null,
     isWeapon: true,
   };
+}
+
+function attackNameAppearsInMessage(attack = {}, message = '') {
+  const text = normalizeTargetPhrase(message);
+  return [attack.weapon_id, attack.weaponId, attack.name]
+    .filter(Boolean)
+    .some((value) => text.includes(normalizeTargetPhrase(value)));
 }
 
 function getSneakAttackDamage({ characterSheet = {}, attack = {}, advantageMode = null, rollDie = defaultRollDie, crit = false } = {}) {

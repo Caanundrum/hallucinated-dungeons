@@ -1478,3 +1478,136 @@ test('Archery Fighting Style updates older ranged sheets during referee attack r
   assert.equal(cultist.hp, 15);
   assert.match(result.reply, /Attack roll: 14 \(natural 8; 8\+6=14\) vs AC 14/);
 });
+
+test('declared paired Light weapons resolve a Nick extra attack inside the Attack action', () => {
+  const result = adjudicate({
+    message: 'Attack the Cultist with my shortsword and dagger.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', initiative: 18, hp: 10, max_hp: 10, ac: 14, is_player: true, conditions: [] },
+          { name: 'Cultist', initiative: 8, hp: 30, max_hp: 30, ac: 10, is_player: false, conditions: [], attack: { name: 'dagger', attack_bonus: 2, damage_formula: '1d4+1' } },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      identity: { name: 'Ari', class: 'rogue', class_name: 'Rogue', level: 1 },
+      abilities: { modifiers: { str: 0, dex: 3 } },
+      equipped: { main_hand: 'shortsword', off_hand: 'dagger' },
+      weapon_masteries: [{ weapon_id: 'dagger', mastery: 'nick' }],
+      derived_stats: {
+        ...characterSheet.derived_stats,
+        proficiency_bonus: 2,
+        attack_breakdowns: [
+          { weapon_id: 'shortsword', name: 'Shortsword', ability: 'dex', attack_total: 5, damage_formula: '1d6 + 3' },
+          { weapon_id: 'dagger', name: 'Dagger', ability: 'dex', attack_total: 5, damage_formula: '1d4 + 3' },
+        ],
+      },
+    },
+    rollDie: sequenceRolls([10, 4, 10, 3, 1]),
+  });
+  const cultist = result.worldState.combat_state.combatants.find((entry) => entry.name === 'Cultist');
+
+  assert.equal(cultist.hp, 20);
+  assert.match(result.reply, /Nick mastery/);
+  assert.match(result.reply, /extra attack.*Dagger/i);
+});
+
+test('Two-Weapon Fighting restores the ability modifier and spends the Light extra attack Bonus Action', () => {
+  const result = adjudicate({
+    message: 'Attack the Cultist with both weapons.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Fia', initiative: 18, hp: 12, max_hp: 12, ac: 16, is_player: true, conditions: [] },
+          { name: 'Cultist', initiative: 8, hp: 30, max_hp: 30, ac: 10, is_player: false, conditions: [], attack: { name: 'dagger', attack_bonus: 2, damage_formula: '1d4+1' } },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      identity: { name: 'Fia', class: 'fighter', class_name: 'Fighter', level: 1 },
+      abilities: { modifiers: { str: 0, dex: 3 } },
+      class_choices: { fighting_style: 'two_weapon_fighting' },
+      equipped: { main_hand: 'shortsword', off_hand: 'dagger' },
+      derived_stats: {
+        ...characterSheet.derived_stats,
+        proficiency_bonus: 2,
+        attack_breakdowns: [
+          { weapon_id: 'shortsword', name: 'Shortsword', ability: 'dex', attack_total: 5, damage_formula: '1d6 + 3' },
+          { weapon_id: 'dagger', name: 'Dagger', ability: 'dex', attack_total: 5, damage_formula: '1d4 + 3' },
+        ],
+      },
+    },
+    rollDie: sequenceRolls([10, 4, 10, 3, 1]),
+  });
+  const cultist = result.worldState.combat_state.combatants.find((entry) => entry.name === 'Cultist');
+
+  assert.equal(cultist.hp, 17);
+  assert.match(result.reply, /spend your Bonus Action/);
+  assert.match(result.reply, /Extra attack hits for 6 damage/);
+});
+
+test('declared weapon name selects the matching calculated attack instead of the first sheet entry', () => {
+  const result = adjudicate({
+    message: 'Attack the Cultist with my dagger.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', initiative: 18, hp: 10, max_hp: 10, ac: 14, is_player: true, conditions: [] },
+          { name: 'Cultist', initiative: 8, hp: 20, max_hp: 20, ac: 10, is_player: false, conditions: [], attack: { name: 'dagger', attack_bonus: 2, damage_formula: '1d4+1' } },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      abilities: { modifiers: { str: 0, dex: 3 } },
+      equipped: { main_hand: 'shortsword', off_hand: 'dagger' },
+      derived_stats: {
+        ...characterSheet.derived_stats,
+        attack_breakdowns: [
+          { weapon_id: 'shortsword', name: 'Shortsword', ability: 'dex', attack_total: 5, damage_formula: '1d6 + 3' },
+          { weapon_id: 'dagger', name: 'Dagger', ability: 'dex', attack_total: 5, damage_formula: '1d4 + 3' },
+        ],
+      },
+    },
+    rollDie: sequenceRolls([10, 4, 1]),
+  });
+
+  assert.match(result.reply, /attack Cultist with Dagger/);
+  assert.match(result.reply, /Hit for 7 damage/);
+});
+
+test('dropping one enemy does not end combat while another enemy remains', () => {
+  const result = adjudicate({
+    message: 'Attack the Cultist with my longsword.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', initiative: 18, hp: 12, max_hp: 12, ac: 16, is_player: true, conditions: [] },
+          { name: 'Cultist', initiative: 8, hp: 4, max_hp: 4, ac: 10, is_player: false, conditions: [], attack: { name: 'dagger', attack_bonus: 2, damage_formula: '1d4+1' } },
+          { name: 'Guard', initiative: 6, hp: 8, max_hp: 8, ac: 12, is_player: false, conditions: [], attack: { name: 'spear', attack_bonus: 2, damage_formula: '1d6+1' } },
+        ],
+      },
+    }),
+    characterSheet,
+    rollDie: sequenceRolls([10, 4, 1]),
+  });
+
+  assert.equal(result.worldState.combat_state.active, true);
+  assert.match(result.reply, /Cultist falls/);
+  assert.doesNotMatch(result.reply, /Combat ends/);
+});

@@ -711,3 +711,18 @@ test('Fighter Fighting Style choices update static character sheet math', () => 
   assert.equal(archery.derived_stats.attack_breakdowns[0].attack_total, 5);
   assert.equal(archery.derived_stats.attack_breakdowns[0].fighting_style_attack_bonus, 2);
 });
+
+test('equips and calculates a second Light weapon without filling a two-handed weapon user off hand', () => {
+  const rogue = validateCharacter(classDraftFor('rogue'), getContentBundle());
+  const barbarian = validateCharacter(classDraftFor('barbarian'), getContentBundle());
+
+  assert.deepEqual(rogue.equipped, {
+    main_hand: 'shortsword',
+    off_hand: 'dagger',
+    armor: 'leather_armor',
+    attuned: [],
+  });
+  assert.deepEqual(rogue.derived_stats.attack_breakdowns.map((attack) => attack.weapon_id), ['shortsword', 'dagger']);
+  assert.equal(barbarian.equipped.main_hand, 'greataxe');
+  assert.equal(barbarian.equipped.off_hand, null);
+});

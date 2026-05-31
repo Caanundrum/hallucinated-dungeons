@@ -1,5 +1,5 @@
 {
-  "version": "4C.6-H4",
+  "version": "4C.6-H5",
   "status_definitions": {
     "implemented": "Exposed and mechanically enforced for the current supported level/scope.",
     "partial": "Exposed and partially enforced, but missing at least one meaningful rules interaction.",
@@ -154,7 +154,7 @@
   "weapon_masteries": {
     "cleave": "deferred",
     "graze": "implemented",
-    "nick": "deferred",
+    "nick": "implemented",
     "push": "partial",
     "sap": "implemented",
     "slow": "partial",
@@ -170,7 +170,7 @@
     "interception": "deferred",
     "protection": "deferred",
     "thrown_weapon_fighting": "partial",
-    "two_weapon_fighting": "deferred",
+    "two_weapon_fighting": "implemented",
     "unarmed_fighting": "partial"
   },
   "equipment_rules": {
@@ -188,7 +188,7 @@
     "ammunition": "deferred",
     "finesse": "implemented",
     "heavy": "implemented",
-    "light": "partial",
+    "light": "implemented",
     "loading": "deferred",
     "reach": "partial",
     "thrown": "partial",

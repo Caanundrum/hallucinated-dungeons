@@ -851,12 +851,16 @@ function buildInventory(characterClass, content, equipmentChoice, background, ba
 }
 
 function buildEquipped(inventory, content) {
-  const weapon = inventory.find((item) => item.type === 'weapon') || null;
+  const weapons = inventory.filter((item) => item.type === 'weapon');
+  const weapon = weapons[0] || null;
   const armor = inventory.find((item) => item.type === 'armor') || null;
   const shield = inventory.find((item) => item.type === 'shield') || null;
+  const pairedLightWeapon = !shield && hasWeaponProperty(weapon, 'light')
+    ? weapons.slice(1).find((item) => item.id !== weapon.id && hasWeaponProperty(item, 'light')) || null
+    : null;
   return {
     main_hand: weapon?.id || null,
-    off_hand: shield?.id || null,
+    off_hand: shield?.id || pairedLightWeapon?.id || null,
     armor: armor?.id || null,
     attuned: [],
   };
@@ -949,8 +953,14 @@ function buildSaveModifiers(saveProficiencies, abilityModifiers, pb) {
 }
 
 function buildAttackBreakdowns(equipped, content, abilityModifiers, pb, activeEffects, classData = {}) {
-  const weapon = byId(content.equipment, equipped.main_hand);
-  if (!weapon || weapon.type !== 'weapon') return [];
+  const weaponIds = [...new Set([equipped.main_hand, equipped.off_hand].filter(Boolean))];
+  return weaponIds
+    .map((weaponId) => byId(content.equipment, weaponId))
+    .filter((weapon) => weapon?.type === 'weapon')
+    .map((weapon) => buildAttackBreakdown(weapon, abilityModifiers, pb, activeEffects, classData));
+}
+
+function buildAttackBreakdown(weapon, abilityModifiers, pb, activeEffects, classData = {}) {
   const ability = getWeaponAttackAbility(weapon, abilityModifiers);
   const attackBonus = activeEffects
     .filter((effect) => effect.target === 'weapon_attack_bonus' && effect.source_item_id === weapon.id)
@@ -962,7 +972,7 @@ function buildAttackBreakdowns(equipped, content, abilityModifiers, pb, activeEf
     styleId: classData.choices?.fighting_style,
     attack: { attackKind: weapon.attack_kind || 'melee' },
   });
-  return [{
+  return {
     weapon_id: weapon.id,
     name: weapon.name,
     ability,
@@ -986,7 +996,7 @@ function buildAttackBreakdowns(equipped, content, abilityModifiers, pb, activeEf
       { label: ability.toUpperCase(), value: abilityModifiers[ability] || 0 },
       ...(damageBonus ? [{ label: 'Weapon magic', value: damageBonus }] : []),
     ],
-  }];
+  };
 }
 
 function getWeaponAttackAbility(weapon, abilityModifiers) {
@@ -994,6 +1004,10 @@ function getWeaponAttackAbility(weapon, abilityModifiers) {
     return Number(abilityModifiers.dex || 0) > Number(abilityModifiers.str || 0) ? 'dex' : 'str';
   }
   return weapon.ability || 'str';
+}
+
+function hasWeaponProperty(weapon, property) {
+  return (weapon?.properties || []).includes(property);
 }
 
 function buildSpellcasting(draft, characterClass, content, abilityModifiers, classData = {}) {
