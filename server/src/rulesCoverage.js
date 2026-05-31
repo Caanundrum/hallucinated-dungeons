@@ -74,6 +74,19 @@ const WEAPON_MASTERY_RULES = [
   'vex',
 ];
 
+const FIGHTING_STYLE_RULES = [
+  'archery',
+  'blind_fighting',
+  'defense',
+  'dueling',
+  'great_weapon_fighting',
+  'interception',
+  'protection',
+  'thrown_weapon_fighting',
+  'two_weapon_fighting',
+  'unarmed_fighting',
+];
+
 function buildRulesCoverageMatrix({ content = getContentBundle(), catalog = DEFAULT_CATALOG } = {}) {
   const matrix = {
     version: catalog.version || '4C.6-A',
@@ -90,6 +103,7 @@ function buildRulesCoverageMatrix({ content = getContentBundle(), catalog = DEFA
       equipment: buildSection('equipment', (content.equipment || []).map((item) => equipmentEntry(item, catalog))),
       equipment_rules: buildSection('equipment_rules', buildEquipmentRuleEntries(content, catalog)),
       weapon_masteries: buildSection('weapon_masteries', buildWeaponMasteryEntries(catalog)),
+      fighting_styles: buildSection('fighting_styles', buildFightingStyleEntries(catalog)),
     },
   };
 
@@ -213,6 +227,16 @@ function buildEquipmentRuleEntries(content, catalog) {
     { description: 'Weapon property rule coverage.' },
   ));
   return [...effectRules, ...propertyRules];
+}
+
+function buildFightingStyleEntries(catalog) {
+  return FIGHTING_STYLE_RULES.map((id) => simpleEntry(
+    'fighting_style',
+    id,
+    titleCase(id),
+    statusFrom(catalog.fighting_styles?.[id] || STATUS.DEFERRED),
+    { description: 'Fighting Style feat rule coverage.' },
+  ));
 }
 
 function buildWeaponMasteryEntries(catalog) {

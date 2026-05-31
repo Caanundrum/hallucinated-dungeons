@@ -7,6 +7,7 @@ const {
   buildResourceState,
   spendResource,
 } = require('./resourceEngine');
+const { buildUnarmedFightingAttack } = require('./fightingStyleEngine');
 
 function resolveOriginFeatAction({ message = '', worldState = {}, characterSheet = {}, rollDie = defaultRollDie } = {}) {
   const intent = getOriginFeatIntent(message);
@@ -138,10 +139,11 @@ function rollWeaponDamage({ formula, characterSheet = {}, rollDie = defaultRollD
   const options = {
     crit,
     rerollOnes: Boolean(attack.rerollDamageOnes),
+    minimumDieRoll: attack.minimumDamageDieRoll,
   };
   const first = rollDamageFormula(formula, rollDie, options);
   if (!attack.isWeapon || !hasOriginFeat(characterSheet, 'savage_attacker')) {
-    return { ...first, note: first.rerolls?.length ? 'Tavern Brawler rerolled damage die results of 1.' : '' };
+    return { ...first, note: buildDamageAdjustmentNote(first) };
   }
 
   const second = rollDamageFormula(formula, rollDie, options);
@@ -153,9 +155,19 @@ function rollWeaponDamage({ formula, characterSheet = {}, rollDie = defaultRollD
   };
 }
 
+function buildDamageAdjustmentNote(damage = {}) {
+  if (damage.rerolls?.length) return 'Tavern Brawler rerolled damage die results of 1.';
+  if (damage.originalRolls?.some((roll, index) => roll !== damage.rolls[index])) {
+    return `Great Weapon Fighting treats low weapon damage die rolls as 3 (${damage.originalRolls.join(', ')} -> ${damage.rolls.join(', ')}).`;
+  }
+  return '';
+}
+
 function buildUnarmedAttack({ characterSheet = {}, message = '' } = {}) {
   if (!isUnarmedAttackIntent(message)) return null;
   const proficiency = getProficiencyBonus(characterSheet);
+  const unarmedFighting = buildUnarmedFightingAttack({ characterSheet, proficiency });
+  if (unarmedFighting) return unarmedFighting;
   const modifiers = characterSheet.abilities?.modifiers || {};
   const monk = normalizeId(characterSheet.identity?.class) === 'monk';
   const tavernBrawler = hasOriginFeat(characterSheet, 'tavern_brawler');

@@ -694,3 +694,20 @@ test('Paladin level 1 prepares two spells even with low Charisma', () => {
 
   assert.deepEqual(sheet.spellcasting.spells_prepared, ['cure_wounds', 'bless']);
 });
+
+test('Fighter Fighting Style choices update static character sheet math', () => {
+  const content = getContentBundle();
+  const defense = validateCharacter(classDraftFor('fighter', {
+    classChoices: { fighting_style: 'defense' },
+  }), content);
+  const rangedContent = JSON.parse(JSON.stringify(content));
+  rangedContent.classes.find((item) => item.id === 'fighter').equipment_pack = ['longbow', 'chain_mail'];
+  const archery = validateCharacter(classDraftFor('fighter', {
+    classChoices: { fighting_style: 'archery' },
+  }), rangedContent);
+
+  assert.equal(defense.derived_stats.armor_class, 19);
+  assert.equal(defense.derived_stats.armor_class_breakdown.some((entry) => entry.label === 'Defense Fighting Style'), true);
+  assert.equal(archery.derived_stats.attack_breakdowns[0].attack_total, 5);
+  assert.equal(archery.derived_stats.attack_breakdowns[0].fighting_style_attack_bonus, 2);
+});

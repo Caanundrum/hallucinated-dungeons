@@ -16,6 +16,7 @@ const {
   spendResource,
 } = require('./resourceEngine');
 const { consumeSapAfterAttack } = require('./weaponRulesEngine');
+const { getRuntimeArmorClass } = require('./fightingStyleEngine');
 
 function resolveCreatureTurns({
   worldState = {},
@@ -260,6 +261,11 @@ function buildPlayerCombatant(characterSheet, worldState) {
   const derived = characterSheet?.derived_stats || {};
   const stats = worldState.player_stats || {};
   const hp = Number(stats.hp ?? derived.hp ?? derived.max_hp ?? 10);
+  const armor = getRuntimeArmorClass({
+    characterSheet,
+    armorClass: stats.armor_class ?? derived.armor_class ?? 10,
+    defenseApplied: Boolean(stats.defense_fighting_style_applied),
+  });
   return {
     character_id: stats.character_id || derived.character_id || null,
     name: identity.name || stats.name || 'You',
@@ -267,7 +273,8 @@ function buildPlayerCombatant(characterSheet, worldState) {
     hp,
     max_hp: Number(stats.max_hp ?? derived.max_hp ?? hp),
     temp_hp: Number(stats.temp_hp ?? derived.temp_hp ?? 0),
-    ac: Number(stats.armor_class ?? derived.armor_class ?? 10),
+    ac: armor.armorClass,
+    defense_fighting_style_applied: armor.defenseApplied,
     conditions: uniqueValues([...(derived.conditions || []), ...(stats.conditions || [])]),
     resistances: uniqueValues([...(characterSheet.resistances || []), ...(stats.resistances || []), ...getActiveDamageResistances(worldState)]),
     vulnerabilities: uniqueValues([...(characterSheet.vulnerabilities || []), ...(stats.vulnerabilities || [])]),
@@ -280,7 +287,8 @@ function mergeActivePlayerDefenses(player = {}, characterSheet = {}, worldState 
   const activePlayer = buildPlayerCombatant(characterSheet, worldState);
   return {
     ...player,
-    ac: player.ac ?? activePlayer.ac,
+    ac: activePlayer.ac,
+    defense_fighting_style_applied: activePlayer.defense_fighting_style_applied,
     temp_hp: player.temp_hp ?? activePlayer.temp_hp,
     conditions: uniqueValues([...(activePlayer.conditions || []), ...(player.conditions || [])]),
     resistances: uniqueValues([...(activePlayer.resistances || []), ...(player.resistances || [])]),
@@ -346,7 +354,11 @@ function getCurrentHp(characterSheet, worldState) {
 }
 
 function getArmorClass(characterSheet, worldState) {
-  return Number(worldState.player_stats?.armor_class ?? characterSheet?.derived_stats?.armor_class ?? 10);
+  return getRuntimeArmorClass({
+    characterSheet,
+    armorClass: worldState.player_stats?.armor_class ?? characterSheet?.derived_stats?.armor_class ?? 10,
+    defenseApplied: Boolean(worldState.player_stats?.defense_fighting_style_applied),
+  }).armorClass;
 }
 
 function defaultRollDie(sides) {

@@ -1,5 +1,5 @@
 {
-  "version": "4C.6-H3",
+  "version": "4C.6-H4",
   "status_definitions": {
     "implemented": "Exposed and mechanically enforced for the current supported level/scope.",
     "partial": "Exposed and partially enforced, but missing at least one meaningful rules interaction.",
@@ -160,6 +160,18 @@
     "slow": "partial",
     "topple": "implemented",
     "vex": "implemented"
+  },
+  "fighting_styles": {
+    "archery": "implemented",
+    "blind_fighting": "deferred",
+    "defense": "implemented",
+    "dueling": "implemented",
+    "great_weapon_fighting": "implemented",
+    "interception": "deferred",
+    "protection": "deferred",
+    "thrown_weapon_fighting": "partial",
+    "two_weapon_fighting": "deferred",
+    "unarmed_fighting": "partial"
   },
   "equipment_rules": {
     "armor_formula": "implemented",

@@ -1,4 +1,8 @@
 const { byId } = require('./contentData');
+const {
+  getFightingStyleArmorBonus,
+  getFightingStyleAttackBonus,
+} = require('./fightingStyleEngine');
 
 const ABILITIES = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
 const STANDARD_ARRAY = [15, 14, 13, 12, 10, 8];
@@ -95,7 +99,7 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
     .filter((effect) => effect.target === 'max_hp_per_level_bonus')
     .reduce((sum, effect) => sum + Number(effect.value || 0) * level, 0);
   const maxHp = Math.max(1, characterClass.hit_die + abilityModifiers.con + maxHpBonus);
-  const armorBreakdown = calculateArmorClass(equipped, content, abilityModifiers, activeEffects, characterClass);
+  const armorBreakdown = calculateArmorClass(equipped, content, abilityModifiers, activeEffects, characterClass, classData);
   const initiativeBreakdown = calculateInitiative(abilityModifiers, pb, activeEffects);
   const derivedStats = {
     level,
@@ -118,7 +122,7 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
     death_saves: { successes: 0, failures: 0 },
     skill_modifiers: buildSkillModifiers(content.skills, skillSet, abilityModifiers, pb, classData.expertiseSkills),
     saving_throw_modifiers: buildSaveModifiers(characterClass.saving_throws, abilityModifiers, pb),
-    attack_breakdowns: buildAttackBreakdowns(equipped, content, abilityModifiers, pb, activeEffects),
+    attack_breakdowns: buildAttackBreakdowns(equipped, content, abilityModifiers, pb, activeEffects, classData),
   };
 
   if (spellcasting) {
@@ -873,7 +877,7 @@ function buildActiveEffects(equipped, content) {
   })));
 }
 
-function calculateArmorClass(equipped, content, abilityModifiers, activeEffects, characterClass) {
+function calculateArmorClass(equipped, content, abilityModifiers, activeEffects, characterClass, classData = {}) {
   const armorEffect = activeEffects.find((effect) => effect.target === 'armor_formula');
   const dexMod = abilityModifiers.dex || 0;
   const unarmoredDefense = !armorEffect ? characterClass.unarmored_defense : null;
@@ -889,14 +893,19 @@ function calculateArmorClass(equipped, content, abilityModifiers, activeEffects,
   const itemBonus = activeEffects
     .filter((effect) => effect.target === 'armor_class_bonus')
     .reduce((sum, effect) => sum + Number(effect.value || 0), 0);
+  const fightingStyleBonus = getFightingStyleArmorBonus({
+    styleId: classData.choices?.fighting_style,
+    wearingArmor: Boolean(armorEffect),
+  });
   return {
-    total: base + dexApplied + unarmoredBonus + shieldApplied + itemBonus,
+    total: base + dexApplied + unarmoredBonus + shieldApplied + itemBonus + fightingStyleBonus,
     parts: [
       { label: armorEffect ? armorEffect.source_item_name : 'Unarmored base', value: base },
       { label: dexCap === null || dexCap === undefined ? 'DEX modifier' : `DEX modifier (cap ${dexCap})`, value: dexApplied },
       ...(unarmoredAbility ? [{ label: `${unarmoredDefense.label} ${unarmoredAbility.toUpperCase()}`, value: unarmoredBonus }] : []),
       ...(shieldApplied ? [{ label: 'Shield', value: shieldApplied }] : []),
       ...(itemBonus ? [{ label: 'Item bonuses', value: itemBonus }] : []),
+      ...(fightingStyleBonus ? [{ label: 'Defense Fighting Style', value: fightingStyleBonus }] : []),
     ],
   };
 }
@@ -939,7 +948,7 @@ function buildSaveModifiers(saveProficiencies, abilityModifiers, pb) {
   }]));
 }
 
-function buildAttackBreakdowns(equipped, content, abilityModifiers, pb, activeEffects) {
+function buildAttackBreakdowns(equipped, content, abilityModifiers, pb, activeEffects, classData = {}) {
   const weapon = byId(content.equipment, equipped.main_hand);
   if (!weapon || weapon.type !== 'weapon') return [];
   const ability = getWeaponAttackAbility(weapon, abilityModifiers);
@@ -949,6 +958,10 @@ function buildAttackBreakdowns(equipped, content, abilityModifiers, pb, activeEf
   const damageBonus = activeEffects
     .filter((effect) => effect.target === 'weapon_damage_bonus' && effect.source_item_id === weapon.id)
     .reduce((sum, effect) => sum + Number(effect.value || 0), 0);
+  const fightingStyleAttackBonus = getFightingStyleAttackBonus({
+    styleId: classData.choices?.fighting_style,
+    attack: { attackKind: weapon.attack_kind || 'melee' },
+  });
   return [{
     weapon_id: weapon.id,
     name: weapon.name,
@@ -959,11 +972,13 @@ function buildAttackBreakdowns(equipped, content, abilityModifiers, pb, activeEf
     damage_type: weapon.damage_type || null,
     mastery: weapon.mastery || null,
     versatile_damage: weapon.versatile_damage || null,
-    attack_total: (abilityModifiers[ability] || 0) + pb + attackBonus,
+    attack_total: (abilityModifiers[ability] || 0) + pb + attackBonus + fightingStyleAttackBonus,
+    fighting_style_attack_bonus: fightingStyleAttackBonus,
     attack_parts: [
       { label: ability.toUpperCase(), value: abilityModifiers[ability] || 0 },
       { label: 'Proficiency', value: pb },
       ...(attackBonus ? [{ label: 'Weapon magic', value: attackBonus }] : []),
+      ...(fightingStyleAttackBonus ? [{ label: 'Archery Fighting Style', value: fightingStyleAttackBonus }] : []),
     ],
     damage_formula: `${weapon.damage} + ${(abilityModifiers[ability] || 0) + damageBonus}`,
     damage_parts: [

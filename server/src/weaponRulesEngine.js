@@ -14,8 +14,8 @@ function getWeaponPropertyAttackSources({ attack = {}, characterSheet = {} } = {
     : [];
 }
 
-function getWeaponDamageFormula({ attack = {}, message = '' } = {}) {
-  if (!attack.isWeapon || !hasProperty(attack, 'versatile') || !wantsTwoHandedUse(message)) {
+function getWeaponDamageFormula({ attack = {}, message = '', characterSheet = {} } = {}) {
+  if (!attack.isWeapon || !hasProperty(attack, 'versatile') || !wantsTwoHandedUse(message) || characterSheet.equipped?.off_hand) {
     return attack.damageFormula;
   }
   return replaceDamageDice(attack.damageFormula, attack.versatileDamage);

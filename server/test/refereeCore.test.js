@@ -1375,3 +1375,106 @@ test('selected Sap mastery gives the enemy next attack disadvantage and then cle
   assert.match(result.reply, /Sap mastery/);
   assert.match(result.reply, /disadvantage: Sapped on attacker/);
 });
+
+test('Dueling Fighting Style adds one-handed melee damage through the referee loop', () => {
+  const result = adjudicate({
+    message: 'Attack the Cultist with my longsword.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', initiative: 18, hp: 12, max_hp: 12, ac: 16, is_player: true, conditions: [] },
+          { name: 'Cultist', initiative: 8, hp: 20, max_hp: 20, ac: 12, is_player: false, conditions: [], attack: { name: 'dagger', attack_bonus: 2, damage_formula: '1d4+1' } },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      class_choices: { fighting_style: 'dueling' },
+      equipped: { main_hand: 'longsword', off_hand: 'shield' },
+      derived_stats: {
+        ...characterSheet.derived_stats,
+        attack_breakdowns: [
+          { weapon_id: 'longsword', name: 'Longsword', ability: 'str', attack_total: 5, damage_formula: '1d8+3' },
+        ],
+      },
+    },
+    rollDie: sequenceRolls([10, 4, 1]),
+  });
+  const cultist = result.worldState.combat_state.combatants.find((entry) => entry.name === 'Cultist');
+
+  assert.equal(cultist.hp, 11);
+  assert.match(result.reply, /Dueling \+2/);
+});
+
+test('Great Weapon Fighting raises low melee weapon damage dice through the referee loop', () => {
+  const result = adjudicate({
+    message: 'Attack the Cultist with my greatsword.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', initiative: 18, hp: 12, max_hp: 12, ac: 16, is_player: true, conditions: [] },
+          { name: 'Cultist', initiative: 8, hp: 20, max_hp: 20, ac: 12, is_player: false, conditions: [], attack: { name: 'dagger', attack_bonus: 2, damage_formula: '1d4+1' } },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      class_choices: { fighting_style: 'great_weapon_fighting' },
+      equipped: { main_hand: 'greatsword', off_hand: null },
+      derived_stats: {
+        ...characterSheet.derived_stats,
+        attack_breakdowns: [
+          { weapon_id: 'greatsword', name: 'Greatsword', ability: 'str', attack_total: 5, damage_formula: '2d6+3' },
+        ],
+      },
+    },
+    rollDie: sequenceRolls([10, 1, 2, 1]),
+  });
+  const cultist = result.worldState.combat_state.combatants.find((entry) => entry.name === 'Cultist');
+
+  assert.equal(cultist.hp, 11);
+  assert.match(result.reply, /Great Weapon Fighting treats low weapon damage die rolls as 3 \(1, 2 -> 3, 3\)/);
+});
+
+test('Archery Fighting Style updates older ranged sheets during referee attack resolution', () => {
+  const result = adjudicate({
+    message: 'Attack the Cultist with my longbow.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', initiative: 18, hp: 12, max_hp: 12, ac: 16, is_player: true, conditions: [] },
+          { name: 'Cultist', initiative: 8, hp: 20, max_hp: 20, ac: 14, is_player: false, conditions: [], attack: { name: 'dagger', attack_bonus: 2, damage_formula: '1d4+1' } },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      abilities: {
+        final_scores: { str: 10, dex: 14 },
+        modifiers: { str: 0, dex: 2 },
+      },
+      class_choices: { fighting_style: 'archery' },
+      equipped: { main_hand: 'longbow', off_hand: null },
+      derived_stats: {
+        ...characterSheet.derived_stats,
+        attack_breakdowns: [
+          { weapon_id: 'longbow', name: 'Longbow', ability: 'dex', attack_total: 4, damage_formula: '1d8+1' },
+        ],
+      },
+    },
+    rollDie: sequenceRolls([8, 4, 1]),
+  });
+  const cultist = result.worldState.combat_state.combatants.find((entry) => entry.name === 'Cultist');
+
+  assert.equal(cultist.hp, 15);
+  assert.match(result.reply, /Attack roll: 14 \(natural 8; 8\+6=14\) vs AC 14/);
+});

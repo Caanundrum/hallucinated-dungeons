@@ -68,3 +68,11 @@ test('dice formulas can reroll results of 1 once for Healer and Tavern Brawler h
   assert.equal(result.total, 9);
   assert.deepEqual(result.rerolls, [{ from: 1, to: 3 }, { from: 1, to: 4 }]);
 });
+
+test('damage formulas can treat low weapon dice as a minimum value', () => {
+  const result = rollDamageFormula('2d6+3', sequenceRolls([1, 2]), { minimumDieRoll: 3 });
+
+  assert.deepEqual(result.originalRolls, [1, 2]);
+  assert.deepEqual(result.rolls, [3, 3]);
+  assert.equal(result.total, 9);
+});

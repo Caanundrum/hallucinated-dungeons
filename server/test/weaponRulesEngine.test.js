@@ -61,6 +61,11 @@ test('Versatile weapons use their two-handed damage only when declared', () => {
   const longsword = attack('longsword', { properties: ['versatile'], versatileDamage: '1d10' });
   assert.equal(getWeaponDamageFormula({ attack: longsword, message: 'I attack the cultist.' }), '1d8+3');
   assert.equal(getWeaponDamageFormula({ attack: longsword, message: 'I attack with both hands.' }), '1d10+3');
+  assert.equal(getWeaponDamageFormula({
+    attack: longsword,
+    message: 'I attack with both hands.',
+    characterSheet: { equipped: { off_hand: 'shield' } },
+  }), '1d8+3');
 });
 
 test('Graze mastery deals only the attack ability modifier on a miss', () => {

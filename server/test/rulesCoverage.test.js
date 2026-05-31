@@ -12,7 +12,7 @@ test('builds a machine-readable coverage matrix for all exposed content catalogs
   const content = getContentBundle();
   const matrix = buildRulesCoverageMatrix({ content });
 
-  assert.equal(matrix.version, '4C.6-H3');
+  assert.equal(matrix.version, '4C.6-H4');
   assert.equal(matrix.sections.classes.entries.length, content.classes.length);
   assert.equal(matrix.sections.species.entries.length, content.species.length);
   assert.equal(matrix.sections.origin_feats.entries.length, content.feats.length);
@@ -22,6 +22,7 @@ test('builds a machine-readable coverage matrix for all exposed content catalogs
   assert.ok(matrix.sections.conditions.entries.length >= 16);
   assert.ok(matrix.sections.resources.entries.length >= 12);
   assert.equal(matrix.sections.weapon_masteries.entries.length, 8);
+  assert.equal(matrix.sections.fighting_styles.entries.length, 10);
   assert.ok(matrix.summary.exposed_total > 0);
 });
 

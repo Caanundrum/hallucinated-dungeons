@@ -109,3 +109,15 @@ test('Tavern Brawler and Monk unarmed strikes use their deterministic damage rul
   assert.equal(monk.damageFormula, '1d6+4');
   assert.equal(monk.ability, 'dex');
 });
+
+test('Unarmed Fighting style routes declared punches through its d6 strike', () => {
+  const unarmed = buildUnarmedAttack({
+    characterSheet: sheet(null, {
+      class_choices: { fighting_style: 'unarmed_fighting' },
+    }),
+    message: 'Punch the cultist.',
+  });
+
+  assert.equal(unarmed.damageFormula, '1d6+3');
+  assert.equal(unarmed.attackBonus, 5);
+});

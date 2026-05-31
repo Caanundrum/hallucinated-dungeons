@@ -1,4 +1,4 @@
-function rollDamageFormula(formula = '1d6', rollDie = defaultRollDie, { crit = false, spellMod = 0, rerollOnes = false } = {}) {
+function rollDamageFormula(formula = '1d6', rollDie = defaultRollDie, { crit = false, spellMod = 0, rerollOnes = false, minimumDieRoll = null } = {}) {
   const normalized = String(formula || '1')
     .replace(/\s+/g, '')
     .replace(/spell_mod_min_1/g, String(Math.max(1, Number(spellMod || 0))))
@@ -20,9 +20,13 @@ function rollDamageFormula(formula = '1d6', rollDie = defaultRollDie, { crit = f
     rerolls.push({ from: first, to: replacement });
     return replacement;
   });
+  const adjustedRolls = minimumDieRoll
+    ? rolls.map((roll) => Math.max(Number(minimumDieRoll), roll))
+    : rolls;
   return {
-    total: rolls.reduce((sum, roll) => sum + roll, 0) + modifier,
-    rolls,
+    total: adjustedRolls.reduce((sum, roll) => sum + roll, 0) + modifier,
+    rolls: adjustedRolls,
+    originalRolls: minimumDieRoll ? rolls : undefined,
     modifier,
     rerolls,
   };

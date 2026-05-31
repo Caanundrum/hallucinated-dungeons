@@ -61,6 +61,11 @@ const {
   getWeaponPropertyAttackMode,
   getWeaponPropertyAttackSources,
 } = require('./weaponRulesEngine');
+const {
+  applyFightingStyleToAttack,
+  getFightingStyleDamageBonus,
+  getRuntimeArmorClass,
+} = require('./fightingStyleEngine');
 
 const DEFAULT_CHECK_DC = 15;
 
@@ -987,6 +992,7 @@ function resolveInitiative({ pending, result, worldState, characterSheet, rollDi
       max_hp: player.max_hp,
       temp_hp: player.temp_hp,
       armor_class: player.ac,
+      defense_fighting_style_applied: player.defense_fighting_style_applied,
     },
   };
   if (playerIndex === 0) {
@@ -1114,7 +1120,11 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
     };
   }
 
-  const attack = getPrimaryAttack(characterSheet, message);
+  const attack = applyFightingStyleToAttack({
+    attack: getPrimaryAttack(characterSheet, message),
+    characterSheet,
+    message,
+  });
   const propertyMode = getWeaponPropertyAttackMode({ attack, characterSheet });
   const propertySources = getWeaponPropertyAttackSources({ attack, characterSheet });
   const lucky = applyLuckyToImmediateD20({
@@ -1150,10 +1160,11 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
   const consumeEffectIds = [];
   Object.assign(target, consumeVexAdvantage(target));
   if (hit) {
-    const damage = rollWeaponDamage({ formula: getWeaponDamageFormula({ attack, message }), characterSheet, rollDie, crit: isCrit, attack });
+    const damage = rollWeaponDamage({ formula: getWeaponDamageFormula({ attack, message, characterSheet }), characterSheet, rollDie, crit: isCrit, attack });
     const bonusDamage = rollBonusDice(getActiveDamageDice(attackState, target), rollDie);
     const flatBonuses = getActiveDamageBonuses(attackState, { attack, characterSheet });
-    const flatBonusTotal = flatBonuses.reduce((sum, bonus) => sum + Number(bonus.value || 0), 0);
+    const fightingStyleBonus = getFightingStyleDamageBonus({ characterSheet, attack, message });
+    const flatBonusTotal = flatBonuses.reduce((sum, bonus) => sum + Number(bonus.value || 0), 0) + fightingStyleBonus.total;
     const sneakAttack = getSneakAttackDamage({ characterSheet, attack, advantageMode, rollDie, crit: isCrit });
     const totalDamage = damage.total + bonusDamage.total + flatBonusTotal + sneakAttack.total;
     const before = Number(target.hp || 0);
@@ -1162,6 +1173,7 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
       `${damage.total} ${attack.isWeapon ? 'weapon' : 'unarmed'}`,
       bonusDamage.total ? bonusDamage.summary : '',
       flatBonuses.length ? flatBonuses.map((bonus) => `${bonus.label} ${formatSigned(bonus.value)}`).join(' + ') : '',
+      fightingStyleBonus.total ? `${fightingStyleBonus.label} ${formatSigned(fightingStyleBonus.total)}` : '',
       sneakAttack.total ? `Sneak Attack ${sneakAttack.die}=${sneakAttack.total}` : '',
     ].filter(Boolean);
     lines.push(`${isCrit ? '**Critical hit.** ' : ''}Hit for ${totalDamage} damage${damageParts.length > 1 ? ` (${damageParts.join(' + ')})` : ''}. ${target.name}: (${before} -> ${target.hp} HP).`);
@@ -1377,6 +1389,7 @@ function advanceEnemyTurns({ worldState, characterSheet, rollDie = defaultRollDi
       max_hp: player.max_hp,
       temp_hp: player.temp_hp,
       armor_class: player.ac,
+      defense_fighting_style_applied: player.defense_fighting_style_applied,
     },
     time_state: {
       ...(worldState.time_state || {}),
@@ -1673,6 +1686,11 @@ function buildPlayerCombatant(characterSheet, worldState) {
   const derived = characterSheet?.derived_stats || {};
   const stats = worldState.player_stats || {};
   const hp = Number(stats.hp ?? derived.hp ?? derived.max_hp ?? 10);
+  const armor = getRuntimeArmorClass({
+    characterSheet,
+    armorClass: stats.armor_class ?? derived.armor_class ?? 10,
+    defenseApplied: Boolean(stats.defense_fighting_style_applied),
+  });
   return {
     character_id: stats.character_id || derived.character_id || null,
     name: identity.name || stats.name || 'You',
@@ -1680,7 +1698,8 @@ function buildPlayerCombatant(characterSheet, worldState) {
     hp,
     max_hp: Number(stats.max_hp ?? derived.max_hp ?? hp),
     temp_hp: Number(stats.temp_hp ?? derived.temp_hp ?? 0),
-    ac: Number(stats.armor_class ?? derived.armor_class ?? 10),
+    ac: armor.armorClass,
+    defense_fighting_style_applied: armor.defenseApplied,
     conditions: derived.conditions || stats.conditions || [],
     is_player: true,
   };
@@ -1766,6 +1785,7 @@ function getPrimaryAttack(characterSheet, message = '') {
     weaponCategory: weapon?.weapon_category || attack?.weapon_category || null,
     attackKind: weapon?.attack_kind || attack?.attack_kind || 'melee',
     attackBonus: Number(attack?.attack_total ?? 3),
+    fightingStyleAttackBonus: Number(attack?.fighting_style_attack_bonus || 0),
     damageFormula: attack?.damage_formula || '1d8+3',
     damageType: weapon?.damage_type || attack?.damage_type || null,
     mastery: weapon?.mastery || attack?.mastery || null,
