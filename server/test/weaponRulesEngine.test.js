@@ -16,6 +16,7 @@ const {
   getWeaponDamageFormula,
   getWeaponMasteryAdvantageSources,
   getWeaponPropertyAttackMode,
+  stripPositiveAbilityModifier,
 } = require('../src/weaponRulesEngine');
 
 function sheet(weaponId, mastery, overrides = {}) {
@@ -66,6 +67,12 @@ test('Versatile weapons use their two-handed damage only when declared', () => {
     message: 'I attack with both hands.',
     characterSheet: { equipped: { off_hand: 'shield' } },
   }), '1d8+3');
+});
+
+test('reduced extra-attack damage removes a positive ability modifier but preserves weapon magic', () => {
+  assert.equal(stripPositiveAbilityModifier('1d12 + 4', 3), '1d12 + 1');
+  assert.equal(stripPositiveAbilityModifier('1d12 + 1', 3), '1d12 - 2');
+  assert.equal(stripPositiveAbilityModifier('1d12 - 1', -1), '1d12 - 1');
 });
 
 test('Graze mastery deals only the attack ability modifier on a miss', () => {

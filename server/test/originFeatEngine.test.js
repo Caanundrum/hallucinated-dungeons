@@ -90,6 +90,18 @@ test('Savage Attacker rolls weapon damage twice and uses the higher result', () 
   assert.match(result.note, /twice \(5\/10\)/);
 });
 
+test('extra attacks can suppress Savage Attacker after its once-per-turn use', () => {
+  const result = rollWeaponDamage({
+    formula: '1d12+3',
+    characterSheet: sheet('savage_attacker'),
+    attack: { isWeapon: true, allowSavageAttacker: false },
+    rollDie: sequenceRolls([4, 12]),
+  });
+
+  assert.equal(result.total, 7);
+  assert.equal(result.savageAttacker, undefined);
+});
+
 test('Tavern Brawler and Monk unarmed strikes use their deterministic damage rules', () => {
   const tavern = buildUnarmedAttack({
     characterSheet: sheet('tavern_brawler'),

@@ -1,6 +1,9 @@
 const { getContentBundle } = require('./contentData');
 const { getFightingStyle } = require('./fightingStyleEngine');
-const { getSelectedWeaponMastery } = require('./weaponRulesEngine');
+const {
+  getSelectedWeaponMastery,
+  stripPositiveAbilityModifier,
+} = require('./weaponRulesEngine');
 
 function getLightExtraAttack({
   characterSheet = {},
@@ -82,14 +85,6 @@ function getWeaponAttackAbility(weapon = {}, characterSheet = {}) {
   return weapon.ability || 'str';
 }
 
-function stripPositiveAbilityModifier(formula, modifier, includeAbilityModifier) {
-  if (includeAbilityModifier || modifier <= 0) return String(formula || '');
-  const match = String(formula || '').match(/^(.*?)(?:\s*\+\s*)(\d+)\s*$/);
-  if (!match) return String(formula || '');
-  const adjusted = Number(match[2]) - modifier;
-  return adjusted ? `${match[1].trim()} + ${adjusted}` : match[1].trim();
-}
-
 function hasProperty(item = {}, property) {
   return (item.properties || []).map(normalizeId).includes(normalizeId(property));
 }
@@ -106,6 +101,5 @@ module.exports = {
   buildLightExtraAttack,
   getEquippedWeapons,
   getLightExtraAttack,
-  stripPositiveAbilityModifier,
   wantsLightExtraAttack,
 };

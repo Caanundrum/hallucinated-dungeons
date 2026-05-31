@@ -990,7 +990,7 @@ function buildAttackBreakdown(weapon, abilityModifiers, pb, activeEffects, class
       ...(attackBonus ? [{ label: 'Weapon magic', value: attackBonus }] : []),
       ...(fightingStyleAttackBonus ? [{ label: 'Archery Fighting Style', value: fightingStyleAttackBonus }] : []),
     ],
-    damage_formula: `${weapon.damage} + ${(abilityModifiers[ability] || 0) + damageBonus}`,
+    damage_formula: buildDamageFormula(weapon.damage, (abilityModifiers[ability] || 0) + damageBonus),
     damage_parts: [
       { label: weapon.damage, value: null },
       { label: ability.toUpperCase(), value: abilityModifiers[ability] || 0 },
@@ -1004,6 +1004,12 @@ function getWeaponAttackAbility(weapon, abilityModifiers) {
     return Number(abilityModifiers.dex || 0) > Number(abilityModifiers.str || 0) ? 'dex' : 'str';
   }
   return weapon.ability || 'str';
+}
+
+function buildDamageFormula(dice, modifier) {
+  const value = Number(modifier || 0);
+  if (value < 0) return `${dice} - ${Math.abs(value)}`;
+  return `${dice} + ${value}`;
 }
 
 function hasWeaponProperty(weapon, property) {

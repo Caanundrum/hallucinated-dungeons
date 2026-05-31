@@ -21,6 +21,16 @@ function getWeaponDamageFormula({ attack = {}, message = '', characterSheet = {}
   return replaceDamageDice(attack.damageFormula, attack.versatileDamage);
 }
 
+function stripPositiveAbilityModifier(formula, modifier, includeAbilityModifier = false) {
+  if (includeAbilityModifier || Number(modifier || 0) <= 0) return String(formula || '');
+  const match = String(formula || '').match(/^(.*?)(?:\s*\+\s*)(\d+)\s*$/);
+  if (!match) return String(formula || '');
+  const adjusted = Number(match[2]) - Number(modifier);
+  if (adjusted > 0) return `${match[1].trim()} + ${adjusted}`;
+  if (adjusted < 0) return `${match[1].trim()} - ${Math.abs(adjusted)}`;
+  return match[1].trim();
+}
+
 function getWeaponMasteryAdvantageSources(target = {}) {
   return getMasteryEffects(target).some((effect) => effect.type === 'vex')
     ? ['Vex mastery']
@@ -240,4 +250,5 @@ module.exports = {
   getWeaponMasteryAdvantageSources,
   getWeaponPropertyAttackMode,
   getWeaponPropertyAttackSources,
+  stripPositiveAbilityModifier,
 };

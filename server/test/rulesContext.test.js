@@ -144,6 +144,26 @@ test('preserves future map coordinates when map state appears', () => {
   assert.equal(context.position_state.r, -1);
 });
 
+test('preserves combatant-specific map coordinates for future reach and adjacency rules', () => {
+  const context = buildRulesContext({
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { character_id: 'char_ari', name: 'Ari', hp: 12, max_hp: 12, ac: 18, is_player: true, position: { map_id: 'gate', q: 0, r: 0 } },
+          { name: 'Gate Wolf', hp: 7, max_hp: 7, ac: 13, is_player: false, position: { map_id: 'gate', q: 1, r: 0 } },
+        ],
+      },
+    }),
+    characterSheet: characterSheet(),
+  });
+
+  const wolf = context.entity_state.find((entity) => entity.id === 'creature:gate_wolf');
+  assert.deepEqual(wolf.position, { map_id: 'gate', q: 1, r: 0 });
+});
+
 test('summarizes rules context for DM prompts without handing rules authority to the DM', () => {
   const context = buildRulesContext({
     worldState: worldState(),

@@ -69,6 +69,10 @@ const {
 const {
   getLightExtraAttack,
 } = require('./lightWeaponEngine');
+const {
+  getCleaveExtraAttack,
+  markCleaveUsed,
+} = require('./cleaveMasteryEngine');
 
 const DEFAULT_CHECK_DC = 15;
 
@@ -1108,7 +1112,7 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
 
   let combat = cloneCombatState(spent.worldState.combat_state);
   const player = combat.combatants.find((combatant) => combatant.is_player);
-  const target = combat.combatants.find((combatant) => !combatant.is_player && Number(combatant.hp) > 0);
+  const target = findCombatTarget(combat, message) || getLivingEnemy(combat);
   if (!player || !target) {
     return endCombat(worldState, 'There is no active enemy left to attack. Combat ends before the initiative tracker has to file a complaint.');
   }
@@ -1163,9 +1167,12 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
 
   const consumeEffectIds = [];
   let sneakAttackUsed = false;
+  let savageAttackerUsed = false;
+  let cleaveExtra = null;
   Object.assign(target, consumeVexAdvantage(target));
   if (hit) {
     const damage = rollWeaponDamage({ formula: getWeaponDamageFormula({ attack, message, characterSheet }), characterSheet, rollDie, crit: isCrit, attack });
+    savageAttackerUsed = Boolean(damage.savageAttacker);
     const bonusDamage = rollBonusDice(getActiveDamageDice(attackState, target), rollDie);
     const flatBonuses = getActiveDamageBonuses(attackState, { attack, characterSheet });
     const fightingStyleBonus = getFightingStyleDamageBonus({ characterSheet, attack, message });
@@ -1195,6 +1202,7 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
       if (Number(target.hp) > 0) lines.push(`${target.name} wakes as the damage lands. Extremely rude alarm clock, but effective.`);
     }
     lines.push(...applyWeaponMasteryOnHit({ attack, target, combat, characterSheet, damageDealt: totalDamage, rollDie }).lines);
+    cleaveExtra = getCleaveExtraAttack({ characterSheet, attack, primaryTarget: target, combat, message });
   } else if (criticalMiss) {
     lines.push('**Critical miss.** The attack fails no matter how pretty the math looked in the margins.');
     lines.push(...applyWeaponMasteryOnMiss({ attack, target, characterSheet }).lines);
@@ -1209,6 +1217,30 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
 
   if (Number(target.hp) <= 0) lines.push(`${target.name} falls.`);
 
+  if (cleaveExtra?.ok) {
+    combat = markCleaveUsed(combat);
+    lines.push(`**Cleave mastery:** you make one extra attack against ${cleaveExtra.target.name}.${cleaveExtra.spatial.reply ? ` ${cleaveExtra.spatial.reply}` : ''}`);
+    const cleaveResult = resolveExtraWeaponAttackRoll({
+      attack: cleaveExtra.attack,
+      target: cleaveExtra.target,
+      combat,
+      worldState: { ...attackState, combat_state: combat },
+      characterSheet,
+      message,
+      rollDie,
+      attackLabel: 'Cleave attack',
+      resultLabel: 'Cleave attack',
+      includeDamageRiders: false,
+      applyMastery: false,
+      sneakAttackAvailable: false,
+      savageAttackerAvailable: false,
+    });
+    lines.push(...cleaveResult.lines);
+    consumeEffectIds.push(...cleaveResult.consumeEffectIds);
+  } else if (cleaveExtra) {
+    lines.push(`**Cleave mastery:** ${cleaveExtra.reply}`);
+  }
+
   if (lightExtra && getLivingEnemy(combat)) {
     const extraSpent = lightExtra.usesBonusAction
       ? spendTurnResource({ ...attackState, combat_state: combat }, 'bonus_action', 'Light weapon extra attack', characterSheet)
@@ -1221,7 +1253,7 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
       lines.push(lightExtra.usesBonusAction
         ? '**Light property:** you spend your Bonus Action to make one extra attack with a different Light weapon.'
         : '**Nick mastery:** your Light-property extra attack folds into the Attack action, leaving your Bonus Action available.');
-      const extraResult = resolveLightExtraAttackRoll({
+      const extraResult = resolveExtraWeaponAttackRoll({
         attack: applyFightingStyleToAttack({
           attack: lightExtra.attack,
           characterSheet,
@@ -1234,6 +1266,7 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
         message,
         rollDie,
         sneakAttackAvailable: !sneakAttackUsed,
+        savageAttackerAvailable: !savageAttackerUsed,
       });
       lines.push(...extraResult.lines);
       consumeEffectIds.push(...extraResult.consumeEffectIds);
@@ -1279,7 +1312,7 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
   };
 }
 
-function resolveLightExtraAttackRoll({
+function resolveExtraWeaponAttackRoll({
   attack,
   target,
   combat,
@@ -1288,6 +1321,11 @@ function resolveLightExtraAttackRoll({
   message,
   rollDie,
   sneakAttackAvailable = true,
+  savageAttackerAvailable = true,
+  includeDamageRiders = true,
+  applyMastery = true,
+  attackLabel = 'extra attack',
+  resultLabel = 'Extra attack',
 }) {
   if (!target) return { lines: [], consumeEffectIds: [] };
 
@@ -1313,19 +1351,25 @@ function resolveLightExtraAttackRoll({
   const criticalMiss = natural === 1;
   const hit = !criticalMiss && (isCrit || attackRoll.total >= Number(target.ac || 10));
   const lines = [
-    `You make the extra attack against ${target.name} with ${attack.name}. Attack roll: ${attackRoll.rollText} vs AC ${target.ac}.`,
+    `You make the ${attackLabel} against ${target.name} with ${attack.name}. Attack roll: ${attackRoll.rollText} vs AC ${target.ac}.`,
   ];
-  if (advantageMode) lines.push(`Extra attack has ${advantageMode} from ${formatList(sources)}.`);
+  if (advantageMode) lines.push(`${resultLabel} has ${advantageMode} from ${formatList(sources)}.`);
 
   const consumeEffectIds = [...attackRoll.bonusDice.expireEffectIds];
   Object.assign(target, consumeVexAdvantage(target));
   if (hit) {
-    const damage = rollWeaponDamage({ formula: attack.damageFormula, characterSheet, rollDie, crit: isCrit, attack });
-    const bonusDamage = rollBonusDice(getActiveDamageDice(worldState, target), rollDie);
-    const flatBonuses = getActiveDamageBonuses(worldState, { attack, characterSheet });
-    const fightingStyleBonus = getFightingStyleDamageBonus({ characterSheet, attack, message });
+    const damage = rollWeaponDamage({
+      formula: attack.damageFormula,
+      characterSheet,
+      rollDie,
+      crit: isCrit,
+      attack: { ...attack, allowSavageAttacker: savageAttackerAvailable },
+    });
+    const bonusDamage = includeDamageRiders ? rollBonusDice(getActiveDamageDice(worldState, target), rollDie) : { total: 0, summary: '', expireEffectIds: [] };
+    const flatBonuses = includeDamageRiders ? getActiveDamageBonuses(worldState, { attack, characterSheet }) : [];
+    const fightingStyleBonus = includeDamageRiders ? getFightingStyleDamageBonus({ characterSheet, attack, message }) : { total: 0, label: null };
     const flatBonusTotal = flatBonuses.reduce((sum, bonus) => sum + Number(bonus.value || 0), 0) + fightingStyleBonus.total;
-    const sneakAttack = sneakAttackAvailable
+    const sneakAttack = includeDamageRiders && sneakAttackAvailable
       ? getSneakAttackDamage({ characterSheet, attack, advantageMode, rollDie, crit: isCrit })
       : { total: 0, die: '1d6' };
     const totalDamage = damage.total + bonusDamage.total + flatBonusTotal + sneakAttack.total;
@@ -1338,7 +1382,7 @@ function resolveLightExtraAttackRoll({
       fightingStyleBonus.total ? `${fightingStyleBonus.label} ${formatSigned(fightingStyleBonus.total)}` : '',
       sneakAttack.total ? `Sneak Attack ${sneakAttack.die}=${sneakAttack.total}` : '',
     ].filter(Boolean);
-    lines.push(`${isCrit ? '**Critical hit.** ' : ''}Extra attack hits for ${totalDamage} damage${damageParts.length > 1 ? ` (${damageParts.join(' + ')})` : ''}. ${target.name}: (${before} -> ${target.hp} HP).`);
+    lines.push(`${isCrit ? '**Critical hit.** ' : ''}${resultLabel} hits for ${totalDamage} damage${damageParts.length > 1 ? ` (${damageParts.join(' + ')})` : ''}. ${target.name}: (${before} -> ${target.hp} HP).`);
     if (damage.note) lines.push(damage.note);
     consumeEffectIds.push(...bonusDamage.expireEffectIds);
     if ((target.conditions || []).includes('sleep')) {
@@ -1346,13 +1390,13 @@ function resolveLightExtraAttackRoll({
       consumeEffectIds.push('sleep');
       if (Number(target.hp) > 0) lines.push(`${target.name} wakes as the damage lands. Apparently paired weapons are not a soothing bedtime routine.`);
     }
-    lines.push(...applyWeaponMasteryOnHit({ attack, target, combat, characterSheet, damageDealt: totalDamage, rollDie }).lines);
+    if (applyMastery) lines.push(...applyWeaponMasteryOnHit({ attack, target, combat, characterSheet, damageDealt: totalDamage, rollDie }).lines);
   } else if (criticalMiss) {
-    lines.push('**Critical miss.** The extra attack fails no matter how determinedly the second weapon joined the meeting.');
-    lines.push(...applyWeaponMasteryOnMiss({ attack, target, characterSheet }).lines);
+    lines.push(`**Critical miss.** The ${attackLabel} fails no matter how enthusiastically it joined the meeting.`);
+    if (applyMastery) lines.push(...applyWeaponMasteryOnMiss({ attack, target, characterSheet }).lines);
   } else {
-    lines.push('The extra attack misses.');
-    lines.push(...applyWeaponMasteryOnMiss({ attack, target, characterSheet }).lines);
+    lines.push(`The ${attackLabel} misses.`);
+    if (applyMastery) lines.push(...applyWeaponMasteryOnMiss({ attack, target, characterSheet }).lines);
   }
   if ((target.conditions || []).includes('guiding_bolt_advantage')) {
     target.conditions = (target.conditions || []).filter((condition) => condition !== 'guiding_bolt_advantage');
@@ -1469,10 +1513,12 @@ function findCombatTarget(combat = {}, message = '') {
   if (!enemies.length) return null;
 
   const normalizedMessage = normalizeTargetPhrase(message);
-  const directMatch = enemies.find((enemy) => {
+  const directMatch = enemies.map((enemy) => {
     const enemyName = normalizeTargetPhrase(enemy.name);
-    return enemyName && normalizedMessage.includes(enemyName);
-  });
+    return { enemy, index: enemyName ? normalizedMessage.indexOf(enemyName) : -1 };
+  })
+    .filter((match) => match.index >= 0)
+    .sort((left, right) => left.index - right.index)[0]?.enemy;
   if (directMatch) return directMatch;
 
   const inferred = normalizeTargetPhrase(inferEnemyName({ scene_presence: { present_npcs: [] } }, message));

@@ -246,6 +246,7 @@ function mergeCombatants(entityMap, worldState, characterSheet, fallbackPosition
       entityMap.set(baseId, {
         ...existing,
         present: true,
+        position: combatant.position || combatant.map_position || existing.position || fallbackPosition,
         combat: combatData,
         interactions: {
           ...(existing.interactions || {}),
@@ -263,7 +264,7 @@ function mergeCombatants(entityMap, worldState, characterSheet, fallbackPosition
       source: 'combat_state.combatants',
       present: true,
       reachable: true,
-      position: fallbackPosition,
+      position: combatant.position || combatant.map_position || fallbackPosition,
       visibility: { visible: true },
       interactions: combatant.is_player ? pcInteractions() : npcInteractions(),
       combat: combatData,

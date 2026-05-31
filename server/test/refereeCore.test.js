@@ -1555,6 +1555,43 @@ test('Two-Weapon Fighting restores the ability modifier and spends the Light ext
   assert.match(result.reply, /Extra attack hits for 6 damage/);
 });
 
+test('Savage Attacker does not repeat on a Light extra attack after the primary hit uses it', () => {
+  const result = adjudicate({
+    message: 'Attack the Cultist with both weapons.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', initiative: 18, hp: 10, max_hp: 10, ac: 14, is_player: true, conditions: [] },
+          { name: 'Cultist', initiative: 8, hp: 30, max_hp: 30, ac: 10, is_player: false, conditions: [], attack: { name: 'dagger', attack_bonus: 2, damage_formula: '1d4+1' } },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      identity: { name: 'Ari', class: 'rogue', class_name: 'Rogue', level: 1 },
+      origin: { background_feat: 'savage_attacker' },
+      abilities: { modifiers: { str: 0, dex: 3 } },
+      equipped: { main_hand: 'shortsword', off_hand: 'dagger' },
+      derived_stats: {
+        ...characterSheet.derived_stats,
+        proficiency_bonus: 2,
+        attack_breakdowns: [
+          { weapon_id: 'shortsword', name: 'Shortsword', ability: 'dex', attack_total: 5, damage_formula: '1d6 + 3' },
+          { weapon_id: 'dagger', name: 'Dagger', ability: 'dex', attack_total: 5, damage_formula: '1d4 + 3' },
+        ],
+      },
+    },
+    rollDie: sequenceRolls([10, 2, 5, 10, 4, 1]),
+  });
+  const cultist = result.worldState.combat_state.combatants.find((entry) => entry.name === 'Cultist');
+
+  assert.equal(cultist.hp, 18);
+  assert.equal((result.reply.match(/Savage Attacker rolled weapon damage twice/g) || []).length, 1);
+});
+
 test('declared weapon name selects the matching calculated attack instead of the first sheet entry', () => {
   const result = adjudicate({
     message: 'Attack the Cultist with my dagger.',
@@ -1610,4 +1647,79 @@ test('dropping one enemy does not end combat while another enemy remains', () =>
   assert.equal(result.worldState.combat_state.active, true);
   assert.match(result.reply, /Cultist falls/);
   assert.doesNotMatch(result.reply, /Combat ends/);
+});
+
+test('selected Cleave mastery attacks the declared second creature with weapon damage only', () => {
+  const result = adjudicate({
+    message: 'Attack the Cultist with my greataxe and cleave the Guard.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', initiative: 18, hp: 14, max_hp: 14, ac: 14, is_player: true, conditions: [] },
+          { name: 'Guard', initiative: 8, hp: 20, max_hp: 20, ac: 10, is_player: false, conditions: [], attack: { name: 'spear', attack_bonus: 2, damage_formula: '1d6+1' } },
+          { name: 'Cultist', initiative: 6, hp: 20, max_hp: 20, ac: 10, is_player: false, conditions: [], attack: { name: 'dagger', attack_bonus: 2, damage_formula: '1d4+1' } },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      identity: { name: 'Ari', class: 'barbarian', class_name: 'Barbarian', level: 1 },
+      abilities: { modifiers: { str: 3, dex: 1 } },
+      equipped: { main_hand: 'greataxe', off_hand: null },
+      weapon_masteries: [{ weapon_id: 'greataxe', mastery: 'cleave' }],
+      derived_stats: {
+        ...characterSheet.derived_stats,
+        attack_breakdowns: [
+          { weapon_id: 'greataxe', name: 'Greataxe', ability: 'str', attack_total: 5, damage_formula: '1d12 + 3' },
+        ],
+      },
+    },
+    rollDie: sequenceRolls([10, 8, 10, 6, 1, 1]),
+  });
+  const guard = result.worldState.combat_state.combatants.find((entry) => entry.name === 'Guard');
+  const cultist = result.worldState.combat_state.combatants.find((entry) => entry.name === 'Cultist');
+
+  assert.equal(cultist.hp, 9);
+  assert.equal(guard.hp, 14);
+  assert.match(result.reply, /Cleave mastery/);
+  assert.match(result.reply, /Cleave attack hits for 6 damage/);
+  assert.match(result.reply, /Map coordinates are not active/);
+});
+
+test('Cleave refuses a declared second target outside reach when map coordinates exist', () => {
+  const result = adjudicate({
+    message: 'Attack the Cultist with my greataxe and cleave the Guard.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', initiative: 18, hp: 14, max_hp: 14, ac: 14, is_player: true, conditions: [], position: { map_id: 'crypt', q: 0, r: 0 } },
+          { name: 'Cultist', initiative: 8, hp: 20, max_hp: 20, ac: 10, is_player: false, conditions: [], position: { map_id: 'crypt', q: 1, r: 0 }, attack: { name: 'dagger', attack_bonus: 2, damage_formula: '1d4+1' } },
+          { name: 'Guard', initiative: 6, hp: 20, max_hp: 20, ac: 10, is_player: false, conditions: [], position: { map_id: 'crypt', q: 2, r: 0 }, attack: { name: 'spear', attack_bonus: 2, damage_formula: '1d6+1' } },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      abilities: { modifiers: { str: 3, dex: 1 } },
+      equipped: { main_hand: 'greataxe', off_hand: null },
+      weapon_masteries: [{ weapon_id: 'greataxe', mastery: 'cleave' }],
+      derived_stats: {
+        ...characterSheet.derived_stats,
+        attack_breakdowns: [
+          { weapon_id: 'greataxe', name: 'Greataxe', ability: 'str', attack_total: 5, damage_formula: '1d12 + 3' },
+        ],
+      },
+    },
+    rollDie: sequenceRolls([10, 8, 1, 1]),
+  });
+  const guard = result.worldState.combat_state.combatants.find((entry) => entry.name === 'Guard');
+
+  assert.equal(guard.hp, 20);
+  assert.match(result.reply, /within 5 feet of the first creature and within your weapon reach/);
 });

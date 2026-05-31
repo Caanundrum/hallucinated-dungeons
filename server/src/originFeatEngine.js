@@ -142,7 +142,7 @@ function rollWeaponDamage({ formula, characterSheet = {}, rollDie = defaultRollD
     minimumDieRoll: attack.minimumDamageDieRoll,
   };
   const first = rollDamageFormula(formula, rollDie, options);
-  if (!attack.isWeapon || !hasOriginFeat(characterSheet, 'savage_attacker')) {
+  if (!attack.isWeapon || attack.allowSavageAttacker === false || !hasOriginFeat(characterSheet, 'savage_attacker')) {
     return { ...first, note: buildDamageAdjustmentNote(first) };
   }
 
