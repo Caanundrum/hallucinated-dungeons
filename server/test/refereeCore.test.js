@@ -5,7 +5,12 @@ process.env.SUPABASE_SERVICE_ROLE_KEY ||= 'test-key';
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { adjudicate, advanceEnemyTurns, advanceNarrativeTime } = require('../src/refereeCore');
+const {
+  adjudicate,
+  advanceEnemyTurns,
+  advanceNarrativeTime,
+  finishPlayerCombatAction,
+} = require('../src/refereeCore');
 
 const characterSheet = {
   identity: { name: 'Sir Testalot', level: 1 },
@@ -106,7 +111,7 @@ test('species save advantages enter the authoritative pending-roll pipeline', ()
   assert.match(result.reply, /Gnomish Cunning/);
 });
 
-test('Dragonborn Breath Weapon resolves through the referee and advances the combat round', () => {
+test('Dragonborn Breath Weapon resolves through the referee and leaves the turn open', () => {
   const result = adjudicate({
     message: 'Use Breath Weapon on the Cultist.',
     worldState: worldState({
@@ -125,15 +130,16 @@ test('Dragonborn Breath Weapon resolves through the referee and advances the com
       identity: { ...characterSheet.identity, species: 'dragonborn' },
       species_choices: { draconic_ancestry: 'blue' },
     },
-    rollDie: sequenceRolls([4, 7, 1]),
+    rollDie: sequenceRolls([4, 7]),
   });
   const cultist = result.worldState.combat_state.combatants.find((entry) => entry.name === 'Cultist');
 
   assert.equal(cultist.hp, 1);
   assert.equal(result.worldState.player_stats.resources.breath_weapon.remaining, 1);
-  assert.equal(result.worldState.combat_state.round, 2);
+  assert.equal(result.worldState.combat_state.round, 1);
+  assert.equal(result.worldState.combat_state.turn_resources.action_available, false);
   assert.match(result.reply, /7 lightning damage/);
-  assert.match(result.reply, /Round 2 begins/);
+  assert.match(result.reply, /Your turn remains open/);
 });
 
 test('ignores player-authored difficulty and DC claims', () => {
@@ -805,6 +811,145 @@ test('ending a turn advances enemies and resets their Reactions at the start of 
   assert.match(result.reply, /Round 2 begins\. It is your turn/);
 });
 
+test('Attack leaves movement and Bonus Action available until the player ends the turn', () => {
+  const attacked = adjudicate({
+    message: 'Attack the wolf with my longsword.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', hp: 12, max_hp: 12, ac: 16, is_player: true },
+          { name: 'Wolf', hp: 20, max_hp: 20, ac: 12, is_player: false, attack: { name: 'bite', attack_bonus: 4, damage_formula: '1d4+1' } },
+        ],
+      },
+    }),
+    characterSheet,
+    rollDie: sequenceRolls([12, 4]),
+  });
+  const moved = adjudicate({
+    message: 'I move 10 feet toward the wolf.',
+    worldState: attacked.worldState,
+    characterSheet,
+  });
+  const ended = adjudicate({
+    message: 'End my turn.',
+    worldState: moved.worldState,
+    characterSheet,
+    rollDie: sequenceRolls([1]),
+  });
+
+  assert.equal(attacked.worldState.combat_state.round, 1);
+  assert.equal(attacked.worldState.combat_state.turn_resources.action_available, false);
+  assert.equal(attacked.worldState.combat_state.turn_resources.bonus_action_available, true);
+  assert.equal(moved.worldState.combat_state.turn_resources.movement_remaining, 20);
+  assert.equal(ended.worldState.combat_state.round, 2);
+  assert.match(attacked.reply, /Your turn remains open/);
+  assert.match(ended.reply, /Wolf uses bite/);
+});
+
+test('a player can use a Bonus Action class feature after attacking', () => {
+  const barbarian = {
+    ...characterSheet,
+    identity: { name: 'Ari', class: 'barbarian', class_name: 'Barbarian', level: 1 },
+    derived_stats: { ...characterSheet.derived_stats, hp: 14, max_hp: 14, armor_class: 14 },
+  };
+  const attacked = adjudicate({
+    message: 'Attack the wolf with my longsword.',
+    worldState: worldState({
+      player_stats: { hp: 14, max_hp: 14, armor_class: 14 },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', hp: 14, max_hp: 14, ac: 14, is_player: true },
+          { name: 'Wolf', hp: 20, max_hp: 20, ac: 12, is_player: false, attack: { name: 'bite', attack_bonus: 4, damage_formula: '1d4+1' } },
+        ],
+      },
+    }),
+    characterSheet: barbarian,
+    rollDie: sequenceRolls([12, 4]),
+  });
+  const raged = adjudicate({
+    message: 'I enter Rage.',
+    worldState: attacked.worldState,
+    characterSheet: barbarian,
+  });
+
+  assert.equal(raged.worldState.combat_state.round, 1);
+  assert.equal(raged.worldState.combat_state.turn_resources.action_available, false);
+  assert.equal(raged.worldState.combat_state.turn_resources.bonus_action_available, false);
+  assert.equal(raged.worldState.active_effects.some((effect) => effect.id === 'rage'), true);
+  assert.doesNotMatch(raged.reply, /Wolf uses/);
+});
+
+test('the socket spell continuation seam keeps an action spell turn open', () => {
+  const continued = finishPlayerCombatAction({
+    result: {
+      handled: true,
+      logType: 'spell_attack',
+      worldState: worldState({
+        combat_state: {
+          active: true,
+          round: 1,
+          turn_index: 0,
+          turn_resources: {
+            actor: 'player',
+            action_available: false,
+            bonus_action_available: true,
+            reaction_available: true,
+            movement_remaining: 30,
+            used: [{ resource: 'action', label: 'Fire Bolt' }],
+          },
+          combatants: [
+            { name: 'Sir Testalot', hp: 12, max_hp: 12, ac: 16, is_player: true },
+            { name: 'Wolf', hp: 8, max_hp: 8, ac: 12, is_player: false },
+          ],
+        },
+      }),
+      reply: 'You cast **Fire Bolt**.',
+    },
+    characterSheet,
+  });
+
+  assert.equal(continued.worldState.combat_state.round, 1);
+  assert.equal(continued.worldState.combat_state.turn_resources.action_available, false);
+  assert.equal(continued.worldState.combat_state.turn_resources.bonus_action_available, true);
+  assert.match(continued.reply, /Your turn remains open/);
+});
+
+test('Dodge persists until end turn and applies to creature attacks', () => {
+  const dodged = adjudicate({
+    message: 'I Dodge.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', hp: 12, max_hp: 12, ac: 16, is_player: true },
+          { name: 'Wolf', hp: 8, max_hp: 8, ac: 12, is_player: false, attack: { name: 'bite', attack_bonus: 4, damage_formula: '1d4+1' } },
+        ],
+      },
+    }),
+    characterSheet,
+  });
+  const ended = adjudicate({
+    message: 'End my turn.',
+    worldState: dodged.worldState,
+    characterSheet,
+    rollDie: sequenceRolls([18, 2]),
+  });
+
+  assert.equal(dodged.worldState.combat_state.round, 1);
+  assert.equal(dodged.worldState.combat_state.turn_resources.dodging, true);
+  assert.equal(ended.worldState.player_stats.hp, 12);
+  assert.equal(ended.worldState.combat_state.turn_resources.dodging, undefined);
+  assert.match(ended.reply, /disadvantage: Dodge/);
+});
+
 test('combat skill checks spend the player action until the roll resolves', () => {
   const result = adjudicate({
     message: "I study the goblin's face.",
@@ -827,6 +972,37 @@ test('combat skill checks spend the player action until the roll resolves', () =
   assert.equal(result.worldState.pending_roll.kind, 'skill_check');
   assert.equal(result.worldState.combat_state.turn_resources.action_available, false);
   assert.match(result.reply, /uses your Action/);
+});
+
+test('resolved combat skill checks leave the remainder of the player turn open', () => {
+  const prompted = adjudicate({
+    message: "I study the goblin's face.",
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', hp: 12, max_hp: 12, ac: 16, is_player: true },
+          { name: 'Goblin', hp: 8, max_hp: 8, ac: 12, is_player: false },
+        ],
+      },
+    }),
+    characterSheet,
+    currentTurn: 10,
+  });
+  const resolved = adjudicate({
+    message: `[ROLL REQUEST: ${prompted.worldState.pending_roll.id}]`,
+    worldState: prompted.worldState,
+    characterSheet,
+    rollDie: sequenceRolls([15]),
+  });
+
+  assert.equal(resolved.worldState.pending_roll, null);
+  assert.equal(resolved.worldState.combat_state.round, 1);
+  assert.equal(resolved.worldState.combat_state.turn_resources.action_available, false);
+  assert.match(resolved.reply, /Your turn remains open/);
+  assert.doesNotMatch(resolved.reply, /Goblin uses/);
 });
 
 test('blocks a second action in the same combat turn', () => {
@@ -860,7 +1036,7 @@ test('blocks a second action in the same combat turn', () => {
 });
 
 test('shove is handled as an Attack action option with target save', () => {
-  const result = adjudicate({
+  const shoved = adjudicate({
     message: 'I try to shove the hostile wolf away from the reeve with my shield.',
     worldState: worldState({
       combat_state: {
@@ -881,20 +1057,27 @@ test('shove is handled as an Attack action option with target save', () => {
         proficiency_bonus: 2,
       },
     },
-    rollDie: sequenceRolls([4, 2, 2]),
+    rollDie: sequenceRolls([4]),
+  });
+  const result = adjudicate({
+    message: 'End my turn.',
+    worldState: shoved.worldState,
+    characterSheet,
+    rollDie: sequenceRolls([2, 2]),
   });
 
   assert.equal(result.handled, true);
   assert.equal(result.worldState.combat_state.turn_resources.action_available, true);
-  assert.match(result.reply, /Shove/);
-  assert.match(result.reply, /against Hostile Wolf/);
-  assert.match(result.reply, /DEX save: 4\+1 = 5 vs DC 13/);
-  assert.match(result.reply, /Hostile Wolf is shoved 5 feet/);
+  assert.equal(shoved.worldState.combat_state.turn_resources.action_available, false);
+  assert.match(shoved.reply, /Shove/);
+  assert.match(shoved.reply, /against Hostile Wolf/);
+  assert.match(shoved.reply, /DEX save: 4\+1 = 5 vs DC 13/);
+  assert.match(shoved.reply, /Hostile Wolf is shoved 5 feet/);
   assert.match(result.reply, /Hostile Wolf uses attack/);
 });
 
 test('shove can knock a target prone and affect its next attack', () => {
-  const result = adjudicate({
+  const shoved = adjudicate({
     message: 'I shove the goblin prone.',
     worldState: worldState({
       combat_state: {
@@ -914,13 +1097,19 @@ test('shove can knock a target prone and affect its next attack', () => {
         proficiency_bonus: 2,
       },
     },
-    rollDie: sequenceRolls([3, 12, 6]),
+    rollDie: sequenceRolls([3]),
+  });
+  const result = adjudicate({
+    message: 'End my turn.',
+    worldState: shoved.worldState,
+    characterSheet,
+    rollDie: sequenceRolls([12, 6]),
   });
 
-  const goblin = result.worldState.combat_state.combatants.find((combatant) => combatant.name === 'Goblin');
+  const goblin = shoved.worldState.combat_state.combatants.find((combatant) => combatant.name === 'Goblin');
   assert.equal(result.handled, true);
   assert.equal(goblin.conditions.includes('prone'), true);
-  assert.match(result.reply, /knocked \*\*prone\*\*/);
+  assert.match(shoved.reply, /knocked \*\*prone\*\*/);
   assert.match(result.reply, /disadvantage: Prone on attacker/);
 });
 
@@ -1538,7 +1727,7 @@ test('selected Graze mastery applies through the referee attack loop on a miss',
 });
 
 test('selected Sap mastery gives the enemy next attack disadvantage and then clears', () => {
-  const result = adjudicate({
+  const attacked = adjudicate({
     message: 'Attack the Cultist with my longsword.',
     worldState: worldState({
       combat_state: {
@@ -1561,12 +1750,18 @@ test('selected Sap mastery gives the enemy next attack disadvantage and then cle
         ],
       },
     },
-    rollDie: sequenceRolls([10, 3, 18, 2]),
+    rollDie: sequenceRolls([10, 3]),
+  });
+  const result = adjudicate({
+    message: 'End my turn.',
+    worldState: attacked.worldState,
+    characterSheet,
+    rollDie: sequenceRolls([18, 2]),
   });
   const cultist = result.worldState.combat_state.combatants.find((entry) => entry.name === 'Cultist');
 
   assert.equal(cultist.conditions.includes('sapped'), false);
-  assert.match(result.reply, /Sap mastery/);
+  assert.match(attacked.reply, /Sap mastery/);
   assert.match(result.reply, /disadvantage: Sapped on attacker/);
 });
 

@@ -7,7 +7,9 @@ const assert = require('node:assert/strict');
 
 const {
   beginPlayerTurn,
+  continuePlayerTurn,
   grantMovement,
+  setTurnFlag,
   spendTurnResource,
   spendMovement,
   getSpellActionResource,
@@ -81,6 +83,25 @@ test('movement grants add Dash distance without consuming the action', () => {
   assert.equal(dashed.ok, true);
   assert.equal(dashed.worldState.combat_state.turn_resources.movement_remaining, 60);
   assert.equal(dashed.worldState.combat_state.turn_resources.action_available, true);
+});
+
+test('turn flags persist until the next player turn reset', () => {
+  const started = beginPlayerTurn(combatWorld(), characterSheet);
+  const flagged = setTurnFlag(started, 'dodging', true, characterSheet);
+  const reset = beginPlayerTurn(flagged, characterSheet);
+
+  assert.equal(flagged.combat_state.turn_resources.dodging, true);
+  assert.equal(reset.combat_state.turn_resources.dodging, undefined);
+});
+
+test('combat continuation reports the remaining turn resources', () => {
+  const spent = spendTurnResource(beginPlayerTurn(combatWorld(), characterSheet), 'action', 'Attack', characterSheet);
+  const continued = continuePlayerTurn(spent.worldState, 'Attack resolved.', characterSheet);
+
+  assert.equal(continued.worldState.combat_state.turn_resources.action_available, false);
+  assert.match(continued.reply, /Your turn remains open/);
+  assert.match(continued.reply, /Bonus Action, Reaction, 30 ft movement/);
+  assert.match(continued.reply, /end turn/);
 });
 
 test('spell casting times map to combat resources', () => {

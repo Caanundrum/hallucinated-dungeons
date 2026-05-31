@@ -12,7 +12,7 @@ test('builds a machine-readable coverage matrix for all exposed content catalogs
   const content = getContentBundle();
   const matrix = buildRulesCoverageMatrix({ content });
 
-  assert.equal(matrix.version, '4C.6-H10');
+  assert.equal(matrix.version, '4C.6-H11');
   assert.equal(matrix.sections.classes.entries.length, content.classes.length);
   assert.equal(matrix.sections.species.entries.length, content.species.length);
   assert.equal(matrix.sections.origin_feats.entries.length, content.feats.length);

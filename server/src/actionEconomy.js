@@ -152,6 +152,35 @@ function grantMovement(worldState = {}, feet, label = 'Dash', characterSheet = {
   };
 }
 
+function setTurnFlag(worldState = {}, flag, value = true, characterSheet = {}) {
+  if (!flag || !worldState.combat_state?.active) return worldState;
+
+  const readyState = ensureTurnResources(worldState, characterSheet);
+  return {
+    ...readyState,
+    combat_state: {
+      ...readyState.combat_state,
+      turn_resources: {
+        ...readyState.combat_state.turn_resources,
+        [flag]: value,
+      },
+    },
+  };
+}
+
+function continuePlayerTurn(worldState = {}, reply = '', characterSheet = {}) {
+  if (!worldState.combat_state?.active || worldState.pending_roll) {
+    return { worldState, reply };
+  }
+
+  const readyState = ensureTurnResources(worldState, characterSheet);
+  const available = describeAvailableResources(readyState.combat_state.turn_resources);
+  return {
+    worldState: readyState,
+    reply: `${reply}\n\n**Your turn remains open.** Available now: ${available}. Use another available option, or say **end turn** when you are finished.`,
+  };
+}
+
 function getSpellActionResource(spell = {}) {
   const castingTime = String(spell.casting_time || '').toLowerCase().trim();
   if (!castingTime) return null;
@@ -193,8 +222,12 @@ function getSpeed(characterSheet = {}, worldState = {}) {
 
 module.exports = {
   beginPlayerTurn,
+  continuePlayerTurn,
+  describeAvailableResources,
+  ensureTurnResources,
   spendTurnResource,
   spendMovement,
   grantMovement,
   getSpellActionResource,
+  setTurnFlag,
 };

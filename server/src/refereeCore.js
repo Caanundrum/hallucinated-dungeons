@@ -14,6 +14,8 @@ const {
 } = require('./spellEffectEngine');
 const {
   beginPlayerTurn,
+  continuePlayerTurn,
+  setTurnFlag,
   spendTurnResource,
 } = require('./actionEconomy');
 const { resolveCreatureTurns } = require('./creatureTurnEngine');
@@ -137,15 +139,15 @@ function adjudicate({ message, worldState = {}, characterSheet = null, currentTu
   }
 
   const featureAction = resolveFeatureAction({ message: text, worldState: state, characterSheet: sheet, rollDie });
-  if (featureAction) return featureAction;
+  if (featureAction) return finishPlayerCombatAction({ result: featureAction, characterSheet: sheet });
 
   const speciesFeatureAction = resolveSpeciesFeatureAction({ message: text, worldState: state, characterSheet: sheet, rollDie });
   if (speciesFeatureAction) {
-    return finishSpeciesFeatureAction({ result: speciesFeatureAction, characterSheet: sheet, rollDie });
+    return finishSpeciesFeatureAction({ result: speciesFeatureAction, characterSheet: sheet });
   }
 
   const originFeatAction = resolveOriginFeatAction({ message: text, worldState: state, characterSheet: sheet, rollDie });
-  if (originFeatAction) return originFeatAction;
+  if (originFeatAction) return finishPlayerCombatAction({ result: originFeatAction, characterSheet: sheet });
 
   if (!state.combat_state?.active && isCombatStarter(text)) {
     const targetIssue = validateCombatStartTarget({ message: text, worldState: state });
@@ -331,7 +333,6 @@ function promptSavingThrow({ intent, worldState, characterSheet, currentTurn = 0
     intent: intent.raw,
     consumes: 'forced_save',
     combat: Boolean(inCombat),
-    ends_turn: false,
     created_turn: currentTurn,
     success_result: `${save.label} succeeds. You resist the immediate danger or reduce its impact as the scene allows.`,
     failure_result: `${save.label} fails. The danger lands cleanly enough to matter.`,
@@ -368,7 +369,6 @@ function promptDeathSave({ worldState, characterSheet = {}, currentTurn = 0 }) {
     reroll_rules: getAutoD20RerollRules(characterSheet),
     consumes: 'death_save',
     combat: true,
-    ends_turn: true,
     created_turn: currentTurn,
   };
 
@@ -426,7 +426,7 @@ function resolvePendingRoll({ message, worldState, characterSheet, rollDie }) {
   }
 
   if (pending.kind === 'skill_check' || pending.kind === 'ability_check' || pending.kind === 'saving_throw') {
-    return resolveCheckRoll({ pending, result, worldState, characterSheet, rollDie });
+    return resolveCheckRoll({ pending, result, worldState, characterSheet });
   }
 
   if (pending.kind === 'death_save') {
@@ -471,7 +471,7 @@ function remindPendingRoll({ worldState }) {
   };
 }
 
-function resolveCheckRoll({ pending, result, worldState, characterSheet, rollDie }) {
+function resolveCheckRoll({ pending, result, worldState, characterSheet }) {
   const margin = result.total - Number(pending.dc || DEFAULT_CHECK_DC);
   const outcome = getRollOutcome({ pending, margin });
   let nextState = {
@@ -493,19 +493,13 @@ function resolveCheckRoll({ pending, result, worldState, characterSheet, rollDie
     nextState = advanced.worldState;
     if (advanced.replySuffix) reply += advanced.replySuffix;
   }
-  if (pending.combat && pending.ends_turn !== false && worldState.combat_state?.active) {
-    const combatResult = advanceEnemyTurns({
-      worldState: nextState,
-      characterSheet,
-      rollDie,
-      playerTurnNote: reply,
-      playerDodging: false,
-    });
+  if (pending.combat && worldState.combat_state?.active) {
+    const continued = continuePlayerTurn(nextState, reply, characterSheet);
     return {
       handled: true,
       logType: 'referee_roll_resolution_combat',
-      worldState: combatResult.worldState,
-      reply: combatResult.reply,
+      worldState: continued.worldState,
+      reply: continued.reply,
     };
   }
 
@@ -1104,14 +1098,13 @@ function resolveCombatAction({ message, intent, worldState, characterSheet, curr
     if (!spent.ok) {
       return { handled: true, logType: 'referee_action_unavailable', worldState: spent.worldState, reply: spent.reply };
     }
-    const result = advanceEnemyTurns({
-      worldState: spent.worldState,
+    const dodging = setTurnFlag(spent.worldState, 'dodging', true, characterSheet);
+    const continued = continuePlayerTurn(
+      dodging,
+      'You take the **Dodge** action, making yourself much harder to hit until your next turn.',
       characterSheet,
-      rollDie,
-      playerTurnNote: 'You take the **Dodge** action, making yourself much harder to hit until your next turn.',
-      playerDodging: true,
-    });
-    return { handled: true, logType: 'referee_combat_dodge', ...result };
+    );
+    return { handled: true, logType: 'referee_combat_dodge', ...continued };
   }
 
   if (/\b(?:disengage|carefully withdraw|withdraw safely)\b/i.test(message)) {
@@ -1486,18 +1479,12 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
   if (consumeEffectIds.length) {
     nextState = consumeActiveEffects(nextState, consumeEffectIds, characterSheet);
   }
-  const enemyResult = advanceEnemyTurns({
-    worldState: nextState,
-    characterSheet,
-    rollDie,
-    playerTurnNote: lines.join('\n\n'),
-    playerDodging: false,
-  });
+  const continued = continuePlayerTurn(nextState, lines.join('\n\n'), characterSheet);
   return {
     handled: true,
     logType: 'referee_combat_attack',
-    worldState: enemyResult.worldState,
-    reply: enemyResult.reply,
+    worldState: continued.worldState,
+    reply: continued.reply,
   };
 }
 
@@ -1705,17 +1692,11 @@ function resolveCombatManeuver({ maneuver, message, worldState, characterSheet, 
     lines.push(`${target.name} is shoved 5 feet, assuming there is room in the scene for that movement.`);
   }
 
-  const result = advanceEnemyTurns({
-    worldState: {
-      ...spent.worldState,
-      combat_state: combat,
-    },
-    characterSheet,
-    rollDie,
-    playerTurnNote: lines.join('\n\n'),
-    playerDodging: false,
-  });
-  return { handled: true, logType: `referee_combat_${maneuver.type}`, ...result };
+  const continued = continuePlayerTurn({
+    ...spent.worldState,
+    combat_state: combat,
+  }, lines.join('\n\n'), characterSheet);
+  return { handled: true, logType: `referee_combat_${maneuver.type}`, ...continued };
 }
 
 function hasFreeHandForGrapple(characterSheet = {}) {
@@ -1769,7 +1750,8 @@ function findCombatTarget(combat = {}, message = '') {
   }) || null;
 }
 
-function advanceEnemyTurns({ worldState, characterSheet, rollDie = defaultRollDie, playerTurnNote, playerDodging = false, advanceRound = true }) {
+function advanceEnemyTurns({ worldState, characterSheet, rollDie = defaultRollDie, playerTurnNote, playerDodging = null, advanceRound = true }) {
+  const defenderDodging = playerDodging ?? Boolean(worldState.combat_state?.turn_resources?.dodging);
   const playerTurnEnded = {
     ...worldState,
     combat_state: expireGiantAncestryEffects(expireMasteryEffects(worldState.combat_state, {
@@ -1784,7 +1766,7 @@ function advanceEnemyTurns({ worldState, characterSheet, rollDie = defaultRollDi
     worldState: playerTurnEnded,
     characterSheet,
     rollDie,
-    playerDodging,
+    playerDodging: defenderDodging,
     advanceRound,
   });
   const combat = expireGiantAncestryEffects(expireMasteryEffects(creatureTurns.combat, {
@@ -1854,8 +1836,8 @@ function advanceEnemyTurns({ worldState, characterSheet, rollDie = defaultRollDi
   };
 }
 
-function finishSpeciesFeatureAction({ result, characterSheet, rollDie = defaultRollDie }) {
-  if (!result?.consumesTurn || !result.worldState?.combat_state?.active) return result;
+function finishSpeciesFeatureAction({ result, characterSheet }) {
+  if (!result?.worldState?.combat_state?.active) return result;
   const hasLivingEnemy = (result.worldState.combat_state.combatants || [])
     .some((combatant) => !combatant.is_player && Number(combatant.hp || 0) > 0);
   if (!hasLivingEnemy) {
@@ -1868,17 +1850,16 @@ function finishSpeciesFeatureAction({ result, characterSheet, rollDie = defaultR
       reply: `${result.reply}\n\nThe last enemy falls. **Combat ends.**`,
     };
   }
-  const creatureTurns = advanceEnemyTurns({
-    worldState: result.worldState,
-    characterSheet,
-    rollDie,
-    playerTurnNote: result.reply,
-    playerDodging: false,
-  });
+  return finishPlayerCombatAction({ result, characterSheet });
+}
+
+function finishPlayerCombatAction({ result, characterSheet = {} }) {
+  if (!result?.worldState?.combat_state?.active || result.worldState.pending_roll) return result;
+  const continued = continuePlayerTurn(result.worldState, result.reply, characterSheet);
   return {
     ...result,
-    worldState: creatureTurns.worldState,
-    reply: creatureTurns.reply,
+    worldState: continued.worldState,
+    reply: continued.reply,
   };
 }
 
@@ -1930,7 +1911,6 @@ function buildConcentrationPrompt({ worldState, characterSheet = {}, damageEvent
     effect_names: effectNames,
     consumes: 'forced_save',
     combat: true,
-    ends_turn: false,
   };
   return {
     pendingRoll,
@@ -2397,5 +2377,6 @@ module.exports = {
   resolveRefereeAction: adjudicate,
   advanceEnemyTurns,
   advanceNarrativeTime,
+  finishPlayerCombatAction,
   rollDamage,
 };

@@ -1,5 +1,5 @@
 {
-  "version": "4C.6-H10",
+  "version": "4C.6-H11",
   "status_definitions": {
     "implemented": "Exposed and mechanically enforced for the current supported level/scope.",
     "partial": "Exposed and partially enforced, but missing at least one meaningful rules interaction.",
@@ -7,7 +7,7 @@
     "not_exposed": "Tracked for future completeness, but not currently exposed to public play."
   },
   "actions": {
-    "attack": { "status": "implemented", "implementation": "Server-owned combat attack resolution exists." },
+    "attack": { "status": "implemented", "implementation": "Server-owned combat attack resolution spends the Action while leaving the rest of the player turn available." },
     "dash": { "status": "implemented", "implementation": "Dash spends an Action and grants extra movement equal to Speed for the current turn." },
     "disengage": { "status": "implemented", "implementation": "Disengage spends an Action and suppresses Opportunity Attacks for the rest of the current turn." },
     "dodge": { "status": "implemented", "implementation": "Dodge can impose disadvantage on creature attacks." },
@@ -47,6 +47,7 @@
     "bonus_action": "implemented",
     "reaction": "partial",
     "movement": "partial",
+    "turn_lifecycle": "implemented",
     "spell_slots": "implemented",
     "limited_spell_uses": "partial",
     "hit_dice": "partial",

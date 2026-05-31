@@ -20,7 +20,7 @@ const { getContentBundle } = require('./contentData');
 const { validateCharacter } = require('./characterValidator');
 const { checkSpatialAction } = require('./spatialGuard');
 const { resolvePreNarration } = require('./mechanicsResolver');
-const { resolveRefereeAction, advanceEnemyTurns, advanceNarrativeTime } = require('./refereeCore');
+const { resolveRefereeAction, advanceNarrativeTime, finishPlayerCombatAction } = require('./refereeCore');
 const { filterActivePartyPresenceRows } = require('./partyPresence');
 const {
   resolveSpellCast,
@@ -475,14 +475,17 @@ async function handleDeterministicSpellAction(socket, sessionId, message) {
   if (spellOutcome?.handled) {
     let finalWorldState = spellOutcome.worldState;
     let reply = spellOutcome.reply;
-    if (spellOutcome.consumesTurn && finalWorldState.combat_state?.active) {
-      const enemyTurns = advanceEnemyTurns({
-        worldState: finalWorldState,
+    if (finalWorldState.combat_state?.active) {
+      const continued = finishPlayerCombatAction({
+        result: {
+          ...spellOutcome,
+          worldState: finalWorldState,
+          reply,
+        },
         characterSheet: saved.character_sheet,
-        playerTurnNote: reply,
       });
-      finalWorldState = enemyTurns.worldState;
-      reply = enemyTurns.reply;
+      finalWorldState = continued.worldState;
+      reply = continued.reply;
     }
 
     const currentTurn = currentWorldState.session_turn ?? 0;
