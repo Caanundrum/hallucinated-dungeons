@@ -1916,3 +1916,61 @@ test('blocked Light ammunition follow-up leaves the Bonus Action available', () 
   assert.equal(result.worldState.combat_state.turn_resources.bonus_action_available, true);
   assert.match(result.reply, /Light property.*needs a free hand/s);
 });
+
+test("declared Fire's Burn applies through the referee attack loop", () => {
+  const result = adjudicate({
+    message: "Attack the Cultist with my longsword and use Fire's Burn.",
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', initiative: 18, hp: 14, max_hp: 14, ac: 16, is_player: true },
+          { name: 'Cultist', initiative: 8, hp: 8, max_hp: 8, ac: 10, is_player: false },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      identity: { ...characterSheet.identity, name: 'Ari', species: 'goliath' },
+      species_choices: { giant_ancestry: 'fire' },
+      derived_stats: {
+        ...characterSheet.derived_stats,
+        proficiency_bonus: 2,
+        attack_breakdowns: [
+          { weapon_id: 'longsword', name: 'Longsword', ability: 'str', attack_total: 5, damage_formula: '1d8 + 3' },
+        ],
+      },
+    },
+    rollDie: sequenceRolls([10, 1, 4]),
+  });
+
+  assert.equal(result.worldState.combat_state, null);
+  assert.equal(result.worldState.player_stats.resources.giant_ancestry.remaining, 1);
+  assert.match(result.reply, /Fire's Burn/);
+});
+
+test("declared Fire's Burn on a spell attack stays available to the spell resolver", () => {
+  const result = adjudicate({
+    message: "I cast Fire Bolt at the Cultist and use Fire's Burn.",
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', initiative: 18, hp: 14, max_hp: 14, ac: 16, is_player: true },
+          { name: 'Cultist', initiative: 8, hp: 8, max_hp: 8, ac: 10, is_player: false },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      identity: { ...characterSheet.identity, name: 'Ari', species: 'goliath' },
+      species_choices: { giant_ancestry: 'fire' },
+    },
+  });
+
+  assert.equal(result, null);
+});

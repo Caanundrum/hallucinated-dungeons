@@ -271,3 +271,24 @@ test('Slow and Vex do not apply when a hit deals no damage', () => {
   assert.equal(slowed.speed_penalty, undefined);
   assert.deepEqual(getWeaponMasteryAdvantageSources(vexed), []);
 });
+
+test('expiring Slow mastery preserves an overlapping ancestry Speed penalty', () => {
+  const target = {
+    name: 'Cultist',
+    hp: 8,
+    conditions: [],
+    speed_penalty: 10,
+    ancestry_effects: [{ type: 'frost_chill', speed_penalty: 10, expires: 'start_of_player_turn', expires_round: 3 }],
+  };
+  applyWeaponMasteryOnHit({
+    attack: attack('whip'),
+    target,
+    combat: { round: 1 },
+    characterSheet: sheet('whip', 'slow'),
+    damageDealt: 4,
+  });
+  const combat = expireMasteryEffects({ combatants: [target] }, { timing: 'start_of_player_turn', round: 2 });
+
+  assert.equal(target.speed_penalty, 20);
+  assert.equal(combat.combatants[0].speed_penalty, 10);
+});

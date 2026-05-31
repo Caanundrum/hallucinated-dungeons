@@ -22,6 +22,7 @@ const {
   applyLuckyToImmediateD20,
   hasOriginFeat,
 } = require('./originFeatEngine');
+const { applyGiantAncestryOnHit } = require('./giantAncestryEngine');
 
 const CONCENTRATION_DURATIONS = {
   bless: 'Concentration, up to 1 minute',
@@ -142,7 +143,8 @@ function resolveSpellOutcome({ spellCast, characterSheet, worldState = {}, rollD
 function resolveSpellAttack({ spell, rule, characterSheet, worldState, rollDie }) {
   const context = getSpellTargetContext({ spell, spellCastMessage: worldState.__spell_message, worldState, characterSheet });
   if (!context?.target) return noSpellTarget(worldState, spell);
-  const { combat, target, activeCombat } = context;
+  let { combat, target } = context;
+  const { activeCombat } = context;
 
   const attackBonus = Number(characterSheet?.derived_stats?.spell_attack_bonus || 0);
   const attacker = getPlayerCombatant(combat, characterSheet, worldState);
@@ -173,12 +175,28 @@ function resolveSpellAttack({ spell, rule, characterSheet, worldState, rollDie }
     lines.push(`Spell attack has ${attackMode} from ${formatList(lucky.sources)}.`);
   }
   if (lucky.note) lines.push(lucky.note);
+  let outcomeWorldState = lucky.worldState;
 
   if (hit) {
     const damage = rollFormula(rule.damage, rollDie, { crit: criticalHit });
     const applied = applyDamage({ target, amount: damage.total, damageType: rule.damage_type, source: spell.name });
     Object.assign(target, applied.target);
     lines.push(`${criticalHit ? '**Critical hit.** ' : ''}Hit for ${applied.amount} ${rule.damage_type} damage${formatDamageAdjustment(applied.adjustment)}. ${target.name}: (${applied.beforeHp} -> ${target.hp} HP).`);
+    const ancestry = applyGiantAncestryOnHit({
+      message: worldState.__spell_message,
+      target,
+      combat,
+      worldState: { ...outcomeWorldState, combat_state: combat },
+      characterSheet,
+      damageDealt: applied.amount,
+      crit: criticalHit,
+      rollDie,
+    });
+    combat = ancestry.combat;
+    outcomeWorldState = activeCombat
+      ? ancestry.worldState
+      : { ...ancestry.worldState, combat_state: lucky.worldState.combat_state || null };
+    lines.push(...ancestry.lines);
     if (rule.condition_on_hit && Number(target.hp) > 0) {
       target.conditions = addCondition(target.conditions, rule.condition_on_hit);
     }
@@ -189,7 +207,7 @@ function resolveSpellAttack({ spell, rule, characterSheet, worldState, rollDie }
     lines.push('Miss.');
   }
 
-  return finishSpellAction({ spell, worldState: lucky.worldState, combat, lines, activeCombat });
+  return finishSpellAction({ spell, worldState: outcomeWorldState, combat, lines, activeCombat });
 }
 
 function resolveAutomaticDamageSpell({ spell, rule, worldState, rollDie }) {

@@ -140,6 +140,7 @@ test('creature damage applies player resistance and temporary HP through shared 
 
   assert.equal(result.player.temp_hp, 0);
   assert.equal(result.player.hp, 12);
+  assert.equal(result.damageEvents[0].amount, 3);
   assert.match(result.lines[0], /fire resistance/);
 });
 
@@ -219,4 +220,74 @@ test('primed Lucky defense imposes disadvantage on one creature attack and is co
   assert.equal(result.player.hp, 12);
   assert.equal(result.worldState.player_stats.lucky_defense_primed, false);
   assert.match(result.lines[0], /disadvantage: Lucky/);
+});
+
+test("primed Stone's Endurance reduces creature damage through the Reaction pipeline", () => {
+  const result = resolveCreatureTurns({
+    worldState: {
+      player_stats: {
+        hp: 12,
+        max_hp: 12,
+        armor_class: 10,
+        giant_ancestry_reaction: { ancestry: 'stone', name: "Stone's Endurance", primed: true },
+      },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', initiative: 18, hp: 12, max_hp: 12, ac: 10, is_player: true, conditions: [] },
+          combatant('Cultist', 8),
+        ],
+      },
+    },
+    characterSheet: {
+      ...characterSheet,
+      identity: { name: 'Ari', species: 'goliath' },
+      species_choices: { giant_ancestry: 'stone' },
+      abilities: { modifiers: { con: 2 } },
+      derived_stats: { ...characterSheet.derived_stats, proficiency_bonus: 2 },
+    },
+    rollDie: sequenceRolls([12, 4, 3]),
+  });
+
+  assert.equal(result.player.hp, 12);
+  assert.equal(result.worldState.player_stats.resources.giant_ancestry.remaining, 1);
+  assert.equal(result.worldState.player_stats.giant_ancestry_reaction, null);
+  assert.match(result.lines.join('\n'), /Stone's Endurance/);
+});
+
+test("primed Storm's Thunder retaliates during the triggering creature turn", () => {
+  const result = resolveCreatureTurns({
+    worldState: {
+      player_stats: {
+        hp: 12,
+        max_hp: 12,
+        armor_class: 10,
+        giant_ancestry_reaction: { ancestry: 'storm', name: "Storm's Thunder", primed: true },
+      },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', initiative: 18, hp: 12, max_hp: 12, ac: 10, is_player: true, conditions: [] },
+          combatant('Cultist', 8),
+        ],
+      },
+    },
+    characterSheet: {
+      ...characterSheet,
+      identity: { name: 'Ari', species: 'goliath' },
+      species_choices: { giant_ancestry: 'storm' },
+      derived_stats: { ...characterSheet.derived_stats, proficiency_bonus: 2 },
+    },
+    rollDie: sequenceRolls([12, 4, 8]),
+  });
+  const cultist = result.combat.combatants.find((entry) => entry.name === 'Cultist');
+
+  assert.equal(result.player.hp, 7);
+  assert.equal(cultist.hp, 0);
+  assert.equal(result.worldState.player_stats.resources.giant_ancestry.remaining, 1);
+  assert.match(result.lines.join('\n'), /Storm's Thunder/);
 });

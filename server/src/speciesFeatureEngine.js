@@ -14,8 +14,12 @@ const {
   spendResource,
 } = require('./resourceEngine');
 const { applyActiveEffectsToWorldState } = require('./spellEffectEngine');
+const { resolveGiantAncestryAction } = require('./giantAncestryEngine');
 
 function resolveSpeciesFeatureAction({ message = '', worldState = {}, characterSheet = {}, rollDie = defaultRollDie } = {}) {
+  const giantAncestry = resolveGiantAncestryAction({ message, worldState, characterSheet });
+  if (giantAncestry) return giantAncestry;
+
   const intent = getSpeciesFeatureIntent(message);
   if (!intent) return null;
 

@@ -79,6 +79,10 @@ const {
   recoverSpentAmmunition,
   spendAmmunitionForAttack,
 } = require('./ammunitionEngine');
+const {
+  applyGiantAncestryOnHit,
+  expireGiantAncestryEffects,
+} = require('./giantAncestryEngine');
 
 const DEFAULT_CHECK_DC = 15;
 
@@ -1287,6 +1291,20 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
       if (Number(target.hp) > 0) lines.push(`${target.name} wakes as the damage lands. Extremely rude alarm clock, but effective.`);
     }
     lines.push(...applyWeaponMasteryOnHit({ attack, target, combat, characterSheet, damageDealt: totalDamage, rollDie }).lines);
+    const ancestry = applyGiantAncestryOnHit({
+      message,
+      target,
+      combat,
+      worldState: { ...attackState, combat_state: combat },
+      characterSheet,
+      damageDealt: totalDamage,
+      crit: isCrit,
+      rollDie,
+    });
+    combat = ancestry.combat;
+    attackState = ancestry.worldState;
+    target = findCombatTarget(combat, target.name) || target;
+    lines.push(...ancestry.lines);
     cleaveExtra = getCleaveExtraAttack({ characterSheet, attack, primaryTarget: target, combat, message });
   } else if (criticalMiss) {
     lines.push('**Critical miss.** The attack fails no matter how pretty the math looked in the margins.');
@@ -1540,6 +1558,22 @@ function resolveExtraWeaponAttackRoll({
       if (Number(target.hp) > 0) lines.push(`${target.name} wakes as the damage lands. Apparently paired weapons are not a soothing bedtime routine.`);
     }
     if (applyMastery) lines.push(...applyWeaponMasteryOnHit({ attack, target, combat, characterSheet, damageDealt: totalDamage, rollDie }).lines);
+    if (includeDamageRiders) {
+      const ancestry = applyGiantAncestryOnHit({
+        message,
+        target,
+        combat,
+        worldState,
+        characterSheet,
+        damageDealt: totalDamage,
+        crit: isCrit,
+        rollDie,
+      });
+      combat = ancestry.combat;
+      worldState = ancestry.worldState;
+      target = findCombatTarget(combat, target.name) || target;
+      lines.push(...ancestry.lines);
+    }
   } else if (criticalMiss) {
     lines.push(`**Critical miss.** The ${attackLabel} fails no matter how enthusiastically it joined the meeting.`);
     if (applyMastery) lines.push(...applyWeaponMasteryOnMiss({ attack, target, characterSheet }).lines);
@@ -1681,7 +1715,10 @@ function findCombatTarget(combat = {}, message = '') {
 function advanceEnemyTurns({ worldState, characterSheet, rollDie = defaultRollDie, playerTurnNote, playerDodging = false, advanceRound = true }) {
   const playerTurnEnded = {
     ...worldState,
-    combat_state: expireMasteryEffects(worldState.combat_state, {
+    combat_state: expireGiantAncestryEffects(expireMasteryEffects(worldState.combat_state, {
+      timing: 'end_of_player_turn',
+      round: worldState.combat_state?.round,
+    }), {
       timing: 'end_of_player_turn',
       round: worldState.combat_state?.round,
     }),
@@ -1693,7 +1730,10 @@ function advanceEnemyTurns({ worldState, characterSheet, rollDie = defaultRollDi
     playerDodging,
     advanceRound,
   });
-  const combat = expireMasteryEffects(creatureTurns.combat, {
+  const combat = expireGiantAncestryEffects(expireMasteryEffects(creatureTurns.combat, {
+    timing: 'start_of_player_turn',
+    round: creatureTurns.combat.round,
+  }), {
     timing: 'start_of_player_turn',
     round: creatureTurns.combat.round,
   });

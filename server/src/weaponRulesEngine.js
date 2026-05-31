@@ -129,7 +129,7 @@ function applyWeaponMasteryOnHit({
       expires_round: Number(combat.round || 1) + 1,
     });
     target.conditions = addCondition(target.conditions, 'slowed');
-    target.speed_penalty = Math.max(Number(target.speed_penalty || 0), 10);
+    target.speed_penalty = getAncestrySpeedPenalty(target) + 10;
     return { lines: [`**Slow mastery:** ${target.name}'s Speed is reduced by 10 feet until the start of your next turn.`], mastery };
   }
 
@@ -298,13 +298,18 @@ function syncMasteryEffects(target = {}, effects = []) {
   if (removedTypes.has('sap')) next.conditions = removeCondition(next.conditions, 'sapped');
   if (removedTypes.has('slow')) {
     next.conditions = removeCondition(next.conditions, 'slowed');
-    next.speed_penalty = 0;
+    next.speed_penalty = getAncestrySpeedPenalty(next);
   }
   return next;
 }
 
 function getMasteryEffects(target = {}) {
   return Array.isArray(target.mastery_effects) ? target.mastery_effects : [];
+}
+
+function getAncestrySpeedPenalty(target = {}) {
+  return (target.ancestry_effects || [])
+    .reduce((total, effect) => total + Number(effect.speed_penalty || 0), 0);
 }
 
 function addCondition(conditions = [], condition) {

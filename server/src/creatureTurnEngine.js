@@ -17,6 +17,10 @@ const {
 } = require('./resourceEngine');
 const { consumeSapAfterAttack } = require('./weaponRulesEngine');
 const { getRuntimeArmorClass } = require('./fightingStyleEngine');
+const {
+  applyPrimedGiantAncestryDamageReduction,
+  applyPrimedGiantAncestryRetaliation,
+} = require('./giantAncestryEngine');
 
 function resolveCreatureTurns({
   worldState = {},
@@ -138,22 +142,36 @@ function resolveCreatureAction({ actor, player, characterSheet, worldState, roll
   if (!criticalMiss && (criticalHit || attackTotal >= ac)) {
     const damage = rollDamage(attack.damage_formula || '1d6+1', rollDie, { crit: criticalHit });
     const before = Number(player.hp ?? getCurrentHp(characterSheet, worldState));
+    const reduction = applyPrimedGiantAncestryDamageReduction({
+      player,
+      worldState: nextWorldState,
+      characterSheet,
+      incomingDamage: damage.total,
+      rollDie,
+    });
     const applied = applyDamageToPlayer({
       player,
       characterSheet,
-      worldState,
-      damage: damage.total,
+      worldState: reduction.worldState,
+      damage: reduction.incomingDamage,
       damageType: attack.damage_type || attack.damageType || null,
+    });
+    const thunder = applyPrimedGiantAncestryRetaliation({
+      actor,
+      worldState: reduction.worldState,
+      characterSheet,
+      damageTaken: applied.amount,
+      rollDie,
     });
     const endurance = applyRelentlessEndurance({
       player: applied.player,
       characterSheet,
-      worldState,
+      worldState: thunder.worldState,
     });
     const retaliation = getMeleeRetaliation(worldState, applied.beforeTempHp);
     const nextActor = retaliation
-      ? { ...actor, hp: Math.max(0, Number(actor.hp || 0) - retaliation.damage) }
-      : actor;
+      ? { ...thunder.actor, hp: Math.max(0, Number(thunder.actor.hp || 0) - retaliation.damage) }
+      : thunder.actor;
     const resolvedActor = consumeSapAfterAttack(nextActor);
     const retaliationLine = retaliation
       ? ` ${retaliation.label} lashes back for ${retaliation.damage} ${retaliation.damageType} damage. ${actor.name}: (${actor.hp} -> ${nextActor.hp} HP).`
@@ -161,18 +179,16 @@ function resolveCreatureAction({ actor, player, characterSheet, worldState, roll
     return {
       actor: resolvedActor,
       player: endurance.player,
-      worldState: endurance.worldState === worldState ? nextWorldState : {
-        ...endurance.worldState,
-        player_stats: {
-          ...(endurance.worldState.player_stats || {}),
-          lucky_defense_primed: false,
-        },
-      },
-      lines: [`${actor.name} uses ${attack.name}: rolls ${rollText} vs AC ${ac}${modeText}. ${criticalHit ? '**Critical hit.** ' : ''}Hit for ${applied.amount} damage${formatDamageAdjustment(applied.adjustment)}${applied.absorbed ? ` (${applied.absorbed} absorbed by temporary HP)` : ''}. ${player.name}: (${before} -> ${endurance.player.hp} HP).${endurance.line}${retaliationLine}`],
+      worldState: endurance.worldState,
+      lines: [
+        `${actor.name} uses ${attack.name}: rolls ${rollText} vs AC ${ac}${modeText}. ${criticalHit ? '**Critical hit.** ' : ''}Hit for ${applied.amount} damage${formatDamageAdjustment(applied.adjustment)}${applied.absorbed ? ` (${applied.absorbed} absorbed by temporary HP)` : ''}. ${player.name}: (${before} -> ${endurance.player.hp} HP).${endurance.line}${retaliationLine}`,
+        ...reduction.lines,
+        ...thunder.lines,
+      ],
       damageEvents: [{
         target: 'player',
         source: actor.name,
-        amount: applied.hpDamage,
+        amount: applied.amount,
       }],
     };
   }

@@ -388,6 +388,60 @@ test('Fire Bolt uses spell attack bonus and can consume a combat turn', () => {
   assert.match(outcome.reply, /12\+5 = 17 vs AC 12/);
 });
 
+test("Fire's Burn can ride a damaging spell attack hit", () => {
+  const sheet = casterSheet({
+    identity: { name: 'Mira', level: 1, class: 'wizard', class_name: 'Wizard', species: 'goliath' },
+    species_choices: { giant_ancestry: 'fire' },
+  });
+  const cast = resolveSpellCast({
+    message: "I cast Fire Bolt at the skeleton and use Fire's Burn.",
+    content,
+    characterSheet: sheet,
+    worldState: combatWorld(),
+  });
+  const outcome = resolveSpellOutcome({
+    spellCast: cast,
+    characterSheet: cast.characterSheet,
+    worldState: cast.worldState,
+    rollDie: sequenceRolls([12, 2, 6]),
+  });
+  const target = outcome.worldState.combat_state.combatants.find((combatant) => combatant.name === 'Skeleton');
+
+  assert.equal(target.hp, 2);
+  assert.equal(outcome.worldState.player_stats.resources.giant_ancestry.remaining, 1);
+  assert.match(outcome.reply, /Fire's Burn/);
+});
+
+test("scene Fire's Burn persists its target result without saving a synthetic combat shell", () => {
+  const sheet = casterSheet({
+    identity: { name: 'Mira', level: 1, class: 'wizard', class_name: 'Wizard', species: 'goliath' },
+    species_choices: { giant_ancestry: 'fire' },
+  });
+  const cast = resolveSpellCast({
+    message: "I cast Fire Bolt at the training dummy and use Fire's Burn.",
+    content,
+    characterSheet: sheet,
+    worldState: worldState({
+      scene_presence: {
+        exact_location: 'practice yard',
+        present_npcs: ['training dummy'],
+        present_objects: [],
+        available_exits: ['gate'],
+      },
+    }),
+  });
+  const outcome = resolveSpellOutcome({
+    spellCast: cast,
+    characterSheet: cast.characterSheet,
+    worldState: cast.worldState,
+    rollDie: sequenceRolls([12, 2, 6]),
+  });
+
+  assert.equal(outcome.worldState.combat_state, null);
+  assert.equal(outcome.worldState.scene_target_states[0].hp, 0);
+  assert.equal(outcome.worldState.player_stats.resources.giant_ancestry.remaining, 1);
+});
+
 test('Lucky can be spent explicitly on an immediate spell attack roll', () => {
   const sheet = casterSheet({
     origin: { background_feat: 'lucky' },
