@@ -91,6 +91,51 @@ test('condition modes are stored on pending checks and saves for the server roll
   assert.match(restrainedSave.reply, /Restrained condition/);
 });
 
+test('species save advantages enter the authoritative pending-roll pipeline', () => {
+  const result = adjudicate({
+    message: 'I resist the spell with a wisdom save.',
+    worldState: worldState(),
+    characterSheet: {
+      ...characterSheet,
+      identity: { ...characterSheet.identity, species: 'gnome' },
+    },
+  });
+
+  assert.equal(result.worldState.pending_roll.advantage_mode, 'advantage');
+  assert.deepEqual(result.worldState.pending_roll.advantage_sources, ['Gnomish Cunning']);
+  assert.match(result.reply, /Gnomish Cunning/);
+});
+
+test('Dragonborn Breath Weapon resolves through the referee and advances the combat round', () => {
+  const result = adjudicate({
+    message: 'Use Breath Weapon on the Cultist.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', initiative: 18, hp: 12, max_hp: 12, ac: 16, is_player: true, conditions: [] },
+          { name: 'Cultist', initiative: 8, hp: 8, max_hp: 8, ac: 12, is_player: false, conditions: [], saves: { dex: 0 }, attack: { name: 'dagger', attack_bonus: 2, damage_formula: '1d4+1' } },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      identity: { ...characterSheet.identity, species: 'dragonborn' },
+      species_choices: { draconic_ancestry: 'blue' },
+    },
+    rollDie: sequenceRolls([4, 7, 1]),
+  });
+  const cultist = result.worldState.combat_state.combatants.find((entry) => entry.name === 'Cultist');
+
+  assert.equal(cultist.hp, 1);
+  assert.equal(result.worldState.player_stats.resources.breath_weapon.remaining, 1);
+  assert.equal(result.worldState.combat_state.round, 2);
+  assert.match(result.reply, /7 lightning damage/);
+  assert.match(result.reply, /Round 2 begins/);
+});
+
 test('ignores player-authored difficulty and DC claims', () => {
   const result = adjudicate({
     message: "I easily study the clerk's face, DC 5.",

@@ -151,3 +151,30 @@ test('short and long rests recover class feature resources', () => {
   assert.match(shortRest.notes.join(' '), /Second Wind recovers 1 use/);
   assert.equal(longRest.resources.rage.remaining, 2);
 });
+
+test('builds proficiency-scaled species resources and restores short-rest species uses on either rest', () => {
+  const orc = {
+    identity: { species: 'orc', level: 1 },
+    derived_stats: { proficiency_bonus: 2 },
+  };
+  const resources = buildResourceState(orc);
+  assert.equal(resources.adrenaline_rush.max, 2);
+  assert.equal(resources.relentless_endurance.max, 1);
+
+  const spentWorld = {
+    player_stats: {
+      resources: {
+        adrenaline_rush: { name: 'Adrenaline Rush', remaining: 0, max: 2, reset: 'short_rest' },
+      },
+    },
+  };
+  assert.equal(completeShortRestResources({ characterSheet: orc, worldState: spentWorld }).resources.adrenaline_rush.remaining, 2);
+  assert.equal(completeLongRestResources({ characterSheet: orc, worldState: spentWorld }).resources.adrenaline_rush.remaining, 2);
+});
+
+test('builds proficiency-scaled Dragonborn, Dwarf, and Goliath species resources', () => {
+  const derived_stats = { proficiency_bonus: 2 };
+  assert.equal(buildResourceState({ identity: { species: 'dragonborn' }, derived_stats }).breath_weapon.max, 2);
+  assert.equal(buildResourceState({ identity: { species: 'dwarf' }, derived_stats }).stonecunning.max, 2);
+  assert.equal(buildResourceState({ identity: { species: 'goliath' }, derived_stats }).giant_ancestry.max, 2);
+});

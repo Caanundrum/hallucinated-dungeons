@@ -40,6 +40,10 @@ const {
   resolveSavingThrow,
 } = require('./conditionEngine');
 const { resolveFeatureAction } = require('./classFeatureEngine');
+const {
+  getSpeciesD20AdvantageSources,
+  resolveSpeciesFeatureAction,
+} = require('./speciesFeatureEngine');
 
 const DEFAULT_CHECK_DC = 15;
 
@@ -86,6 +90,11 @@ function adjudicate({ message, worldState = {}, characterSheet = null, currentTu
 
   const featureAction = resolveFeatureAction({ message: text, worldState: state, characterSheet: sheet, rollDie });
   if (featureAction) return featureAction;
+
+  const speciesFeatureAction = resolveSpeciesFeatureAction({ message: text, worldState: state, characterSheet: sheet, rollDie });
+  if (speciesFeatureAction) {
+    return finishSpeciesFeatureAction({ result: speciesFeatureAction, characterSheet: sheet, rollDie });
+  }
 
   if (!state.combat_state?.active && isCombatStarter(text)) {
     const targetIssue = validateCombatStartTarget({ message: text, worldState: state });
@@ -244,8 +253,14 @@ function promptSavingThrow({ intent, worldState, characterSheet, currentTurn = 0
     testType: 'saving_throw',
     ability: save.ability,
   });
-  const advantageMode = combineAdvantageModes(conditionMode, activeAdvantageSources.length ? 'advantage' : null);
-  const advantageSources = [...conditionSources, ...activeAdvantageSources];
+  const speciesAdvantageSources = getSpeciesD20AdvantageSources({
+    characterSheet,
+    testType: 'saving_throw',
+    ability: save.ability,
+    reason: intent.raw,
+  });
+  const advantageMode = combineAdvantageModes(conditionMode, [...activeAdvantageSources, ...speciesAdvantageSources].length ? 'advantage' : null);
+  const advantageSources = [...conditionSources, ...activeAdvantageSources, ...speciesAdvantageSources];
   const pendingRoll = {
     id: `roll_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     kind: 'saving_throw',
@@ -1303,11 +1318,11 @@ function advanceEnemyTurns({ worldState, characterSheet, rollDie = defaultRollDi
   const lines = [playerTurnNote, ...creatureTurns.lines].filter(Boolean);
 
   let nextState = {
-    ...worldState,
+    ...(creatureTurns.worldState || worldState),
     pending_roll: null,
     combat_state: combat,
     player_stats: {
-      ...(worldState.player_stats || {}),
+      ...((creatureTurns.worldState || worldState).player_stats || {}),
       hp: player.hp,
       max_hp: player.max_hp,
       temp_hp: player.temp_hp,
@@ -1355,6 +1370,34 @@ function advanceEnemyTurns({ worldState, characterSheet, rollDie = defaultRollDi
   return {
     worldState: nextState,
     reply: `${lines.join('\n\n')}\n\n${endLine}`,
+  };
+}
+
+function finishSpeciesFeatureAction({ result, characterSheet, rollDie = defaultRollDie }) {
+  if (!result?.consumesTurn || !result.worldState?.combat_state?.active) return result;
+  const hasLivingEnemy = (result.worldState.combat_state.combatants || [])
+    .some((combatant) => !combatant.is_player && Number(combatant.hp || 0) > 0);
+  if (!hasLivingEnemy) {
+    return {
+      ...result,
+      worldState: {
+        ...result.worldState,
+        combat_state: null,
+      },
+      reply: `${result.reply}\n\nThe last enemy falls. **Combat ends.**`,
+    };
+  }
+  const creatureTurns = advanceEnemyTurns({
+    worldState: result.worldState,
+    characterSheet,
+    rollDie,
+    playerTurnNote: result.reply,
+    playerDodging: false,
+  });
+  return {
+    ...result,
+    worldState: creatureTurns.worldState,
+    reply: creatureTurns.reply,
   };
 }
 

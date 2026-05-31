@@ -7,6 +7,7 @@ const assert = require('node:assert/strict');
 
 const {
   beginPlayerTurn,
+  grantMovement,
   spendTurnResource,
   spendMovement,
   getSpellActionResource,
@@ -71,6 +72,15 @@ test('movement spend reduces remaining movement without consuming the action', (
   assert.equal(moved.ok, true);
   assert.equal(moved.worldState.combat_state.turn_resources.movement_remaining, 20);
   assert.equal(moved.worldState.combat_state.turn_resources.action_available, true);
+});
+
+test('movement grants add Dash distance without consuming the action', () => {
+  const started = beginPlayerTurn(combatWorld(), characterSheet);
+  const dashed = grantMovement(started, 30, 'Adrenaline Rush Dash', characterSheet);
+
+  assert.equal(dashed.ok, true);
+  assert.equal(dashed.worldState.combat_state.turn_resources.movement_remaining, 60);
+  assert.equal(dashed.worldState.combat_state.turn_resources.action_available, true);
 });
 
 test('spell casting times map to combat resources', () => {

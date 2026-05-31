@@ -1,5 +1,5 @@
 {
-  "version": "4C.6-G/H",
+  "version": "4C.6-H1",
   "status_definitions": {
     "implemented": "Exposed and mechanically enforced for the current supported level/scope.",
     "partial": "Exposed and partially enforced, but missing at least one meaningful rules interaction.",
@@ -107,13 +107,17 @@
     "human.versatile": "implemented",
     "halfling.luck": "partial",
     "dwarf.dwarven_toughness": "implemented",
-    "dwarf.dwarven_resilience": "partial",
-    "gnome.gnomish_cunning": "deferred",
+    "dwarf.dwarven_resilience": "implemented",
+    "dwarf.stonecunning": "partial",
+    "gnome.gnomish_cunning": "implemented",
     "elf.keen_senses": "implemented",
-    "orc.relentless_endurance": "deferred",
-    "dragonborn.breath_weapon": "deferred",
+    "elf.fey_ancestry": "implemented",
+    "halfling.brave": "implemented",
+    "orc.adrenaline_rush": "implemented",
+    "orc.relentless_endurance": "partial",
+    "dragonborn.breath_weapon": "partial",
     "goliath.giant_ancestry": "deferred",
-    "celestial_touched.healing_hands": "deferred"
+    "celestial_touched.healing_hands": "partial"
   },
   "spells": {
     "armor_of_agathys": "implemented",

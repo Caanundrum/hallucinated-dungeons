@@ -57,6 +57,22 @@ const RESOURCE_DEFINITIONS = {
     max: 1,
     reset: 'long_rest',
   },
+  adrenaline_rush: {
+    name: 'Adrenaline Rush',
+    reset: 'short_rest',
+  },
+  breath_weapon: {
+    name: 'Breath Weapon',
+    reset: 'long_rest',
+  },
+  stonecunning: {
+    name: 'Stonecunning',
+    reset: 'long_rest',
+  },
+  giant_ancestry: {
+    name: 'Giant Ancestry',
+    reset: 'long_rest',
+  },
 };
 
 function buildResourceState(characterSheet = {}, worldState = {}) {
@@ -219,8 +235,11 @@ function completeLongRestResources({ characterSheet = {}, worldState = {} } = {}
   const notes = [];
 
   for (const [key, resource] of Object.entries(resources)) {
-    if (isCounterResource(resource) && resource.reset === 'long_rest') {
-      resources[key] = resetResourceUse(resource, 'long_rest');
+    if (isCounterResource(resource) && ['long_rest', 'short_rest'].includes(resource.reset)) {
+      resources[key] = {
+        ...resource,
+        remaining: Number(resource.max ?? 1),
+      };
     }
   }
 
@@ -321,7 +340,19 @@ function applySpeciesResourceDefaults(resources, characterSheet = {}, worldResou
   if (speciesId === 'celestial_touched') {
     defaults.healing_hands = { ...RESOURCE_DEFINITIONS.healing_hands, dice: `${proficiency}d4` };
   }
-  if (speciesId === 'orc') defaults.relentless_endurance = RESOURCE_DEFINITIONS.relentless_endurance;
+  if (speciesId === 'orc') {
+    defaults.adrenaline_rush = { ...RESOURCE_DEFINITIONS.adrenaline_rush, remaining: proficiency, max: proficiency };
+    defaults.relentless_endurance = RESOURCE_DEFINITIONS.relentless_endurance;
+  }
+  if (speciesId === 'dragonborn') {
+    defaults.breath_weapon = { ...RESOURCE_DEFINITIONS.breath_weapon, remaining: proficiency, max: proficiency };
+  }
+  if (speciesId === 'dwarf') {
+    defaults.stonecunning = { ...RESOURCE_DEFINITIONS.stonecunning, remaining: proficiency, max: proficiency };
+  }
+  if (speciesId === 'goliath') {
+    defaults.giant_ancestry = { ...RESOURCE_DEFINITIONS.giant_ancestry, remaining: proficiency, max: proficiency };
+  }
 
   for (const [key, definition] of Object.entries(defaults)) {
     if (resources[key]) continue;

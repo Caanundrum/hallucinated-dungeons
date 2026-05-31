@@ -11,6 +11,10 @@ const {
   getTurnBlockReason,
 } = require('./conditionEngine');
 const { getActiveDamageResistances } = require('./spellEffectEngine');
+const {
+  buildResourceState,
+  spendResource,
+} = require('./resourceEngine');
 
 function resolveCreatureTurns({
   worldState = {},
@@ -37,6 +41,7 @@ function resolveCreatureTurns({
   }
 
   let player = combatants[playerIndex];
+  let nextWorldState = worldState;
   const actingIndexes = getActingIndexes(combatants, combat.turn_index, playerIndex, advanceRound);
   const lines = [];
   const damageEvents = [];
@@ -49,12 +54,13 @@ function resolveCreatureTurns({
       actor,
       player,
       characterSheet,
-      worldState,
+      worldState: nextWorldState,
       rollDie,
       playerDodging,
     });
     combatants[index] = action.actor;
     player = action.player;
+    nextWorldState = action.worldState || nextWorldState;
     lines.push(...action.lines);
     damageEvents.push(...(action.damageEvents || []));
     if (Number(player.hp || 0) <= 0) break;
@@ -82,6 +88,7 @@ function resolveCreatureTurns({
     lines,
     damageEvents,
     roundsElapsed: advanceRound ? 1 : 0,
+    worldState: nextWorldState,
   };
 }
 
@@ -131,6 +138,11 @@ function resolveCreatureAction({ actor, player, characterSheet, worldState, roll
       damage: damage.total,
       damageType: attack.damage_type || attack.damageType || null,
     });
+    const endurance = applyRelentlessEndurance({
+      player: applied.player,
+      characterSheet,
+      worldState,
+    });
     const retaliation = getMeleeRetaliation(worldState, applied.beforeTempHp);
     const nextActor = retaliation
       ? { ...actor, hp: Math.max(0, Number(actor.hp || 0) - retaliation.damage) }
@@ -140,8 +152,9 @@ function resolveCreatureAction({ actor, player, characterSheet, worldState, roll
       : '';
     return {
       actor: nextActor,
-      player: applied.player,
-      lines: [`${actor.name} uses ${attack.name}: rolls ${rollText} vs AC ${ac}${modeText}. ${criticalHit ? '**Critical hit.** ' : ''}Hit for ${applied.amount} damage${formatDamageAdjustment(applied.adjustment)}${applied.absorbed ? ` (${applied.absorbed} absorbed by temporary HP)` : ''}. ${player.name}: (${before} -> ${applied.player.hp} HP).${retaliationLine}`],
+      player: endurance.player,
+      worldState: endurance.worldState,
+      lines: [`${actor.name} uses ${attack.name}: rolls ${rollText} vs AC ${ac}${modeText}. ${criticalHit ? '**Critical hit.** ' : ''}Hit for ${applied.amount} damage${formatDamageAdjustment(applied.adjustment)}${applied.absorbed ? ` (${applied.absorbed} absorbed by temporary HP)` : ''}. ${player.name}: (${before} -> ${endurance.player.hp} HP).${endurance.line}${retaliationLine}`],
       damageEvents: [{
         target: 'player',
         source: actor.name,
@@ -162,6 +175,28 @@ function resolveCreatureAction({ actor, player, characterSheet, worldState, roll
     actor,
     player,
     lines: [`${actor.name} uses ${attack.name}: rolls ${rollText} vs AC ${ac}${modeText}. Miss.`],
+  };
+}
+
+function applyRelentlessEndurance({ player = {}, characterSheet = {}, worldState = {} } = {}) {
+  if (Number(player.hp || 0) > 0 || normalizeId(characterSheet.identity?.species) !== 'orc') {
+    return { player, worldState, line: '' };
+  }
+
+  const resources = buildResourceState(characterSheet, worldState);
+  if (Number(resources.relentless_endurance?.remaining || 0) <= 0) {
+    return { player, worldState, line: '' };
+  }
+
+  const spent = spendResource({ worldState, characterSheet, resource: 'relentless_endurance' });
+  if (!spent.ok) return { player, worldState, line: '' };
+  return {
+    player: {
+      ...player,
+      hp: 1,
+    },
+    worldState: spent.worldState,
+    line: ' **Relentless Endurance** keeps you at 1 HP instead of dropping to 0.',
   };
 }
 
@@ -299,6 +334,10 @@ function formatSigned(value) {
 
 function uniqueValues(values = []) {
   return [...new Set((values || []).filter(Boolean))];
+}
+
+function normalizeId(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 }
 
 module.exports = {

@@ -123,6 +123,35 @@ function spendMovement(worldState = {}, feet, label = 'movement', characterSheet
   };
 }
 
+function grantMovement(worldState = {}, feet, label = 'Dash', characterSheet = {}) {
+  if (!worldState.combat_state?.active) return { ok: true, worldState };
+
+  const readyState = ensureTurnResources(worldState, characterSheet);
+  const resources = readyState.combat_state.turn_resources;
+  const granted = Math.max(0, Number(feet || 0));
+  return {
+    ok: true,
+    worldState: {
+      ...readyState,
+      combat_state: {
+        ...readyState.combat_state,
+        turn_resources: {
+          ...resources,
+          movement_remaining: Number(resources.movement_remaining || 0) + granted,
+          used: [
+            ...(resources.used || []),
+            {
+              resource: 'movement_grant',
+              label,
+              feet: granted,
+            },
+          ],
+        },
+      },
+    },
+  };
+}
+
 function getSpellActionResource(spell = {}) {
   const castingTime = String(spell.casting_time || '').toLowerCase().trim();
   if (!castingTime) return null;
@@ -166,5 +195,6 @@ module.exports = {
   beginPlayerTurn,
   spendTurnResource,
   spendMovement,
+  grantMovement,
   getSpellActionResource,
 };
