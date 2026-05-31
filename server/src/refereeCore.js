@@ -83,6 +83,11 @@ const {
   applyGiantAncestryOnHit,
   expireGiantAncestryEffects,
 } = require('./giantAncestryEngine');
+const {
+  resolveCombatMovement,
+  resolveDashAction,
+  resolveDisengageAction,
+} = require('./combatMovementEngine');
 
 const DEFAULT_CHECK_DC = 15;
 
@@ -1110,18 +1115,27 @@ function resolveCombatAction({ message, intent, worldState, characterSheet, curr
   }
 
   if (/\b(?:disengage|carefully withdraw|withdraw safely)\b/i.test(message)) {
-    const spent = spendTurnResource(worldState, 'action', 'Disengage', characterSheet);
-    if (!spent.ok) {
-      return { handled: true, logType: 'referee_action_unavailable', worldState: spent.worldState, reply: spent.reply };
-    }
+    return finishCombatMovementAction({
+      result: resolveDisengageAction({ message, worldState, characterSheet, rollDie }),
+      characterSheet,
+    });
+  }
+
+  if (/\b(?:dash|sprint)\b/i.test(message)) {
+    return finishCombatMovementAction({
+      result: resolveDashAction({ message, worldState, characterSheet, rollDie }),
+      characterSheet,
+    });
+  }
+
+  if (/\b(?:end|finish)\s+(?:my\s+)?turn\b|\b(?:wait|done)\s*$/i.test(message)) {
     const result = advanceEnemyTurns({
-      worldState: spent.worldState,
+      worldState,
       characterSheet,
       rollDie,
-      playerTurnNote: 'You take the **Disengage** action and move without giving nearby enemies a free swing.',
-      playerDodging: false,
+      playerTurnNote: 'You end your turn.',
     });
-    return { handled: true, logType: 'referee_combat_disengage', ...result };
+    return { handled: true, logType: 'referee_combat_end_turn', ...result };
   }
 
   if (isCombatStarter(message) || /\battack\b/i.test(message) || isUnarmedAttackIntent(message)) {
@@ -1129,12 +1143,10 @@ function resolveCombatAction({ message, intent, worldState, characterSheet, curr
   }
 
   if (isMovementIntent(message)) {
-    return {
-      handled: true,
-      logType: 'referee_combat_movement_block',
-      worldState,
-      reply: 'Combat is still active. You can move as part of your turn, but you cannot slip into free exploration while an enemy is still trying to rearrange your skeleton. Choose an action such as **Attack**, **Dodge**, **Disengage**, **Hide**, **Search**, **Study**, or **Help**.',
-    };
+    return finishCombatMovementAction({
+      result: resolveCombatMovement({ message, worldState, characterSheet, rollDie }),
+      characterSheet,
+    });
   }
 
   return {
@@ -1143,6 +1155,51 @@ function resolveCombatAction({ message, intent, worldState, characterSheet, curr
     worldState,
     reply: 'Combat is active and initiative is running. What action do you take this turn: **Attack**, **Shove**, **Grapple**, **Dodge**, **Disengage**, **Hide**, **Search**, **Study**, **Help**, **Ready**, or a valid spell/action from your sheet?',
   };
+}
+
+function finishCombatMovementAction({ result, characterSheet }) {
+  if (!result?.handled || !result.worldState) return result;
+
+  let nextState = result.worldState;
+  const lines = [result.reply];
+  const hp = Number(nextState.player_stats?.hp ?? getCurrentHp(characterSheet, nextState));
+  if (hp <= 0) {
+    const ended = endConcentration(nextState, characterSheet);
+    nextState = ended.worldState;
+    if (ended.endedEffects.length > 0) {
+      lines.push(`Concentration ends: ${ended.endedEffects.map((effect) => effect.name || effect.id).join(', ')}.`);
+    }
+  } else {
+    const concentrationPrompt = buildConcentrationPrompt({
+      worldState: nextState,
+      characterSheet,
+      damageEvents: result.damageEvents || [],
+    });
+    if (concentrationPrompt) {
+      nextState = {
+        ...nextState,
+        pending_roll: concentrationPrompt.pendingRoll,
+      };
+      lines.push(concentrationPrompt.reply);
+    }
+  }
+  if (nextState.combat_state?.active && !hasLivingEnemies(nextState.combat_state)) {
+    nextState = {
+      ...nextState,
+      combat_state: null,
+    };
+    lines.push('All active enemies are down. **Combat ends.**');
+  }
+
+  return {
+    ...result,
+    worldState: nextState,
+    reply: lines.filter(Boolean).join('\n\n'),
+  };
+}
+
+function hasLivingEnemies(combat = {}) {
+  return (combat.combatants || []).some((combatant) => !combatant.is_player && Number(combatant.hp) > 0);
 }
 
 function shouldPromptCombatCheck(intent) {
@@ -2276,7 +2333,7 @@ function combineAdvantageModes(left = null, right = null) {
 }
 
 function isMovementIntent(message) {
-  return /\b(?:go|walk|head|travel|move|return|enter|leave|approach|step|run|ride|follow|continue|flee|escape)\b/i.test(message);
+  return /\b(?:go|walk|head|travel|move|return|enter|leave|approach|step|run|ride|follow|continue|flee|escape|retreat|withdraw|back away)\b/i.test(message);
 }
 
 function advanceNarrativeTime({ message = '', dmReply = '', worldState = {}, characterSheet = {}, defaultElapsed = null } = {}) {

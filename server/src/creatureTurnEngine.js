@@ -57,7 +57,10 @@ function resolveCreatureTurns({
     if (!actor || actor.is_player || Number(actor.hp || 0) <= 0) continue;
 
     const action = resolveCreatureAction({
-      actor,
+      actor: {
+        ...actor,
+        reaction_available: true,
+      },
       player,
       characterSheet,
       worldState: nextWorldState,
@@ -396,6 +399,7 @@ function normalizeId(value) {
 
 module.exports = {
   resolveCreatureTurns,
+  resolveCreatureAction,
   getActingIndexes,
   getTurnSkipReason: getTurnBlockReason,
 };

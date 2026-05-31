@@ -589,7 +589,7 @@ test('natural 1 on an attack is an automatic miss even with a high bonus', () =>
   assert.match(result.reply, /Critical miss/);
 });
 
-test('blocks free exploration movement while combat is active', () => {
+test('asks for distance before resolving movement while combat is active', () => {
   const result = adjudicate({
     message: 'I leave the fight and go into the forest.',
     worldState: worldState({
@@ -607,8 +607,202 @@ test('blocks free exploration movement while combat is active', () => {
   });
 
   assert.equal(result.handled, true);
-  assert.match(result.reply, /Combat is still active/);
-  assert.match(result.reply, /cannot slip into free exploration/);
+  assert.match(result.reply, /Say how far you want to move in feet/);
+});
+
+test('combat movement through the referee provokes an Opportunity Attack before moving', () => {
+  const result = adjudicate({
+    message: 'I move 10 feet away from the wolf.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', hp: 12, max_hp: 12, ac: 16, is_player: true },
+          {
+            name: 'Wolf',
+            hp: 8,
+            max_hp: 8,
+            ac: 12,
+            is_player: false,
+            attack: { name: 'bite', attack_bonus: 4, damage_formula: '1d4+1' },
+          },
+        ],
+      },
+    }),
+    characterSheet,
+    rollDie: sequenceRolls([14, 3]),
+  });
+  const wolf = result.worldState.combat_state.combatants.find((combatant) => combatant.name === 'Wolf');
+
+  assert.equal(result.worldState.player_stats.hp, 8);
+  assert.equal(result.worldState.combat_state.turn_resources.movement_remaining, 20);
+  assert.equal(wolf.reaction_available, false);
+  assert.match(result.reply, /Opportunity Attack/);
+});
+
+test('Disengage leaves the turn open for movement without Opportunity Attacks', () => {
+  const result = adjudicate({
+    message: 'I Disengage and sprint 20 feet away.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', hp: 12, max_hp: 12, ac: 16, is_player: true },
+          { name: 'Wolf', hp: 8, max_hp: 8, ac: 12, is_player: false },
+        ],
+      },
+    }),
+    characterSheet,
+  });
+
+  assert.equal(result.worldState.combat_state.round, 1);
+  assert.equal(result.worldState.combat_state.turn_resources.action_available, false);
+  assert.equal(result.worldState.combat_state.turn_resources.disengaged, true);
+  assert.equal(result.worldState.combat_state.turn_resources.movement_remaining, 10);
+  assert.doesNotMatch(result.reply, /Opportunity Attack:/);
+});
+
+test('Dash leaves the turn open with extra movement equal to Speed', () => {
+  const result = adjudicate({
+    message: 'I Dash.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', hp: 12, max_hp: 12, ac: 16, is_player: true },
+          { name: 'Wolf', hp: 8, max_hp: 8, ac: 12, is_player: false },
+        ],
+      },
+    }),
+    characterSheet,
+  });
+
+  assert.equal(result.worldState.combat_state.round, 1);
+  assert.equal(result.worldState.combat_state.turn_resources.action_available, false);
+  assert.equal(result.worldState.combat_state.turn_resources.movement_remaining, 60);
+  assert.match(result.reply, /gain 30 feet of movement/);
+});
+
+test('Opportunity Attack damage prompts a concentration save after movement resolves', () => {
+  const result = adjudicate({
+    message: 'I move 10 feet away from the wolf.',
+    worldState: worldState({
+      active_effects: [
+        { id: 'shield_of_faith', name: 'Shield of Faith', concentration: true },
+      ],
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', hp: 12, max_hp: 12, ac: 16, is_player: true },
+          {
+            name: 'Wolf',
+            hp: 8,
+            max_hp: 8,
+            ac: 12,
+            is_player: false,
+            attack: { name: 'bite', attack_bonus: 4, damage_formula: '1d4+1' },
+          },
+        ],
+      },
+    }),
+    characterSheet,
+    rollDie: sequenceRolls([14, 3]),
+  });
+
+  assert.equal(result.worldState.pending_roll.kind, 'concentration_save');
+  assert.equal(result.worldState.pending_roll.dc, 10);
+  assert.match(result.reply, /Concentration is at risk from Wolf/);
+});
+
+test('retaliation that drops the last Opportunity Attacker ends combat immediately', () => {
+  const result = adjudicate({
+    message: 'I move 10 feet away from the wolf.',
+    worldState: worldState({
+      player_stats: { hp: 12, max_hp: 12, temp_hp: 5, armor_class: 16 },
+      active_effects: [
+        {
+          id: 'armor_of_agathys',
+          name: 'Armor of Agathys',
+          rules_effects: [
+            { target: 'temp_hp', value: 5, label: 'Armor of Agathys' },
+            { target: 'melee_retaliation_damage', value: 5, damage_type: 'cold', label: 'Armor of Agathys' },
+          ],
+        },
+      ],
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', hp: 12, max_hp: 12, temp_hp: 5, ac: 16, is_player: true },
+          {
+            name: 'Wolf',
+            hp: 5,
+            max_hp: 8,
+            ac: 12,
+            is_player: false,
+            attack: { name: 'bite', attack_bonus: 4, damage_formula: '1d4+1' },
+          },
+        ],
+      },
+    }),
+    characterSheet,
+    rollDie: sequenceRolls([14, 3]),
+  });
+
+  assert.equal(result.worldState.combat_state, null);
+  assert.match(result.reply, /Armor of Agathys lashes back for 5 cold damage/);
+  assert.match(result.reply, /Combat ends/);
+});
+
+test('ending a turn advances enemies and resets their Reactions at the start of their turns', () => {
+  const result = adjudicate({
+    message: 'End my turn.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        turn_resources: {
+          actor: 'player',
+          action_available: false,
+          bonus_action_available: true,
+          reaction_available: true,
+          movement_remaining: 20,
+          used: [{ resource: 'movement', label: 'combat movement', feet: 10 }],
+        },
+        combatants: [
+          { name: 'Sir Testalot', hp: 12, max_hp: 12, ac: 16, is_player: true },
+          {
+            name: 'Wolf',
+            hp: 8,
+            max_hp: 8,
+            ac: 12,
+            is_player: false,
+            reaction_available: false,
+            attack: { name: 'bite', attack_bonus: 4, damage_formula: '1d4+1' },
+          },
+        ],
+      },
+    }),
+    characterSheet,
+    rollDie: sequenceRolls([1]),
+  });
+  const wolf = result.worldState.combat_state.combatants.find((combatant) => combatant.name === 'Wolf');
+
+  assert.equal(result.worldState.combat_state.round, 2);
+  assert.equal(result.worldState.combat_state.turn_resources.action_available, true);
+  assert.equal(wolf.reaction_available, true);
+  assert.match(result.reply, /You end your turn/);
+  assert.match(result.reply, /Round 2 begins\. It is your turn/);
 });
 
 test('combat skill checks spend the player action until the roll resolves', () => {

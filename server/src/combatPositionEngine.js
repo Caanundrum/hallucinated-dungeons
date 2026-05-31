@@ -108,4 +108,5 @@ module.exports = {
   hexDistance,
   pushCombatantAway,
   sameMap,
+  setHexPosition,
 };

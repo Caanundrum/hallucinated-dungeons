@@ -1,5 +1,5 @@
 {
-  "version": "4C.6-H9",
+  "version": "4C.6-H10",
   "status_definitions": {
     "implemented": "Exposed and mechanically enforced for the current supported level/scope.",
     "partial": "Exposed and partially enforced, but missing at least one meaningful rules interaction.",
@@ -8,8 +8,8 @@
   },
   "actions": {
     "attack": { "status": "implemented", "implementation": "Server-owned combat attack resolution exists." },
-    "dash": { "status": "partial", "implementation": "Turn movement exists, but Dash is not fully modeled." },
-    "disengage": { "status": "partial", "implementation": "Action is recognized, but opportunity-attack interactions are not complete." },
+    "dash": { "status": "implemented", "implementation": "Dash spends an Action and grants extra movement equal to Speed for the current turn." },
+    "disengage": { "status": "implemented", "implementation": "Disengage spends an Action and suppresses Opportunity Attacks for the rest of the current turn." },
     "dodge": { "status": "implemented", "implementation": "Dodge can impose disadvantage on creature attacks." },
     "grapple": { "status": "implemented", "implementation": "Grapple uses Attack action option and target save." },
     "help": { "status": "partial", "implementation": "Recognized as an action, but advantage handoff is incomplete." },
@@ -21,7 +21,7 @@
     "shove": { "status": "implemented", "implementation": "Shove uses Attack action option and target save." },
     "study": { "status": "partial", "implementation": "Prompts Investigation/Insight-style checks, but object/NPC knowledge state is incomplete." },
     "utilize": { "status": "partial", "implementation": "Object interaction exists through narration/spatial guard, not full item rules." },
-    "opportunity_attack": { "status": "deferred", "implementation": "Needed for reaction and movement rules." },
+    "opportunity_attack": { "status": "partial", "implementation": "Enemy melee reactions resolve when the active player leaves reach; player reactions to future creature movement remain deferred." },
     "object_interaction": { "status": "partial", "implementation": "Spatial guard checks presence; item/object state is not complete." }
   },
   "conditions": {
