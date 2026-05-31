@@ -16,6 +16,8 @@ const {
   getWeaponDamageFormula,
   getWeaponMasteryAdvantageSources,
   getWeaponPropertyAttackMode,
+  getWeaponPropertyAttackSources,
+  prepareWeaponAttack,
   stripPositiveAbilityModifier,
 } = require('../src/weaponRulesEngine');
 
@@ -58,6 +60,91 @@ test('Heavy weapon property imposes the correct minimum ability disadvantage', (
   assert.equal(getWeaponPropertyAttackMode({ attack: attack('maul', { properties: ['heavy'] }), characterSheet: sheet() }), null);
 });
 
+test('Thrown melee weapons become ranged attacks when the player declares a throw', () => {
+  const result = prepareWeaponAttack({
+    attack: attack('javelin', {
+      name: 'Javelin',
+      attackKind: 'melee',
+      properties: ['thrown'],
+      range: { normal: 30, long: 120 },
+    }),
+    message: 'I throw my javelin at the cultist.',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.attack.attackKind, 'ranged');
+  assert.equal(result.attack.isThrownAttack, true);
+});
+
+test('Two-Handed weapons refuse attacks while the off hand is occupied', () => {
+  const result = prepareWeaponAttack({
+    attack: attack('greatsword', { name: 'Greatsword', properties: ['heavy', 'two-handed'] }),
+    characterSheet: { equipped: { off_hand: 'shield' } },
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.reply, /requires two hands/);
+});
+
+test('Reach and ranged limits use hex coordinates when available', () => {
+  const player = { position: { map_id: 'crypt', q: 0, r: 0 } };
+  const target = { name: 'Cultist', position: { map_id: 'crypt', q: 2, r: 0 } };
+  const longsword = prepareWeaponAttack({
+    attack: attack('longsword', { name: 'Longsword', attackKind: 'melee' }),
+    player,
+    target,
+  });
+  const whip = prepareWeaponAttack({
+    attack: attack('whip', { name: 'Whip', attackKind: 'melee', properties: ['reach'] }),
+    player,
+    target,
+  });
+  const javelin = attack('javelin', {
+    name: 'Javelin',
+    attackKind: 'ranged',
+    properties: ['thrown'],
+    range: { normal: 30, long: 120 },
+  });
+
+  assert.equal(longsword.ok, false);
+  assert.equal(whip.ok, true);
+  assert.deepEqual(getWeaponPropertyAttackSources({
+    attack: javelin,
+    player,
+    target: { name: 'Far Cultist', position: { map_id: 'crypt', q: 8, r: 0 } },
+  }), ['Long range']);
+  assert.equal(prepareWeaponAttack({
+    attack: javelin,
+    player,
+    target: { name: 'Very Far Cultist', position: { map_id: 'crypt', q: 25, r: 0 } },
+  }).ok, false);
+});
+
+test('Ranged attacks have disadvantage when a seeing, active enemy is within 5 feet', () => {
+  const player = { is_player: true, position: { map_id: 'crypt', q: 0, r: 0 } };
+  const target = { name: 'Far Cultist', hp: 8, position: { map_id: 'crypt', q: 6, r: 0 } };
+  const nearby = { name: 'Nearby Guard', hp: 8, position: { map_id: 'crypt', q: 1, r: 0 } };
+  const longbow = attack('longbow', {
+    name: 'Longbow',
+    attackKind: 'ranged',
+    range: { normal: 150, long: 600 },
+  });
+
+  assert.deepEqual(getWeaponPropertyAttackSources({
+    attack: longbow,
+    player,
+    target,
+    combat: { combatants: [player, target, nearby] },
+  }), ['Ranged attack in close combat']);
+  nearby.conditions = ['stunned'];
+  assert.deepEqual(getWeaponPropertyAttackSources({
+    attack: longbow,
+    player,
+    target,
+    combat: { combatants: [player, target, nearby] },
+  }), []);
+});
+
 test('Versatile weapons use their two-handed damage only when declared', () => {
   const longsword = attack('longsword', { properties: ['versatile'], versatileDamage: '1d10' });
   assert.equal(getWeaponDamageFormula({ attack: longsword, message: 'I attack the cultist.' }), '1d8+3');
@@ -95,6 +182,19 @@ test('Push mastery moves Large or smaller targets but not Huge targets', () => {
   applyWeaponMasteryOnHit({ attack: weapon, target: huge, characterSheet });
   assert.equal(eligible.forced_movement.feet, 10);
   assert.equal(huge.forced_movement, undefined);
+});
+
+test('Push mastery updates target hex coordinates when the map can enforce movement', () => {
+  const eligible = { name: 'Cultist', hp: 8, size: 'medium', position: { map_id: 'crypt', q: 1, r: 0 } };
+  applyWeaponMasteryOnHit({
+    attack: attack('warhammer'),
+    target: eligible,
+    combat: { combatants: [{ is_player: true, position: { map_id: 'crypt', q: 0, r: 0 } }] },
+    characterSheet: sheet('warhammer', 'push'),
+  });
+
+  assert.deepEqual(eligible.position, { map_id: 'crypt', q: 3, r: 0 });
+  assert.equal(eligible.forced_movement.mode, 'hex');
 });
 
 test('Sap mastery affects one creature attack and is then consumed', () => {

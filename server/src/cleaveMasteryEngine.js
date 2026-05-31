@@ -2,6 +2,13 @@ const {
   getSelectedWeaponMastery,
   stripPositiveAbilityModifier,
 } = require('./weaponRulesEngine');
+const {
+  getFeetPerHex,
+  getHexPosition,
+  getWeaponReach,
+  hexDistance,
+  sameMap,
+} = require('./combatPositionEngine');
 
 function getCleaveExtraAttack({
   characterSheet = {},
@@ -94,34 +101,6 @@ function checkCleaveSpatialEligibility({ player = {}, primaryTarget = {}, second
 
 function wantsCleaveAttack(message = '') {
   return /\b(?:cleave|cleaving|sweep|sweeping|follow through)\b/i.test(String(message || ''));
-}
-
-function getHexPosition(combatant = {}) {
-  const position = combatant.position || combatant.map_position || null;
-  if (!position || position.q === null || position.q === undefined || position.r === null || position.r === undefined) return null;
-  const q = Number(position.q);
-  const r = Number(position.r);
-  if (!Number.isFinite(q) || !Number.isFinite(r)) return null;
-  return { ...position, q, r };
-}
-
-function sameMap(...positions) {
-  const ids = positions.map((position) => position.map_id).filter(Boolean);
-  return new Set(ids).size <= 1;
-}
-
-function hexDistance(left, right) {
-  const dq = Number(left.q) - Number(right.q);
-  const dr = Number(left.r) - Number(right.r);
-  return (Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr)) / 2;
-}
-
-function getFeetPerHex(position = {}) {
-  return Number(position.feet_per_hex || 5);
-}
-
-function getWeaponReach(attack = {}) {
-  return (attack.properties || []).includes('reach') ? 10 : 5;
 }
 
 function blocked(reply) {

@@ -1,17 +1,59 @@
 const { resolveSavingThrow } = require('./conditionEngine');
+const {
+  getCombatantDistanceFeet,
+  getWeaponReach,
+  pushCombatantAway,
+} = require('./combatPositionEngine');
 
 const LARGE_OR_SMALLER = new Set(['tiny', 'small', 'medium', 'large']);
+const INCAPACITATING_CONDITIONS = new Set(['incapacitated', 'paralyzed', 'petrified', 'stunned', 'unconscious', 'sleep']);
 
-function getWeaponPropertyAttackMode({ attack = {}, characterSheet = {} } = {}) {
-  if (!hasProperty(attack, 'heavy')) return null;
-  const ability = attack.attackKind === 'ranged' ? 'dex' : 'str';
-  return getAbilityScore(characterSheet, ability) < 13 ? 'disadvantage' : null;
+function prepareWeaponAttack({
+  attack = {},
+  message = '',
+  characterSheet = {},
+  player = {},
+  target = {},
+} = {}) {
+  const prepared = normalizeThrownAttack(attack, message);
+  if (hasProperty(prepared, 'two-handed') && characterSheet.equipped?.off_hand && !canUseLanceOneHanded(prepared, player)) {
+    return blocked(`${prepared.name} requires two hands when you attack with it. Your off hand is occupied, so choose another attack or free that hand first.`);
+  }
+
+  const distance = getCombatantDistanceFeet(player, target);
+  if (distance === null) return { ok: true, attack: prepared, spatialMode: 'scene_zone_assumption' };
+  if (!Number.isFinite(distance)) {
+    return blocked(`${target.name || 'That target'} is on a different map or encounter layer.`);
+  }
+  if (prepared.attackKind === 'melee' && distance > getWeaponReach(prepared)) {
+    return blocked(`${target.name || 'That target'} is ${distance} feet away, beyond ${prepared.name}'s ${getWeaponReach(prepared)}-foot melee reach.`);
+  }
+  if (prepared.attackKind === 'ranged' && Number(prepared.range?.long || 0) > 0 && distance > Number(prepared.range.long)) {
+    return blocked(`${target.name || 'That target'} is ${distance} feet away, beyond ${prepared.name}'s ${prepared.range.long}-foot long range.`);
+  }
+  return { ok: true, attack: prepared, spatialMode: 'hex', distance };
 }
 
-function getWeaponPropertyAttackSources({ attack = {}, characterSheet = {} } = {}) {
-  return getWeaponPropertyAttackMode({ attack, characterSheet })
-    ? ['Heavy weapon minimum ability score']
-    : [];
+function getWeaponPropertyAttackMode({ attack = {}, characterSheet = {}, player = {}, target = {}, combat = {} } = {}) {
+  return getWeaponPropertyAttackSources({ attack, characterSheet, player, target, combat }).length
+    ? 'disadvantage'
+    : null;
+}
+
+function getWeaponPropertyAttackSources({ attack = {}, characterSheet = {}, player = {}, target = {}, combat = {} } = {}) {
+  const sources = [];
+  if (hasProperty(attack, 'heavy')) {
+    const ability = attack.attackKind === 'ranged' ? 'dex' : 'str';
+    if (getAbilityScore(characterSheet, ability) < 13) sources.push('Heavy weapon minimum ability score');
+  }
+  const distance = getCombatantDistanceFeet(player, target);
+  if (attack.attackKind === 'ranged' && Number.isFinite(distance) && Number(attack.range?.normal || 0) > 0 && distance > Number(attack.range.normal)) {
+    sources.push('Long range');
+  }
+  if (hasCloseCombatThreat({ attack, player, target, combat })) {
+    sources.push('Ranged attack in close combat');
+  }
+  return sources;
 }
 
 function getWeaponDamageFormula({ attack = {}, message = '', characterSheet = {} } = {}) {
@@ -54,8 +96,15 @@ function applyWeaponMasteryOnHit({
 
   if (mastery === 'push') {
     if (!canPushTarget(target)) return { lines: [], mastery };
-    target.forced_movement = { feet: 10, direction: 'away_from_player', source: 'Push mastery' };
-    return { lines: [`**Push mastery:** ${target.name} is pushed up to 10 feet straight away, subject to available space in the scene.`], mastery };
+    const movement = pushCombatantAway({
+      source: (combat.combatants || []).find((combatant) => combatant.is_player),
+      target,
+      feet: 10,
+    });
+    const qualifier = movement.mode === 'hex'
+      ? '.'
+      : ', subject to available space in the scene.';
+    return { lines: [`**Push mastery:** ${target.name} is pushed ${movement.feet} feet straight away${qualifier}`], mastery };
   }
 
   if (mastery === 'sap') {
@@ -193,6 +242,42 @@ function canPushTarget(target = {}) {
   return !size || LARGE_OR_SMALLER.has(size);
 }
 
+function normalizeThrownAttack(attack = {}, message = '') {
+  if (!hasProperty(attack, 'thrown') || attack.attackKind === 'ranged' || !wantsThrownUse(message)) return attack;
+  return {
+    ...attack,
+    attackKind: 'ranged',
+    isThrownAttack: true,
+  };
+}
+
+function canUseLanceOneHanded(attack = {}, player = {}) {
+  return attack.weaponId === 'lance' && Boolean(player.mounted);
+}
+
+function wantsThrownUse(message = '') {
+  return /\b(?:throw(?:s|ing)?|thrown|hurl(?:s|ing)?|toss(?:es|ing)?|fling(?:s|ing)?)\b/i.test(String(message || ''));
+}
+
+function hasCloseCombatThreat({ attack = {}, player = {}, target = {}, combat = {} } = {}) {
+  if (attack.attackKind !== 'ranged') return false;
+  const enemies = Array.isArray(combat.combatants) && combat.combatants.length
+    ? combat.combatants.filter((combatant) => !combatant.is_player)
+    : [target];
+  return enemies.some((enemy) => {
+    const distance = getCombatantDistanceFeet(player, enemy);
+    return Number(enemy.hp || 0) > 0
+      && enemy.can_see_player !== false
+      && !(enemy.conditions || []).some((condition) => INCAPACITATING_CONDITIONS.has(normalizeId(condition)))
+      && Number.isFinite(distance)
+      && distance <= 5;
+  });
+}
+
+function blocked(reply) {
+  return { ok: false, reply };
+}
+
 function addMasteryEffect(target = {}, effect) {
   const retained = getMasteryEffects(target).filter((current) => current.type !== effect.type);
   target.mastery_effects = [...retained, effect];
@@ -246,6 +331,7 @@ module.exports = {
   consumeVexAdvantage,
   expireMasteryEffects,
   getSelectedWeaponMastery,
+  prepareWeaponAttack,
   getWeaponDamageFormula,
   getWeaponMasteryAdvantageSources,
   getWeaponPropertyAttackMode,

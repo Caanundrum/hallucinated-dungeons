@@ -1723,3 +1723,65 @@ test('Cleave refuses a declared second target outside reach when map coordinates
   assert.equal(guard.hp, 20);
   assert.match(result.reply, /within 5 feet of the first creature and within your weapon reach/);
 });
+
+test('referee blocks a two-handed weapon attack while the character carries a shield', () => {
+  const result = adjudicate({
+    message: 'Attack the Cultist with my greatsword.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', initiative: 18, hp: 14, max_hp: 14, ac: 16, is_player: true, position: { map_id: 'crypt', q: 0, r: 0 } },
+          { name: 'Cultist', initiative: 8, hp: 20, max_hp: 20, ac: 10, is_player: false, position: { map_id: 'crypt', q: 1, r: 0 } },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      equipped: { main_hand: 'greatsword', off_hand: 'shield' },
+      derived_stats: {
+        ...characterSheet.derived_stats,
+        attack_breakdowns: [
+          { weapon_id: 'greatsword', name: 'Greatsword', ability: 'str', attack_total: 5, damage_formula: '2d6 + 3' },
+        ],
+      },
+    },
+  });
+
+  assert.equal(result.logType, 'referee_weapon_attack_unavailable');
+  assert.equal(result.worldState.combat_state.turn_resources, undefined);
+  assert.match(result.reply, /requires two hands/);
+});
+
+test('referee routes a declared javelin throw through ranged long-range disadvantage', () => {
+  const result = adjudicate({
+    message: 'I attack the Cultist by throwing my javelin.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', initiative: 18, hp: 14, max_hp: 14, ac: 16, is_player: true, position: { map_id: 'crypt', q: 0, r: 0 } },
+          { name: 'Cultist', initiative: 8, hp: 20, max_hp: 20, ac: 30, is_player: false, position: { map_id: 'crypt', q: 8, r: 0 }, attack: { name: 'dagger', attack_bonus: 2, damage_formula: '1d4+1' } },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      equipped: { main_hand: 'javelin', off_hand: null },
+      derived_stats: {
+        ...characterSheet.derived_stats,
+        attack_breakdowns: [
+          { weapon_id: 'javelin', name: 'Javelin', ability: 'str', attack_total: 5, damage_formula: '1d6 + 3' },
+        ],
+      },
+    },
+    rollDie: sequenceRolls([18, 4, 1]),
+  });
+
+  assert.match(result.reply, /disadvantage from Long range/);
+  assert.match(result.reply, /Attack roll: 9 \(natural 4; 18\/4 with disadvantage, using 4\+5=9\)/);
+});

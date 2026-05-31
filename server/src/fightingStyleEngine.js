@@ -72,7 +72,7 @@ function isDuelingAttack({ characterSheet = {}, attack = {}, message = '' } = {}
 
 function isThrownAttack(attack = {}, message = '') {
   if (!(attack.properties || []).includes('thrown')) return false;
-  return attack.attackKind === 'ranged' || /\b(?:throw|thrown|hurl|toss|fling)\b/i.test(String(message || ''));
+  return attack.attackKind === 'ranged' || /\b(?:throw(?:s|ing)?|thrown|hurl(?:s|ing)?|toss(?:es|ing)?|fling(?:s|ing)?)\b/i.test(String(message || ''));
 }
 
 function isHeldWithTwoHands(attack = {}, message = '', characterSheet = {}) {

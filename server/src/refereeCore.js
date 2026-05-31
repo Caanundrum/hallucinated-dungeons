@@ -60,6 +60,7 @@ const {
   getWeaponMasteryAdvantageSources,
   getWeaponPropertyAttackMode,
   getWeaponPropertyAttackSources,
+  prepareWeaponAttack,
 } = require('./weaponRulesEngine');
 const {
   applyFightingStyleToAttack,
@@ -1127,14 +1128,29 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
     };
   }
 
-  const attack = applyFightingStyleToAttack({
+  const preparedAttack = prepareWeaponAttack({
     attack: getPrimaryAttack(characterSheet, message),
+    message,
+    characterSheet,
+    player,
+    target,
+  });
+  if (!preparedAttack.ok) {
+    return {
+      handled: true,
+      logType: 'referee_weapon_attack_unavailable',
+      worldState,
+      reply: preparedAttack.reply,
+    };
+  }
+  const attack = applyFightingStyleToAttack({
+    attack: preparedAttack.attack,
     characterSheet,
     message,
   });
   const lightExtra = getLightExtraAttack({ characterSheet, primaryAttack: attack, message });
-  const propertyMode = getWeaponPropertyAttackMode({ attack, characterSheet });
-  const propertySources = getWeaponPropertyAttackSources({ attack, characterSheet });
+  const propertyMode = getWeaponPropertyAttackMode({ attack, characterSheet, player, target, combat });
+  const propertySources = getWeaponPropertyAttackSources({ attack, characterSheet, player, target, combat });
   const lucky = applyLuckyToImmediateD20({
     message,
     worldState: spent.worldState,
@@ -1329,14 +1345,13 @@ function resolveExtraWeaponAttackRoll({
 }) {
   if (!target) return { lines: [], consumeEffectIds: [] };
 
-  const advantageMode = getAttackAdvantageMode(
-    combat.combatants.find((combatant) => combatant.is_player),
-    target,
-  );
-  const sources = getAttackAdvantageSources(
-    combat.combatants.find((combatant) => combatant.is_player),
-    target,
-  );
+  const player = combat.combatants.find((combatant) => combatant.is_player);
+  const propertyMode = getWeaponPropertyAttackMode({ attack, characterSheet, player, target, combat });
+  const advantageMode = combineAdvantageModes(getAttackAdvantageMode(player, target), propertyMode);
+  const sources = [
+    ...getAttackAdvantageSources(player, target),
+    ...getWeaponPropertyAttackSources({ attack, characterSheet, player, target, combat }),
+  ];
   const attackRoll = resolveD20Test({
     kind: 'attack',
     modifier: attack.attackBonus,
@@ -1968,6 +1983,7 @@ function buildAttackFromBreakdown(attack = {}) {
     damageType: weapon?.damage_type || attack?.damage_type || null,
     mastery: weapon?.mastery || attack?.mastery || null,
     versatileDamage: weapon?.versatile_damage || attack?.versatile_damage || null,
+    range: weapon?.range || attack?.range || null,
     isWeapon: true,
   };
 }
