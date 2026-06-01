@@ -1262,6 +1262,7 @@ io.on('connection', (socket) => {
           playerInput:  message,
           fullPrompt:   JSON.stringify({
             pending_roll: referee.worldState?.pending_roll || null,
+            pending_reaction: referee.worldState?.pending_reaction || null,
             combat_state: referee.worldState?.combat_state || null,
             turn: currentTurn,
           }),

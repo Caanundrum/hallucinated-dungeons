@@ -1,5 +1,5 @@
 {
-  "version": "4C.6-H11",
+  "version": "4C.6-H12",
   "status_definitions": {
     "implemented": "Exposed and mechanically enforced for the current supported level/scope.",
     "partial": "Exposed and partially enforced, but missing at least one meaningful rules interaction.",
@@ -15,7 +15,7 @@
     "help": { "status": "partial", "implementation": "Recognized as an action, but advantage handoff is incomplete." },
     "hide": { "status": "partial", "implementation": "Prompts Stealth checks, but full hidden/visibility state is incomplete." },
     "influence": { "status": "partial", "implementation": "Prompts social checks, but NPC attitude state is incomplete." },
-    "magic": { "status": "partial", "implementation": "Spell casting exists, but action/spell edge cases remain." },
+    "magic": { "status": "partial", "implementation": "Spell casting includes a server-owned attack-hit Reaction window for Shield; additional Reaction spells and trigger families remain incomplete." },
     "ready": { "status": "deferred", "implementation": "Recognized as a future combat action." },
     "search": { "status": "partial", "implementation": "Prompts Perception checks, but target/entity search state is incomplete." },
     "shove": { "status": "implemented", "implementation": "Shove uses Attack action option and target save." },

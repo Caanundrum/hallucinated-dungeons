@@ -474,10 +474,15 @@ test('Lucky can be spent explicitly on an immediate spell attack roll', () => {
 });
 
 test('action spell outcome can advance enemy turns through the referee', () => {
+  const sheet = casterSheet({
+    spellcasting: {
+      spells_prepared: ['magic_missile'],
+    },
+  });
   const cast = resolveSpellCast({
     message: 'I cast Fire Bolt at the skeleton.',
     content,
-    characterSheet: casterSheet(),
+    characterSheet: sheet,
     worldState: combatWorld(),
   });
   const outcome = resolveSpellOutcome({

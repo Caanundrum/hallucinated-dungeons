@@ -104,6 +104,17 @@ test('combat continuation reports the remaining turn resources', () => {
   assert.match(continued.reply, /end turn/);
 });
 
+test('combat continuation does not advertise player actions during a Reaction window', () => {
+  const state = {
+    ...beginPlayerTurn(combatWorld(), characterSheet),
+    pending_reaction: { id: 'reaction_test' },
+  };
+  const continued = continuePlayerTurn(state, 'Attack interrupted.', characterSheet);
+
+  assert.equal(continued.worldState, state);
+  assert.equal(continued.reply, 'Attack interrupted.');
+});
+
 test('spell casting times map to combat resources', () => {
   assert.equal(getSpellActionResource({ casting_time: 'Action' }), 'action');
   assert.equal(getSpellActionResource({ casting_time: 'Bonus Action' }), 'bonus_action');

@@ -169,7 +169,7 @@ function setTurnFlag(worldState = {}, flag, value = true, characterSheet = {}) {
 }
 
 function continuePlayerTurn(worldState = {}, reply = '', characterSheet = {}) {
-  if (!worldState.combat_state?.active || worldState.pending_roll) {
+  if (!worldState.combat_state?.active || worldState.pending_roll || worldState.pending_reaction) {
     return { worldState, reply };
   }
 

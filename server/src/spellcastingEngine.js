@@ -183,11 +183,17 @@ function validateSpellTiming({ spell, message, worldState = {}, characterSheet =
     return `${spell.name} takes ${spell.casting_time} to cast. That is not a single combat action; you would need to spend the required rounds maintaining the casting. The initiative tracker has opinions about paperwork.`;
   }
 
-  if (/reaction/i.test(spell.casting_time || '') && !/\b(reaction|trigger|when|being hit|gets hit|am hit|attacked|attack hits|hits me|fall|falling|takes damage|take damage)\b/i.test(message || '')) {
-    return `${spell.name} is a Reaction spell. You can cast it when its trigger happens, not as a casual pre-emptive vibe check.`;
+  if (/reaction/i.test(spell.casting_time || '') && !hasMatchingReactionWindow(worldState, spell)) {
+    return `${spell.name} is a Reaction spell. You can cast it when the referee opens its trigger window, not as a casual pre-emptive vibe check.`;
   }
 
   return null;
+}
+
+function hasMatchingReactionWindow(worldState = {}, spell = {}) {
+  return Boolean(worldState.pending_reaction?.options?.some((option) => (
+    option.type === 'cast_spell' && option.spell_id === spell.id
+  )));
 }
 
 function spendSpellResource(characterSheet = {}, spell = {}, known = {}, { message = '' } = {}) {

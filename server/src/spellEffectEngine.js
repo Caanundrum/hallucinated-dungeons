@@ -657,6 +657,7 @@ function buildSpellEffect(characterSheet, spell, known, message = '', worldState
     mechanical_effect: spell.description,
     rules_effects: getRulesEffectsForSpell(spell, { message }),
     ...durationToRemaining(duration),
+    ...(spell.id === 'shield' ? { expires_at_start_of_player_turn: true } : {}),
   };
 }
 
@@ -1109,24 +1110,29 @@ function consumeActiveEffects(worldState = {}, effectIds = [], characterSheet = 
 
 function applyStartOfTurnEffects(worldState = {}, characterSheet = null) {
   const activeEffects = normalizeEffects(worldState.active_effects || []);
-  const tempHp = activeEffects
+  const retainedEffects = activeEffects.filter((effect) => !effect.expires_at_start_of_player_turn);
+  let nextWorldState = retainedEffects.length === activeEffects.length
+    ? worldState
+    : applyActiveEffectsToWorldState(worldState, retainedEffects, characterSheet);
+  const currentEffects = normalizeEffects(nextWorldState.active_effects || []);
+  const tempHp = currentEffects
     .flatMap((effect) => (effect.rules_effects || []).map((rule) => ({ effect, rule })))
     .filter(({ rule }) => rule.target === 'temp_hp_each_turn')
     .reduce((best, { rule, effect }) => Math.max(best, resolveRuleValue(rule.value, effect)), 0);
-  if (tempHp <= 0) return worldState;
+  if (tempHp <= 0) return nextWorldState;
 
-  const stats = worldState.player_stats || {};
+  const stats = nextWorldState.player_stats || {};
   const nextTempHp = Math.max(Number(stats.temp_hp || 0), tempHp);
-  const combat = worldState.combat_state?.active
+  const combat = nextWorldState.combat_state?.active
     ? {
-        ...worldState.combat_state,
-        combatants: (worldState.combat_state.combatants || []).map((combatant) => (
+        ...nextWorldState.combat_state,
+        combatants: (nextWorldState.combat_state.combatants || []).map((combatant) => (
           combatant.is_player ? { ...combatant, temp_hp: nextTempHp } : combatant
         )),
       }
-    : worldState.combat_state;
+    : nextWorldState.combat_state;
   return {
-    ...worldState,
+    ...nextWorldState,
     combat_state: combat,
     player_stats: {
       ...stats,

@@ -18,7 +18,11 @@ const {
   setTurnFlag,
   spendTurnResource,
 } = require('./actionEconomy');
-const { resolveCreatureTurns } = require('./creatureTurnEngine');
+const { resolveCreatureTurns, resumeCreatureTurns } = require('./creatureTurnEngine');
+const {
+  formatPendingReactionPrompt,
+  resolvePendingReactionChoice,
+} = require('./reactionEngine');
 const { checkSpatialAction } = require('./spatialGuard');
 const {
   resolveD20Test,
@@ -100,6 +104,10 @@ function adjudicate({ message, worldState = {}, characterSheet = null, currentTu
   const intent = resolveIntent(text);
   const state = normalizeWorldState(worldState);
   const sheet = characterSheet || {};
+
+  if (state.pending_reaction) {
+    return resolvePendingReaction({ message: text, worldState: state, characterSheet: sheet, rollDie });
+  }
 
   if (intent.isRollResult || parseRollRequest(text)) {
     return resolvePendingRoll({ message: text, worldState: state, characterSheet: sheet, rollDie });
@@ -1769,6 +1777,62 @@ function advanceEnemyTurns({ worldState, characterSheet, rollDie = defaultRollDi
     playerDodging: defenderDodging,
     advanceRound,
   });
+  return finishCreatureTurns({
+    creatureTurns,
+    worldState: playerTurnEnded,
+    characterSheet,
+    playerTurnNote,
+  });
+}
+
+function resolvePendingReaction({ message, worldState, characterSheet, rollDie = defaultRollDie }) {
+  const reaction = resolvePendingReactionChoice({ message, worldState, characterSheet });
+  if (!reaction?.resolved) return reaction;
+
+  const creatureTurns = resumeCreatureTurns({
+    worldState: reaction.worldState,
+    characterSheet,
+    rollDie,
+    pendingReaction: reaction.pendingReaction,
+  });
+  if (!creatureTurns) {
+    return {
+      handled: true,
+      logType: 'referee_reaction_resume_failed',
+      worldState,
+      reply: 'The Reaction window could not resume its interrupted attack. The referee stopped combat state here instead of guessing.',
+    };
+  }
+
+  const resumed = finishCreatureTurns({
+    creatureTurns,
+    worldState: reaction.worldState,
+    characterSheet,
+    playerTurnNote: reaction.reply,
+  });
+  return {
+    handled: true,
+    logType: reaction.logType,
+    ...resumed,
+  };
+}
+
+function finishCreatureTurns({ creatureTurns, worldState, characterSheet, playerTurnNote }) {
+  const player = creatureTurns.player;
+  const lines = [playerTurnNote, ...creatureTurns.lines].filter(Boolean);
+  if (creatureTurns.paused) {
+    const pausedState = syncCreatureTurnState({
+      worldState: creatureTurns.worldState || worldState,
+      combat: creatureTurns.combat,
+      player,
+      pendingReaction: creatureTurns.pendingReaction,
+    });
+    return {
+      worldState: pausedState,
+      reply: [...lines, formatPendingReactionPrompt(creatureTurns.pendingReaction)].join('\n\n'),
+    };
+  }
+
   const combat = expireGiantAncestryEffects(expireMasteryEffects(creatureTurns.combat, {
     timing: 'start_of_player_turn',
     round: creatureTurns.combat.round,
@@ -1776,12 +1840,11 @@ function advanceEnemyTurns({ worldState, characterSheet, rollDie = defaultRollDi
     timing: 'start_of_player_turn',
     round: creatureTurns.combat.round,
   });
-  const player = creatureTurns.player;
-  const lines = [playerTurnNote, ...creatureTurns.lines].filter(Boolean);
 
   let nextState = {
     ...(creatureTurns.worldState || worldState),
     pending_roll: null,
+    pending_reaction: null,
     combat_state: combat,
     player_stats: {
       ...((creatureTurns.worldState || worldState).player_stats || {}),
@@ -1833,6 +1896,23 @@ function advanceEnemyTurns({ worldState, characterSheet, rollDie = defaultRollDi
   return {
     worldState: nextState,
     reply: `${lines.join('\n\n')}\n\n${endLine}`,
+  };
+}
+
+function syncCreatureTurnState({ worldState, combat, player, pendingReaction = null }) {
+  return {
+    ...worldState,
+    pending_roll: null,
+    pending_reaction: pendingReaction,
+    combat_state: combat,
+    player_stats: {
+      ...(worldState.player_stats || {}),
+      hp: player.hp,
+      max_hp: player.max_hp,
+      temp_hp: player.temp_hp,
+      armor_class: player.ac,
+      defense_fighting_style_applied: player.defense_fighting_style_applied,
+    },
   };
 }
 

@@ -262,6 +262,7 @@ const DEFAULT_WORLD_STATE = {
     ability_scores: {},          // Ability modifiers, e.g. { str: 3, dex: 1, ... }.
   },
   pending_roll: null,
+  pending_reaction: null,
   combat_state: null,
 };
 

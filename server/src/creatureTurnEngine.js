@@ -21,6 +21,7 @@ const {
   applyPrimedGiantAncestryDamageReduction,
   applyPrimedGiantAncestryRetaliation,
 } = require('./giantAncestryEngine');
+const { buildAttackHitReaction } = require('./reactionEngine');
 
 function resolveCreatureTurns({
   worldState = {},
@@ -28,6 +29,7 @@ function resolveCreatureTurns({
   rollDie = defaultRollDie,
   playerDodging = false,
   advanceRound = true,
+  resumeReaction = null,
 } = {}) {
   const combat = cloneCombatState(worldState.combat_state);
   const combatants = Array.isArray(combat.combatants) ? combat.combatants : [];
@@ -48,11 +50,38 @@ function resolveCreatureTurns({
 
   let player = combatants[playerIndex];
   let nextWorldState = worldState;
-  const actingIndexes = getActingIndexes(combatants, combat.turn_index, playerIndex, advanceRound);
+  const continuation = resumeReaction?.resume?.type === 'creature_turns'
+    ? resumeReaction.resume
+    : null;
+  const actingIndexes = continuation?.acting_indexes
+    || getActingIndexes(combatants, combat.turn_index, playerIndex, advanceRound);
   const lines = [];
-  const damageEvents = [];
+  const damageEvents = [...(continuation?.damage_events || [])];
 
-  for (const index of actingIndexes) {
+  let startOffset = 0;
+  if (continuation) {
+    const actorIndex = Number(continuation.actor_index);
+    const actor = combatants[actorIndex];
+    if (actor && !actor.is_player && Number(actor.hp || 0) > 0) {
+      const action = resolveCreatureAttackHit({
+        actor,
+        player,
+        characterSheet,
+        worldState: nextWorldState,
+        rollDie,
+        frame: resumeReaction.attack_frame,
+      });
+      combatants[actorIndex] = action.actor;
+      player = action.player;
+      nextWorldState = action.worldState || nextWorldState;
+      lines.push(...action.lines);
+      damageEvents.push(...(action.damageEvents || []));
+    }
+    startOffset = Number(continuation.next_offset || 0);
+  }
+
+  for (let offset = startOffset; offset < actingIndexes.length; offset += 1) {
+    const index = actingIndexes[offset];
     const actor = combatants[index];
     if (!actor || actor.is_player || Number(actor.hp || 0) <= 0) continue;
 
@@ -66,30 +95,35 @@ function resolveCreatureTurns({
       worldState: nextWorldState,
       rollDie,
       playerDodging,
+      allowReactionWindow: true,
     });
     combatants[index] = action.actor;
     player = action.player;
     nextWorldState = action.worldState || nextWorldState;
     lines.push(...action.lines);
     damageEvents.push(...(action.damageEvents || []));
+    if (action.pendingReaction) {
+      return pauseCreatureTurns({
+        combat,
+        combatants,
+        player,
+        lines,
+        damageEvents,
+        nextWorldState,
+        pendingReaction: action.pendingReaction,
+        actorIndex: index,
+        actingIndexes,
+        nextOffset: offset + 1,
+        advanceRound,
+        playerDodging,
+      });
+    }
     if (Number(player.hp || 0) <= 0) break;
   }
 
   combat.round = Number(combat.round || 1) + (advanceRound ? 1 : 0);
   combat.turn_index = playerIndex;
-  combat.combatants = combatants.map((combatant, index) => (
-    index === playerIndex
-      ? {
-          ...combatant,
-          hp: player.hp,
-          temp_hp: player.temp_hp,
-          conditions: clearPlayerTurnConditions(player.conditions || combatant.conditions),
-          resistances: player.resistances || combatant.resistances,
-          vulnerabilities: player.vulnerabilities || combatant.vulnerabilities,
-          immunities: player.immunities || combatant.immunities,
-        }
-      : combatant
-  ));
+  combat.combatants = syncPlayerCombatant(combatants, playerIndex, player, { clearTurnConditions: true });
 
   return {
     combat,
@@ -101,7 +135,15 @@ function resolveCreatureTurns({
   };
 }
 
-function resolveCreatureAction({ actor, player, characterSheet, worldState, rollDie, playerDodging }) {
+function resolveCreatureAction({
+  actor,
+  player,
+  characterSheet,
+  worldState,
+  rollDie,
+  playerDodging,
+  allowReactionWindow = false,
+}) {
   const skipReason = getTurnBlockReason(actor);
   if (skipReason) {
     return {
@@ -143,57 +185,46 @@ function resolveCreatureAction({ actor, player, characterSheet, worldState, roll
   const criticalMiss = natural === 1;
 
   if (!criticalMiss && (criticalHit || attackTotal >= ac)) {
-    const damage = rollDamage(attack.damage_formula || '1d6+1', rollDie, { crit: criticalHit });
-    const before = Number(player.hp ?? getCurrentHp(characterSheet, worldState));
-    const reduction = applyPrimedGiantAncestryDamageReduction({
-      player,
-      worldState: nextWorldState,
-      characterSheet,
-      incomingDamage: damage.total,
-      rollDie,
-    });
-    const applied = applyDamageToPlayer({
-      player,
-      characterSheet,
-      worldState: reduction.worldState,
-      damage: reduction.incomingDamage,
-      damageType: attack.damage_type || attack.damageType || null,
-    });
-    const thunder = applyPrimedGiantAncestryRetaliation({
-      actor,
-      worldState: reduction.worldState,
-      characterSheet,
-      damageTaken: applied.amount,
-      rollDie,
-    });
-    const endurance = applyRelentlessEndurance({
-      player: applied.player,
-      characterSheet,
-      worldState: thunder.worldState,
-    });
-    const retaliation = getMeleeRetaliation(worldState, applied.beforeTempHp);
-    const nextActor = retaliation
-      ? { ...thunder.actor, hp: Math.max(0, Number(thunder.actor.hp || 0) - retaliation.damage) }
-      : thunder.actor;
-    const resolvedActor = consumeSapAfterAttack(nextActor);
-    const retaliationLine = retaliation
-      ? ` ${retaliation.label} lashes back for ${retaliation.damage} ${retaliation.damageType} damage. ${actor.name}: (${actor.hp} -> ${nextActor.hp} HP).`
-      : '';
-    return {
-      actor: resolvedActor,
-      player: endurance.player,
-      worldState: endurance.worldState,
-      lines: [
-        `${actor.name} uses ${attack.name}: rolls ${rollText} vs AC ${ac}${modeText}. ${criticalHit ? '**Critical hit.** ' : ''}Hit for ${applied.amount} damage${formatDamageAdjustment(applied.adjustment)}${applied.absorbed ? ` (${applied.absorbed} absorbed by temporary HP)` : ''}. ${player.name}: (${before} -> ${endurance.player.hp} HP).${endurance.line}${retaliationLine}`,
-        ...reduction.lines,
-        ...thunder.lines,
-      ],
-      damageEvents: [{
-        target: 'player',
-        source: actor.name,
-        amount: applied.amount,
-      }],
+    const frame = {
+      attack,
+      attack_roll: attackRoll,
+      attack_total: attackTotal,
+      ac_before: ac,
+      roll_text: rollText,
+      mode_text: modeText,
+      critical_hit: criticalHit,
     };
+    const pendingReaction = allowReactionWindow
+      ? buildAttackHitReaction({
+          actor,
+          attack,
+          attackRoll,
+          attackTotal,
+          ac,
+          rollText,
+          modeText,
+          criticalHit,
+          worldState: nextWorldState,
+          characterSheet,
+        })
+      : null;
+    if (pendingReaction) {
+      return {
+        actor,
+        player,
+        worldState: nextWorldState,
+        pendingReaction,
+        lines: [`${actor.name} uses ${attack.name}: rolls ${rollText} vs AC ${ac}${modeText}. **Hit pending.**`],
+      };
+    }
+    return resolveCreatureAttackHit({
+      actor,
+      player,
+      characterSheet,
+      worldState: nextWorldState,
+      rollDie,
+      frame,
+    });
   }
 
   if (criticalMiss) {
@@ -210,6 +241,73 @@ function resolveCreatureAction({ actor, player, characterSheet, worldState, roll
     player,
     worldState: nextWorldState,
     lines: [`${actor.name} uses ${attack.name}: rolls ${rollText} vs AC ${ac}${modeText}. Miss.`],
+  };
+}
+
+function resolveCreatureAttackHit({ actor, player, characterSheet, worldState, rollDie, frame = {} }) {
+  const attack = frame.attack || actor.attack || { name: 'attack', damage_formula: '1d6+1' };
+  const ac = Number(player.ac || getArmorClass(characterSheet, worldState));
+  const criticalHit = Boolean(frame.critical_hit);
+  const stillHits = criticalHit || Number(frame.attack_total || 0) >= ac;
+  if (!stillHits) {
+    return {
+      actor: consumeSapAfterAttack(actor),
+      player,
+      worldState,
+      lines: [`${actor.name} uses ${attack.name}: rolls ${frame.roll_text} vs AC ${ac}${frame.mode_text || ''}. **Shield turns the triggering hit into a miss.**`],
+    };
+  }
+
+  const damage = rollDamage(attack.damage_formula || '1d6+1', rollDie, { crit: criticalHit });
+  const before = Number(player.hp ?? getCurrentHp(characterSheet, worldState));
+  const reduction = applyPrimedGiantAncestryDamageReduction({
+    player,
+    worldState,
+    characterSheet,
+    incomingDamage: damage.total,
+    rollDie,
+  });
+  const applied = applyDamageToPlayer({
+    player,
+    characterSheet,
+    worldState: reduction.worldState,
+    damage: reduction.incomingDamage,
+    damageType: attack.damage_type || attack.damageType || null,
+  });
+  const thunder = applyPrimedGiantAncestryRetaliation({
+    actor,
+    worldState: reduction.worldState,
+    characterSheet,
+    damageTaken: applied.amount,
+    rollDie,
+  });
+  const endurance = applyRelentlessEndurance({
+    player: applied.player,
+    characterSheet,
+    worldState: thunder.worldState,
+  });
+  const retaliation = getMeleeRetaliation(worldState, applied.beforeTempHp);
+  const nextActor = retaliation
+    ? { ...thunder.actor, hp: Math.max(0, Number(thunder.actor.hp || 0) - retaliation.damage) }
+    : thunder.actor;
+  const resolvedActor = consumeSapAfterAttack(nextActor);
+  const retaliationLine = retaliation
+    ? ` ${retaliation.label} lashes back for ${retaliation.damage} ${retaliation.damageType} damage. ${actor.name}: (${actor.hp} -> ${nextActor.hp} HP).`
+    : '';
+  return {
+    actor: resolvedActor,
+    player: endurance.player,
+    worldState: endurance.worldState,
+    lines: [
+      `${actor.name} uses ${attack.name}: rolls ${frame.roll_text} vs AC ${ac}${frame.mode_text || ''}. ${criticalHit ? '**Critical hit.** ' : ''}Hit for ${applied.amount} damage${formatDamageAdjustment(applied.adjustment)}${applied.absorbed ? ` (${applied.absorbed} absorbed by temporary HP)` : ''}. ${player.name}: (${before} -> ${endurance.player.hp} HP).${endurance.line}${retaliationLine}`,
+      ...reduction.lines,
+      ...thunder.lines,
+    ],
+    damageEvents: [{
+      target: 'player',
+      source: actor.name,
+      amount: applied.amount,
+    }],
   };
 }
 
@@ -244,6 +342,77 @@ function applyRelentlessEndurance({ player = {}, characterSheet = {}, worldState
     worldState: spent.worldState,
     line: ' **Relentless Endurance** keeps you at 1 HP instead of dropping to 0.',
   };
+}
+
+function pauseCreatureTurns({
+  combat,
+  combatants,
+  player,
+  lines,
+  damageEvents,
+  nextWorldState,
+  pendingReaction,
+  actorIndex,
+  actingIndexes,
+  nextOffset,
+  advanceRound,
+  playerDodging,
+}) {
+  const playerIndex = combatants.findIndex((combatant) => combatant.is_player);
+  combat.turn_index = actorIndex;
+  combat.combatants = syncPlayerCombatant(combatants, playerIndex, player);
+  return {
+    combat,
+    player,
+    lines,
+    damageEvents,
+    paused: true,
+    roundsElapsed: 0,
+    worldState: nextWorldState,
+    pendingReaction: {
+      ...pendingReaction,
+      resume: {
+        type: 'creature_turns',
+        acting_indexes: actingIndexes,
+        next_offset: nextOffset,
+        actor_index: actorIndex,
+        advance_round: Boolean(advanceRound),
+        player_dodging: Boolean(playerDodging),
+        damage_events: damageEvents,
+      },
+    },
+  };
+}
+
+function resumeCreatureTurns({ worldState = {}, characterSheet = {}, rollDie = defaultRollDie, pendingReaction = null } = {}) {
+  if (!pendingReaction?.resume) return null;
+  return resolveCreatureTurns({
+    worldState,
+    characterSheet,
+    rollDie,
+    playerDodging: Boolean(pendingReaction.resume.player_dodging),
+    advanceRound: Boolean(pendingReaction.resume.advance_round),
+    resumeReaction: pendingReaction,
+  });
+}
+
+function syncPlayerCombatant(combatants = [], playerIndex, player = {}, { clearTurnConditions = false } = {}) {
+  return combatants.map((combatant, index) => (
+    index === playerIndex
+      ? {
+          ...combatant,
+          hp: player.hp,
+          temp_hp: player.temp_hp,
+          ac: player.ac ?? combatant.ac,
+          conditions: clearTurnConditions
+            ? clearPlayerTurnConditions(player.conditions || combatant.conditions)
+            : player.conditions || combatant.conditions,
+          resistances: player.resistances || combatant.resistances,
+          vulnerabilities: player.vulnerabilities || combatant.vulnerabilities,
+          immunities: player.immunities || combatant.immunities,
+        }
+      : combatant
+  ));
 }
 
 function getActingIndexes(combatants, turnIndex, playerIndex, advanceRound) {
@@ -399,6 +568,7 @@ function normalizeId(value) {
 
 module.exports = {
   resolveCreatureTurns,
+  resumeCreatureTurns,
   resolveCreatureAction,
   getActingIndexes,
   getTurnSkipReason: getTurnBlockReason,
