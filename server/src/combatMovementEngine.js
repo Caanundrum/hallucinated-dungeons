@@ -12,7 +12,11 @@ const {
   setHexPosition,
 } = require('./combatPositionEngine');
 const { getTurnBlockReason } = require('./conditionEngine');
-const { resolveCreatureAction } = require('./creatureTurnEngine');
+const {
+  resolveCreatureAction,
+  resolveCreatureAttackHit,
+} = require('./creatureTurnEngine');
+const { formatPendingReactionPrompt } = require('./reactionEngine');
 
 function resolveDashAction({
   message = '',
@@ -101,7 +105,42 @@ function resolveCombatMovement({
     characterSheet,
     rollDie,
     destination: movement.to,
+    allowReactionWindow: true,
   });
+  if (opportunity.paused) {
+    return pauseCombatMovement({ opportunity, movement });
+  }
+  return finishCombatMovement({ opportunity, movement, characterSheet });
+}
+
+function resumeCombatMovement({
+  worldState = {},
+  characterSheet = {},
+  rollDie = defaultRollDie,
+  pendingReaction = null,
+  reactionNote = '',
+} = {}) {
+  if (pendingReaction?.resume?.type !== 'combat_movement') return null;
+
+  const movement = pendingReaction.resume.movement;
+  if (!movement) return null;
+  const opportunity = resolveOpportunityAttacks({
+    message: pendingReaction.resume.message,
+    worldState,
+    characterSheet,
+    rollDie,
+    destination: pendingReaction.resume.destination,
+    allowReactionWindow: true,
+    resumeReaction: pendingReaction,
+  });
+  opportunity.lines = [reactionNote, ...opportunity.lines].filter(Boolean);
+  if (opportunity.paused) {
+    return pauseCombatMovement({ opportunity, movement });
+  }
+  return finishCombatMovement({ opportunity, movement, characterSheet });
+}
+
+function finishCombatMovement({ opportunity, movement, characterSheet }) {
   if (Number(opportunity.player?.hp || 0) <= 0) {
     return resolved('referee_combat_movement_stopped', opportunity.worldState, [
       ...opportunity.lines,
@@ -122,28 +161,83 @@ function resolveCombatMovement({
   ], opportunity.damageEvents);
 }
 
+function pauseCombatMovement({ opportunity, movement }) {
+  const pendingReaction = {
+    ...opportunity.pendingReaction,
+    resume: {
+      ...(opportunity.pendingReaction?.resume || {}),
+      movement,
+    },
+  };
+  return resolved('referee_combat_movement_reaction', {
+    ...opportunity.worldState,
+    pending_reaction: pendingReaction,
+  }, [
+    ...opportunity.lines,
+    formatPendingReactionPrompt(pendingReaction),
+  ], opportunity.damageEvents);
+}
+
 function resolveOpportunityAttacks({
   message = '',
   worldState = {},
   characterSheet = {},
   rollDie = defaultRollDie,
   destination = null,
+  allowReactionWindow = false,
+  resumeReaction = null,
 } = {}) {
   const combat = clone(worldState.combat_state);
   const combatants = combat.combatants || [];
   const playerIndex = combatants.findIndex((combatant) => combatant.is_player);
   let player = combatants[playerIndex];
   let nextWorldState = { ...worldState, combat_state: combat };
+  const continuation = resumeReaction?.resume?.type === 'combat_movement'
+    ? resumeReaction.resume
+    : null;
   const lines = [];
-  const damageEvents = [];
-  let assumedSceneZone = false;
+  const damageEvents = [...(continuation?.damage_events || [])];
+  let assumedSceneZone = Boolean(continuation?.assumed_scene_zone);
   const disengaged = Boolean(combat.turn_resources?.disengaged);
 
   if (!player || disengaged) {
     return { worldState: nextWorldState, combat, player, lines, damageEvents, assumedSceneZone };
   }
 
-  for (let index = 0; index < combatants.length; index += 1) {
+  let startIndex = 0;
+  if (continuation) {
+    const actorIndex = Number(continuation.actor_index);
+    const actor = combatants[actorIndex];
+    if (actor && !actor.is_player && Number(actor.hp || 0) > 0) {
+      const attack = resolveCreatureAttackHit({
+        actor,
+        player,
+        characterSheet,
+        worldState: nextWorldState,
+        rollDie,
+        frame: resumeReaction.attack_frame,
+      });
+      combatants[actorIndex] = {
+        ...attack.actor,
+        reaction_available: false,
+      };
+      player = attack.player;
+      nextWorldState = syncOpportunityAttackState({
+        worldState: attack.worldState || nextWorldState,
+        combat,
+        player,
+        playerIndex,
+      });
+      lines.push(`**Opportunity Attack:** ${attack.lines.join('\n\n')}`);
+      damageEvents.push(...(attack.damageEvents || []));
+    }
+    startIndex = Number(continuation.next_index || 0);
+    if (Number(player.hp || 0) <= 0) {
+      return { worldState: nextWorldState, combat, player, lines, damageEvents, assumedSceneZone };
+    }
+  }
+
+  for (let index = startIndex; index < combatants.length; index += 1) {
     const actor = combatants[index];
     const trigger = getOpportunityAttackTrigger({
       actor,
@@ -161,28 +255,62 @@ function resolveOpportunityAttacks({
       worldState: nextWorldState,
       rollDie,
       playerDodging: false,
+      allowReactionWindow,
     });
     combatants[index] = {
       ...attack.actor,
       reaction_available: false,
     };
     player = attack.player;
-    combatants[playerIndex] = {
-      ...combatants[playerIndex],
-      hp: player.hp,
-      temp_hp: player.temp_hp,
-      conditions: player.conditions || combatants[playerIndex].conditions,
-    };
-    nextWorldState = syncPlayerState({
-      ...(attack.worldState || nextWorldState),
-      combat_state: combat,
-    }, player);
+    nextWorldState = syncOpportunityAttackState({
+      worldState: attack.worldState || nextWorldState,
+      combat,
+      player,
+      playerIndex,
+    });
     lines.push(`**Opportunity Attack:** ${attack.lines.join('\n\n')}`);
     damageEvents.push(...(attack.damageEvents || []));
+    if (attack.pendingReaction) {
+      return {
+        worldState: nextWorldState,
+        combat,
+        player,
+        lines,
+        damageEvents,
+        assumedSceneZone,
+        paused: true,
+        pendingReaction: {
+          ...attack.pendingReaction,
+          resume: {
+            type: 'combat_movement',
+            message,
+            destination,
+            actor_index: index,
+            next_index: index + 1,
+            assumed_scene_zone: assumedSceneZone,
+            damage_events: damageEvents,
+          },
+        },
+      };
+    }
     if (Number(player.hp || 0) <= 0) break;
   }
 
   return { worldState: nextWorldState, combat, player, lines, damageEvents, assumedSceneZone };
+}
+
+function syncOpportunityAttackState({ worldState = {}, combat = {}, player = {}, playerIndex = -1 }) {
+  combat.combatants[playerIndex] = {
+    ...combat.combatants[playerIndex],
+    hp: player.hp,
+    temp_hp: player.temp_hp,
+    ac: player.ac ?? combat.combatants[playerIndex]?.ac,
+    conditions: player.conditions || combat.combatants[playerIndex]?.conditions,
+  };
+  return syncPlayerState({
+    ...worldState,
+    combat_state: combat,
+  }, player);
 }
 
 function getOpportunityAttackTrigger({
@@ -401,4 +529,5 @@ module.exports = {
   resolveDashAction,
   resolveDisengageAction,
   resolveOpportunityAttacks,
+  resumeCombatMovement,
 };

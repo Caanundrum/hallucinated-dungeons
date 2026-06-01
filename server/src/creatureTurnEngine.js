@@ -570,6 +570,7 @@ module.exports = {
   resolveCreatureTurns,
   resumeCreatureTurns,
   resolveCreatureAction,
+  resolveCreatureAttackHit,
   getActingIndexes,
   getTurnSkipReason: getTurnBlockReason,
 };

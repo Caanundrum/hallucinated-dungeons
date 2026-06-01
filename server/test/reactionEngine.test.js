@@ -9,6 +9,7 @@ const {
   adjudicate,
   advanceEnemyTurns,
 } = require('../src/refereeCore');
+const { resolveCombatMovement } = require('../src/combatMovementEngine');
 
 const wizardSheet = {
   identity: { name: 'Mira', level: 1, class: 'wizard', class_name: 'Wizard' },
@@ -263,4 +264,181 @@ test('damage before a later Reaction pause still prompts the eventual concentrat
   assert.equal(secondPending.worldState.pending_reaction.trigger, 'attack_hit');
   assert.equal(resolved.worldState.pending_roll.kind, 'concentration_save');
   assert.match(resolved.reply, /Concentration is at risk/);
+});
+
+test('Shield pauses an Opportunity Attack before movement and resumes the original movement after the miss', () => {
+  const pending = adjudicate({
+    message: 'I retreat 10 feet away from the skeleton.',
+    worldState: combatWorld(),
+    characterSheet: wizardSheet,
+    rollDie: sequenceRolls([12]),
+  });
+  const skeletonBefore = pending.worldState.combat_state.combatants.find((entry) => entry.name === 'Skeleton');
+  const resolved = adjudicate({
+    message: 'Cast Shield.',
+    worldState: pending.worldState,
+    characterSheet: wizardSheet,
+    rollDie: sequenceRolls([4]),
+  });
+  const skeletonAfter = resolved.worldState.combat_state.combatants.find((entry) => entry.name === 'Skeleton');
+
+  assert.equal(pending.worldState.pending_reaction.resume.type, 'combat_movement');
+  assert.equal(pending.worldState.combat_state.turn_resources.movement_remaining, 30);
+  assert.equal(pending.worldState.player_stats.last_movement, undefined);
+  assert.equal(skeletonBefore.reaction_available, false);
+  assert.equal(resolved.worldState.pending_reaction, null);
+  assert.equal(resolved.worldState.player_stats.hp, 8);
+  assert.equal(resolved.worldState.player_stats.spell_slots[1], 0);
+  assert.equal(resolved.worldState.player_stats.armor_class, 17);
+  assert.equal(resolved.worldState.combat_state.turn_resources.reaction_available, false);
+  assert.equal(resolved.worldState.combat_state.turn_resources.movement_remaining, 20);
+  assert.equal(resolved.worldState.player_stats.last_movement.feet, 10);
+  assert.equal(skeletonAfter.reaction_available, false);
+  assert.match(resolved.reply, /Shield turns the triggering hit into a miss/);
+  assert.match(resolved.reply, /You move 10 feet/);
+});
+
+test('hex movement does not update the player position until a Shielded Opportunity Attack resolves', () => {
+  const destination = { map_id: 'crypt', q: -2, r: 0 };
+  const pending = resolveCombatMovement({
+    message: 'I retreat from the skeleton.',
+    worldState: combatWorld({
+      combatants: [
+        { name: 'Mira', initiative: 18, hp: 8, max_hp: 8, ac: 12, is_player: true, conditions: [], position: { map_id: 'crypt', q: 0, r: 0 } },
+        combatant('Skeleton', 8, { position: { map_id: 'crypt', q: 1, r: 0 } }),
+      ],
+    }),
+    characterSheet: wizardSheet,
+    destination,
+    rollDie: sequenceRolls([12]),
+  });
+  const before = pending.worldState.combat_state.combatants.find((entry) => entry.is_player);
+  const resolved = adjudicate({
+    message: 'Cast Shield.',
+    worldState: pending.worldState,
+    characterSheet: wizardSheet,
+    rollDie: sequenceRolls([4]),
+  });
+  const after = resolved.worldState.combat_state.combatants.find((entry) => entry.is_player);
+
+  assert.deepEqual(before.position, { map_id: 'crypt', q: 0, r: 0 });
+  assert.deepEqual(after.position, destination);
+  assert.equal(resolved.worldState.player_stats.last_movement.mode, 'hex');
+});
+
+test('declining an Opportunity Attack that drops the player stops movement before spending feet', () => {
+  const state = combatWorld();
+  state.player_stats.hp = 3;
+  state.combat_state.combatants[0].hp = 3;
+  const pending = adjudicate({
+    message: 'I flee 10 feet away from the skeleton.',
+    worldState: state,
+    characterSheet: wizardSheet,
+    rollDie: sequenceRolls([12]),
+  });
+  const resolved = adjudicate({
+    message: 'Decline reaction.',
+    worldState: pending.worldState,
+    characterSheet: wizardSheet,
+    rollDie: sequenceRolls([4]),
+  });
+
+  assert.equal(resolved.worldState.player_stats.hp, 0);
+  assert.equal(resolved.worldState.combat_state.turn_resources.movement_remaining, 30);
+  assert.equal(resolved.worldState.player_stats.last_movement, undefined);
+  assert.match(resolved.reply, /stops your movement before you leave reach/);
+});
+
+test('declining one Opportunity Attack can open a later Shield window without losing the original movement', () => {
+  const state = combatWorld({
+    combatants: [
+      { name: 'Mira', initiative: 18, hp: 8, max_hp: 8, ac: 12, is_player: true, conditions: [] },
+      combatant('Skeleton', 8),
+      combatant('Cultist', 6),
+    ],
+  });
+  const firstPending = adjudicate({
+    message: 'I retreat 10 feet away.',
+    worldState: state,
+    characterSheet: wizardSheet,
+    rollDie: sequenceRolls([12]),
+  });
+  const secondPending = adjudicate({
+    message: 'Decline reaction.',
+    worldState: firstPending.worldState,
+    characterSheet: wizardSheet,
+    rollDie: sequenceRolls([2, 12]),
+  });
+  const resolved = adjudicate({
+    message: 'Cast Shield.',
+    worldState: secondPending.worldState,
+    characterSheet: wizardSheet,
+    rollDie: sequenceRolls([4]),
+  });
+
+  assert.equal(secondPending.worldState.player_stats.hp, 5);
+  assert.equal(secondPending.worldState.combat_state.turn_resources.movement_remaining, 30);
+  assert.equal(secondPending.worldState.pending_reaction.resume.movement.feet, 10);
+  assert.equal(resolved.worldState.player_stats.hp, 5);
+  assert.equal(resolved.worldState.combat_state.turn_resources.movement_remaining, 20);
+  assert.equal(resolved.worldState.player_stats.last_movement.feet, 10);
+  assert.match(resolved.reply, /Cultist uses claw/);
+  assert.match(resolved.reply, /You move 10 feet/);
+});
+
+test('damage from a declined Opportunity Attack still prompts concentration after resumed movement', () => {
+  const state = combatWorld();
+  state.active_effects = [{
+    id: 'detect_magic',
+    name: 'Detect Magic',
+    concentration: true,
+    remaining_rounds: 100,
+  }];
+  const pending = adjudicate({
+    message: 'I retreat 10 feet away from the skeleton.',
+    worldState: state,
+    characterSheet: wizardSheet,
+    rollDie: sequenceRolls([12]),
+  });
+  const resolved = adjudicate({
+    message: 'Decline reaction.',
+    worldState: pending.worldState,
+    characterSheet: wizardSheet,
+    rollDie: sequenceRolls([2]),
+  });
+
+  assert.equal(resolved.worldState.player_stats.hp, 5);
+  assert.equal(resolved.worldState.player_stats.last_movement.feet, 10);
+  assert.equal(resolved.worldState.pending_roll.kind, 'concentration_save');
+  assert.match(resolved.reply, /Concentration is at risk/);
+});
+
+test('Dash keeps its granted movement through a Shielded Opportunity Attack and spends distance once', () => {
+  const state = combatWorld();
+  state.combat_state.turn_resources = {
+    actor: 'player',
+    action_available: true,
+    bonus_action_available: true,
+    reaction_available: true,
+    movement_remaining: 30,
+    used: [],
+  };
+  const pending = adjudicate({
+    message: 'I Dash and retreat 40 feet away from the skeleton.',
+    worldState: state,
+    characterSheet: wizardSheet,
+    rollDie: sequenceRolls([12]),
+  });
+  const resolved = adjudicate({
+    message: 'Cast Shield.',
+    worldState: pending.worldState,
+    characterSheet: wizardSheet,
+    rollDie: sequenceRolls([4]),
+  });
+
+  assert.equal(pending.worldState.combat_state.turn_resources.action_available, false);
+  assert.equal(pending.worldState.combat_state.turn_resources.movement_remaining, 60);
+  assert.equal(resolved.worldState.combat_state.turn_resources.movement_remaining, 20);
+  assert.equal(resolved.worldState.player_stats.last_movement.feet, 40);
+  assert.match(resolved.reply, /You move 40 feet/);
 });

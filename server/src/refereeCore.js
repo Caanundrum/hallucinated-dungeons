@@ -93,6 +93,7 @@ const {
   resolveCombatMovement,
   resolveDashAction,
   resolveDisengageAction,
+  resumeCombatMovement,
 } = require('./combatMovementEngine');
 
 const DEFAULT_CHECK_DC = 15;
@@ -1163,6 +1164,8 @@ function finishCombatMovementAction({ result, characterSheet }) {
 
   let nextState = result.worldState;
   const lines = [result.reply];
+  if (nextState.pending_reaction) return result;
+
   const hp = Number(nextState.player_stats?.hp ?? getCurrentHp(characterSheet, nextState));
   if (hp <= 0) {
     const ended = endConcentration(nextState, characterSheet);
@@ -1789,20 +1792,29 @@ function resolvePendingReaction({ message, worldState, characterSheet, rollDie =
   const reaction = resolvePendingReactionChoice({ message, worldState, characterSheet });
   if (!reaction?.resolved) return reaction;
 
+  if (reaction.pendingReaction?.resume?.type === 'combat_movement') {
+    const movement = resumeCombatMovement({
+      worldState: reaction.worldState,
+      characterSheet,
+      rollDie,
+      pendingReaction: reaction.pendingReaction,
+      reactionNote: reaction.reply,
+    });
+    if (!movement) return failedReactionResume({ worldState });
+    return {
+      ...finishCombatMovementAction({ result: movement, characterSheet }),
+      handled: true,
+      logType: reaction.logType,
+    };
+  }
+
   const creatureTurns = resumeCreatureTurns({
     worldState: reaction.worldState,
     characterSheet,
     rollDie,
     pendingReaction: reaction.pendingReaction,
   });
-  if (!creatureTurns) {
-    return {
-      handled: true,
-      logType: 'referee_reaction_resume_failed',
-      worldState,
-      reply: 'The Reaction window could not resume its interrupted attack. The referee stopped combat state here instead of guessing.',
-    };
-  }
+  if (!creatureTurns) return failedReactionResume({ worldState });
 
   const resumed = finishCreatureTurns({
     creatureTurns,
@@ -1814,6 +1826,15 @@ function resolvePendingReaction({ message, worldState, characterSheet, rollDie =
     handled: true,
     logType: reaction.logType,
     ...resumed,
+  };
+}
+
+function failedReactionResume({ worldState }) {
+  return {
+    handled: true,
+    logType: 'referee_reaction_resume_failed',
+    worldState,
+    reply: 'The Reaction window could not resume its interrupted action. The referee stopped combat state here instead of guessing.',
   };
 }
 

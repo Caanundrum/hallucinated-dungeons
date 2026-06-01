@@ -1,5 +1,5 @@
 {
-  "version": "4C.6-H12",
+  "version": "4C.6-H13",
   "status_definitions": {
     "implemented": "Exposed and mechanically enforced for the current supported level/scope.",
     "partial": "Exposed and partially enforced, but missing at least one meaningful rules interaction.",
@@ -21,7 +21,7 @@
     "shove": { "status": "implemented", "implementation": "Shove uses Attack action option and target save." },
     "study": { "status": "partial", "implementation": "Prompts Investigation/Insight-style checks, but object/NPC knowledge state is incomplete." },
     "utilize": { "status": "partial", "implementation": "Object interaction exists through narration/spatial guard, not full item rules." },
-    "opportunity_attack": { "status": "partial", "implementation": "Enemy melee reactions resolve when the active player leaves reach; player reactions to future creature movement remain deferred." },
+    "opportunity_attack": { "status": "partial", "implementation": "Enemy melee reactions resolve before the active player leaves reach, including resumable Shield windows; player Opportunity Attacks against future creature movement remain deferred." },
     "object_interaction": { "status": "partial", "implementation": "Spatial guard checks presence; item/object state is not complete." }
   },
   "conditions": {
