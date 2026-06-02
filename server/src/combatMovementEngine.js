@@ -17,6 +17,11 @@ const {
   resolveCreatureAttackHit,
 } = require('./creatureTurnEngine');
 const { formatPendingReactionPrompt } = require('./reactionEngine');
+const {
+  REACTION_RESUME_STAGES,
+  REACTION_RESUME_TYPES,
+  buildReactionResume,
+} = require('./refereeContracts');
 
 function resolveDashAction({
   message = '',
@@ -120,7 +125,7 @@ function resumeCombatMovement({
   pendingReaction = null,
   reactionNote = '',
 } = {}) {
-  if (pendingReaction?.resume?.type !== 'combat_movement') return null;
+  if (pendingReaction?.resume?.type !== REACTION_RESUME_TYPES.COMBAT_MOVEMENT) return null;
 
   const movement = pendingReaction.resume.movement;
   if (!movement) return null;
@@ -192,7 +197,7 @@ function resolveOpportunityAttacks({
   const playerIndex = combatants.findIndex((combatant) => combatant.is_player);
   let player = combatants[playerIndex];
   let nextWorldState = { ...worldState, combat_state: combat };
-  const continuation = resumeReaction?.resume?.type === 'combat_movement'
+  const continuation = resumeReaction?.resume?.type === REACTION_RESUME_TYPES.COMBAT_MOVEMENT
     ? resumeReaction.resume
     : null;
   const lines = [];
@@ -209,7 +214,7 @@ function resolveOpportunityAttacks({
     const actorIndex = Number(continuation.actor_index);
     const actor = combatants[actorIndex];
     if (
-      continuation.stage !== 'after_attack'
+      continuation.stage !== REACTION_RESUME_STAGES.AFTER_ATTACK
       && actor
       && !actor.is_player
       && Number(actor.hp || 0) > 0
@@ -247,16 +252,16 @@ function resolveOpportunityAttacks({
           paused: true,
           pendingReaction: {
             ...attack.pendingReaction,
-            resume: {
-              type: 'combat_movement',
+            resume: buildReactionResume({
+              type: REACTION_RESUME_TYPES.COMBAT_MOVEMENT,
               message: continuation.message,
               destination: continuation.destination,
               actor_index: actorIndex,
               next_index: Number(continuation.next_index || 0),
               assumed_scene_zone: assumedSceneZone,
               damage_events: damageEvents,
-              stage: attack.pendingReaction.resume_stage || 'before_attack',
-            },
+              stage: attack.pendingReaction.resume_stage || REACTION_RESUME_STAGES.BEFORE_ATTACK,
+            }),
           },
         };
       }
@@ -311,16 +316,16 @@ function resolveOpportunityAttacks({
         paused: true,
         pendingReaction: {
           ...attack.pendingReaction,
-          resume: {
-            type: 'combat_movement',
+          resume: buildReactionResume({
+            type: REACTION_RESUME_TYPES.COMBAT_MOVEMENT,
             message,
             destination,
             actor_index: index,
             next_index: index + 1,
             assumed_scene_zone: assumedSceneZone,
             damage_events: damageEvents,
-            stage: attack.pendingReaction.resume_stage || 'before_attack',
-          },
+            stage: attack.pendingReaction.resume_stage || REACTION_RESUME_STAGES.BEFORE_ATTACK,
+          }),
         },
       };
     }

@@ -15,6 +15,7 @@ const {
 } = require('./resourceEngine');
 const { applyActiveEffectsToWorldState } = require('./spellEffectEngine');
 const { resolveGiantAncestryAction } = require('./giantAncestryEngine');
+const { assertValidRulesEffects } = require('./refereeContracts');
 
 function resolveSpeciesFeatureAction({ message = '', worldState = {}, characterSheet = {}, rollDie = defaultRollDie } = {}) {
   const giantAncestry = resolveGiantAncestryAction({ message, worldState, characterSheet });
@@ -249,6 +250,7 @@ function grantTemporaryHpToActiveCharacter(worldState = {}, characterSheet = {},
 }
 
 function addOrReplaceFeatureEffect(worldState = {}, effect, characterSheet = {}) {
+  assertValidRulesEffects(effect.rules_effects || [], `rules effects for ${effect.id || 'species feature'}`);
   const activeEffects = Array.isArray(worldState.active_effects) ? worldState.active_effects : [];
   return applyActiveEffectsToWorldState(worldState, [...activeEffects.filter((item) => item.id !== effect.id), effect], characterSheet);
 }

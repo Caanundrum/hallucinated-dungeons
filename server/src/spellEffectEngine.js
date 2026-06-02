@@ -23,6 +23,7 @@ const {
   hasOriginFeat,
 } = require('./originFeatEngine');
 const { applyGiantAncestryOnHit } = require('./giantAncestryEngine');
+const { assertValidRulesEffects } = require('./refereeContracts');
 
 const CONCENTRATION_DURATIONS = {
   bless: 'Concentration, up to 1 minute',
@@ -757,7 +758,7 @@ function getRulesEffectsForSpell(spell, { message = '' } = {}) {
   };
 
   if (effectsBySpell[spell.id]) {
-    return effectsBySpell[spell.id];
+    return assertValidRulesEffects(effectsBySpell[spell.id], `rules effects for ${spell.id}`);
   }
   return [];
 }

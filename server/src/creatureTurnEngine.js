@@ -25,6 +25,11 @@ const {
   buildAttackHitReaction,
   buildDamageTakenReaction,
 } = require('./reactionEngine');
+const {
+  REACTION_RESUME_STAGES,
+  REACTION_RESUME_TYPES,
+  buildReactionResume,
+} = require('./refereeContracts');
 
 function resolveCreatureTurns({
   worldState = {},
@@ -53,7 +58,7 @@ function resolveCreatureTurns({
 
   let player = combatants[playerIndex];
   let nextWorldState = worldState;
-  const continuation = resumeReaction?.resume?.type === 'creature_turns'
+  const continuation = resumeReaction?.resume?.type === REACTION_RESUME_TYPES.CREATURE_TURNS
     ? resumeReaction.resume
     : null;
   const actingIndexes = continuation?.acting_indexes
@@ -66,7 +71,7 @@ function resolveCreatureTurns({
     const actorIndex = Number(continuation.actor_index);
     const actor = combatants[actorIndex];
     if (
-      continuation.stage !== 'after_attack'
+      continuation.stage !== REACTION_RESUME_STAGES.AFTER_ATTACK
       && actor
       && !actor.is_player
       && Number(actor.hp || 0) > 0
@@ -416,16 +421,16 @@ function pauseCreatureTurns({
     worldState: nextWorldState,
     pendingReaction: {
       ...pendingReaction,
-      resume: {
-        type: 'creature_turns',
+      resume: buildReactionResume({
+        type: REACTION_RESUME_TYPES.CREATURE_TURNS,
         acting_indexes: actingIndexes,
         next_offset: nextOffset,
         actor_index: actorIndex,
         advance_round: Boolean(advanceRound),
         player_dodging: Boolean(playerDodging),
         damage_events: damageEvents,
-        stage: pendingReaction.resume_stage || 'before_attack',
-      },
+        stage: pendingReaction.resume_stage || REACTION_RESUME_STAGES.BEFORE_ATTACK,
+      }),
     },
   };
 }

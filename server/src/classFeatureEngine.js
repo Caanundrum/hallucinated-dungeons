@@ -11,6 +11,7 @@ const {
   applyHealing,
   rollDamageFormula,
 } = require('./damageHealingEngine');
+const { assertValidRulesEffects } = require('./refereeContracts');
 
 function resolveFeatureAction({ message = '', worldState = {}, characterSheet = {}, rollDie = defaultRollDie } = {}) {
   const intent = getFeatureIntent(message);
@@ -280,6 +281,7 @@ function healActiveCharacter(worldState = {}, characterSheet = {}, amount = 0) {
 }
 
 function addOrReplaceFeatureEffect(worldState = {}, effect, characterSheet = {}) {
+  assertValidRulesEffects(effect.rules_effects || [], `rules effects for ${effect.id || 'class feature'}`);
   const activeEffects = Array.isArray(worldState.active_effects) ? worldState.active_effects : [];
   const retained = activeEffects.filter((item) => item.id !== effect.id);
   return applyActiveEffectsToWorldState(worldState, [...retained, effect], characterSheet);

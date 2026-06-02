@@ -3,21 +3,27 @@ const { getCombatantDistanceFeet } = require('./combatPositionEngine');
 const { getContentBundle } = require('./contentData');
 const { resolveSpellCast, resolveSpellOutcome } = require('./spellEffectEngine');
 const { getKnownSpellInfo } = require('./spellcastingEngine');
+const {
+  REACTION_RESUME_STAGES,
+  REACTION_TRIGGERS,
+  buildPendingReactionWindow,
+  defineReactionDefinition,
+} = require('./refereeContracts');
 
 const REACTION_DEFINITIONS = {
-  shield: {
+  shield: defineReactionDefinition({
     id: 'shield',
-    trigger: 'attack_hit',
+    trigger: REACTION_TRIGGERS.ATTACK_HIT,
     spellId: 'shield',
     label: 'Cast Shield',
     canOffer({ worldState }) {
       return !(worldState.active_effects || []).some((effect) => effect.id === 'shield');
     },
     reply: 'You spend your **Reaction** and cast **Shield**. Your AC rises by 5 until the start of your next turn, including against the interrupted attack.',
-  },
-  hellish_rebuke: {
+  }),
+  hellish_rebuke: defineReactionDefinition({
     id: 'hellish_rebuke',
-    trigger: 'damage_taken',
+    trigger: REACTION_TRIGGERS.DAMAGE_TAKEN,
     spellId: 'hellish_rebuke',
     label: 'Cast Hellish Rebuke',
     resolveOutcome: true,
@@ -30,7 +36,7 @@ const REACTION_DEFINITIONS = {
         && actor.visible !== false
         && (distance === null || distance <= 60);
     },
-  },
+  }),
 };
 
 function buildAttackHitReaction({
@@ -46,7 +52,7 @@ function buildAttackHitReaction({
   characterSheet = {},
 } = {}) {
   return buildReactionWindow({
-    trigger: 'attack_hit',
+    trigger: REACTION_TRIGGERS.ATTACK_HIT,
     triggerLabel: `${actor.name || 'Creature'}'s ${attack.name || 'attack'}`,
     triggerPrompt: `${actor.name || 'A creature'}'s ${attack.name || 'attack'} would hit.`,
     worldState,
@@ -75,10 +81,10 @@ function buildDamageTakenReaction({
   characterSheet = {},
 } = {}) {
   return buildReactionWindow({
-    trigger: 'damage_taken',
+    trigger: REACTION_TRIGGERS.DAMAGE_TAKEN,
     triggerLabel: `${actor.name || 'Creature'}'s ${attack.name || 'attack'}`,
     triggerPrompt: `${actor.name || 'A creature'} dealt ${Number(damageTaken || 0)} damage.`,
-    resumeStage: 'after_attack',
+    resumeStage: REACTION_RESUME_STAGES.AFTER_ATTACK,
     worldState,
     characterSheet,
     context: {
@@ -100,7 +106,7 @@ function buildReactionWindow({
   trigger,
   triggerLabel,
   triggerPrompt,
-  resumeStage = 'before_attack',
+  resumeStage = REACTION_RESUME_STAGES.BEFORE_ATTACK,
   worldState = {},
   characterSheet = {},
   context = {},
@@ -109,16 +115,14 @@ function buildReactionWindow({
   const options = getReactionOptions({ trigger, worldState, characterSheet, context });
   if (options.length === 0) return null;
 
-  return {
-    id: `reaction_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    kind: 'player_reaction',
+  return buildPendingReactionWindow({
     trigger,
-    trigger_label: triggerLabel,
-    trigger_prompt: triggerPrompt,
-    resume_stage: resumeStage,
+    triggerLabel,
+    triggerPrompt,
+    resumeStage,
     options,
     ...extra,
-  };
+  });
 }
 
 function getReactionOptions({ trigger, worldState = {}, characterSheet = {}, context = {} } = {}) {

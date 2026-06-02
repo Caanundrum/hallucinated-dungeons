@@ -1,6 +1,10 @@
 const { filterActivePartyPresenceRows } = require('./partyPresence');
+const {
+  REFEREE_CONTRACT_VERSION,
+  assertValidEntity,
+} = require('./refereeContracts');
 
-const RULES_CONTEXT_VERSION = '4C.6-B';
+const RULES_CONTEXT_VERSION = REFEREE_CONTRACT_VERSION;
 
 function buildRulesContext({
   sessionId = null,
@@ -96,7 +100,7 @@ function buildRulesContext({
 
   mergeCombatants(entityMap, worldState, characterSheet, position);
 
-  const entities = [...entityMap.values()];
+  const entities = [...entityMap.values()].map(assertValidEntity);
   return {
     version: RULES_CONTEXT_VERSION,
     session_id: sessionId,
