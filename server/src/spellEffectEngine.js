@@ -44,6 +44,7 @@ const SPELL_OUTCOMES = {
   magic_missile: { type: 'automatic_damage', darts: 3, damage: '1d4+1', damage_type: 'force' },
   cure_wounds: { type: 'healing', healing: '2d8+spell_mod' },
   healing_word: { type: 'healing', healing: '2d4+spell_mod' },
+  hellish_rebuke: { type: 'saving_throw', save: 'dex', damage: '2d10', damage_type: 'fire', half_on_success: true },
   poison_spray: { type: 'saving_throw', save: 'con', damage: '1d12', damage_type: 'poison', half_on_success: false },
   sacred_flame: { type: 'saving_throw', save: 'dex', damage: '1d8', damage_type: 'radiant', half_on_success: false },
   thunderwave: { type: 'saving_throw', save: 'con', damage: '2d8', damage_type: 'thunder', half_on_success: true },
@@ -437,11 +438,12 @@ function finishSpellAction({ spell, worldState, combat, lines, activeCombat }) {
   }
 
   const enemiesAlive = combat.combatants.some((combatant) => !combatant.is_player && Number(combatant.hp) > 0);
+  const preserveCombatState = Boolean(worldState.__preserve_combat_state);
   const nextState = {
     ...stripInternalState(worldState),
-    combat_state: enemiesAlive ? combat : null,
+    combat_state: enemiesAlive || preserveCombatState ? combat : null,
   };
-  const reply = enemiesAlive
+  const reply = enemiesAlive || preserveCombatState
     ? lines.join('\n\n')
     : `${lines.join('\n\n')}\n\nAll active enemies are down. **Combat ends.**`;
 
@@ -470,7 +472,16 @@ function addCondition(conditions = [], condition) {
 function getSpellTargetContext({ spell, spellCastMessage = '', worldState = {}, characterSheet = {}, allowMultiple = false } = {}) {
   if (worldState.combat_state?.active) {
     const combat = cloneCombatState(worldState.combat_state);
-    const target = firstEnemy(combat);
+    const requestedId = normalizeName(worldState.__spell_target_id);
+    const requestedName = normalizeName(worldState.__spell_target_name);
+    const target = (combat.combatants || []).find((combatant) => (
+      !combatant.is_player
+      && Number(combatant.hp) > 0
+      && (
+        (requestedId && normalizeName(combatant.id) === requestedId)
+        || (requestedName && targetNamesMatch(combatant.name, requestedName))
+      )
+    )) || firstEnemy(combat);
     if (target) return { combat, target, activeCombat: true };
   }
 
@@ -611,7 +622,13 @@ function uniqueValues(values = []) {
 }
 
 function stripInternalState(worldState = {}) {
-  const { __spell_message: ignored, ...clean } = worldState;
+  const {
+    __preserve_combat_state: ignoredPreserve,
+    __spell_message: ignoredMessage,
+    __spell_target_id: ignoredTargetId,
+    __spell_target_name: ignoredTargetName,
+    ...clean
+  } = worldState;
   return clean;
 }
 

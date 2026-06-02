@@ -21,7 +21,10 @@ const {
   applyPrimedGiantAncestryDamageReduction,
   applyPrimedGiantAncestryRetaliation,
 } = require('./giantAncestryEngine');
-const { buildAttackHitReaction } = require('./reactionEngine');
+const {
+  buildAttackHitReaction,
+  buildDamageTakenReaction,
+} = require('./reactionEngine');
 
 function resolveCreatureTurns({
   worldState = {},
@@ -62,7 +65,12 @@ function resolveCreatureTurns({
   if (continuation) {
     const actorIndex = Number(continuation.actor_index);
     const actor = combatants[actorIndex];
-    if (actor && !actor.is_player && Number(actor.hp || 0) > 0) {
+    if (
+      continuation.stage !== 'after_attack'
+      && actor
+      && !actor.is_player
+      && Number(actor.hp || 0) > 0
+    ) {
       const action = resolveCreatureAttackHit({
         actor,
         player,
@@ -70,12 +78,29 @@ function resolveCreatureTurns({
         worldState: nextWorldState,
         rollDie,
         frame: resumeReaction.attack_frame,
+        allowReactionWindow: true,
       });
       combatants[actorIndex] = action.actor;
       player = action.player;
       nextWorldState = action.worldState || nextWorldState;
       lines.push(...action.lines);
       damageEvents.push(...(action.damageEvents || []));
+      if (action.pendingReaction) {
+        return pauseCreatureTurns({
+          combat,
+          combatants,
+          player,
+          lines,
+          damageEvents,
+          nextWorldState,
+          pendingReaction: action.pendingReaction,
+          actorIndex,
+          actingIndexes,
+          nextOffset: Number(continuation.next_offset || 0),
+          advanceRound,
+          playerDodging,
+        });
+      }
     }
     startOffset = Number(continuation.next_offset || 0);
   }
@@ -224,6 +249,7 @@ function resolveCreatureAction({
       worldState: nextWorldState,
       rollDie,
       frame,
+      allowReactionWindow,
     });
   }
 
@@ -244,7 +270,15 @@ function resolveCreatureAction({
   };
 }
 
-function resolveCreatureAttackHit({ actor, player, characterSheet, worldState, rollDie, frame = {} }) {
+function resolveCreatureAttackHit({
+  actor,
+  player,
+  characterSheet,
+  worldState,
+  rollDie,
+  frame = {},
+  allowReactionWindow = false,
+}) {
   const attack = frame.attack || actor.attack || { name: 'attack', damage_formula: '1d6+1' };
   const ac = Number(player.ac || getArmorClass(characterSheet, worldState));
   const criticalHit = Boolean(frame.critical_hit);
@@ -294,6 +328,16 @@ function resolveCreatureAttackHit({ actor, player, characterSheet, worldState, r
   const retaliationLine = retaliation
     ? ` ${retaliation.label} lashes back for ${retaliation.damage} ${retaliation.damageType} damage. ${actor.name}: (${actor.hp} -> ${nextActor.hp} HP).`
     : '';
+  const pendingReaction = allowReactionWindow && Number(endurance.player.hp || 0) > 0
+    ? buildDamageTakenReaction({
+        actor: resolvedActor,
+        attack,
+        player: endurance.player,
+        damageTaken: applied.amount,
+        worldState: endurance.worldState,
+        characterSheet,
+      })
+    : null;
   return {
     actor: resolvedActor,
     player: endurance.player,
@@ -308,6 +352,7 @@ function resolveCreatureAttackHit({ actor, player, characterSheet, worldState, r
       source: actor.name,
       amount: applied.amount,
     }],
+    pendingReaction,
   };
 }
 
@@ -379,6 +424,7 @@ function pauseCreatureTurns({
         advance_round: Boolean(advanceRound),
         player_dodging: Boolean(playerDodging),
         damage_events: damageEvents,
+        stage: pendingReaction.resume_stage || 'before_attack',
       },
     },
   };

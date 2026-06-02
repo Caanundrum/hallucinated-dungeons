@@ -208,7 +208,12 @@ function resolveOpportunityAttacks({
   if (continuation) {
     const actorIndex = Number(continuation.actor_index);
     const actor = combatants[actorIndex];
-    if (actor && !actor.is_player && Number(actor.hp || 0) > 0) {
+    if (
+      continuation.stage !== 'after_attack'
+      && actor
+      && !actor.is_player
+      && Number(actor.hp || 0) > 0
+    ) {
       const attack = resolveCreatureAttackHit({
         actor,
         player,
@@ -216,6 +221,7 @@ function resolveOpportunityAttacks({
         worldState: nextWorldState,
         rollDie,
         frame: resumeReaction.attack_frame,
+        allowReactionWindow: true,
       });
       combatants[actorIndex] = {
         ...attack.actor,
@@ -230,6 +236,30 @@ function resolveOpportunityAttacks({
       });
       lines.push(`**Opportunity Attack:** ${attack.lines.join('\n\n')}`);
       damageEvents.push(...(attack.damageEvents || []));
+      if (attack.pendingReaction) {
+        return {
+          worldState: nextWorldState,
+          combat,
+          player,
+          lines,
+          damageEvents,
+          assumedSceneZone,
+          paused: true,
+          pendingReaction: {
+            ...attack.pendingReaction,
+            resume: {
+              type: 'combat_movement',
+              message: continuation.message,
+              destination: continuation.destination,
+              actor_index: actorIndex,
+              next_index: Number(continuation.next_index || 0),
+              assumed_scene_zone: assumedSceneZone,
+              damage_events: damageEvents,
+              stage: attack.pendingReaction.resume_stage || 'before_attack',
+            },
+          },
+        };
+      }
     }
     startIndex = Number(continuation.next_index || 0);
     if (Number(player.hp || 0) <= 0) {
@@ -289,6 +319,7 @@ function resolveOpportunityAttacks({
             next_index: index + 1,
             assumed_scene_zone: assumedSceneZone,
             damage_events: damageEvents,
+            stage: attack.pendingReaction.resume_stage || 'before_attack',
           },
         },
       };

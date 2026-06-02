@@ -1789,7 +1789,7 @@ function advanceEnemyTurns({ worldState, characterSheet, rollDie = defaultRollDi
 }
 
 function resolvePendingReaction({ message, worldState, characterSheet, rollDie = defaultRollDie }) {
-  const reaction = resolvePendingReactionChoice({ message, worldState, characterSheet });
+  const reaction = resolvePendingReactionChoice({ message, worldState, characterSheet, rollDie });
   if (!reaction?.resolved) return reaction;
 
   if (reaction.pendingReaction?.resume?.type === 'combat_movement') {
@@ -1905,18 +1905,29 @@ function finishCreatureTurns({ creatureTurns, worldState, characterSheet, player
     }
   }
 
+  const combatEnded = !hasLivingEnemies(combat);
+  if (combatEnded) {
+    nextState = {
+      ...nextState,
+      combat_state: null,
+    };
+    lines.push('All active enemies are down. **Combat ends.**');
+  }
+
   const endLine = player.hp <= 0
     ? '**You drop to 0 HP.** Death saves are now the next thing on the table.'
     : nextState.pending_roll?.kind === 'concentration_save'
       ? '**Resolve the concentration save before taking your turn.**'
-      : `**Round ${combat.round} begins. It is your turn.**`;
+      : combatEnded
+        ? ''
+        : `**Round ${combat.round} begins. It is your turn.**`;
   if (ticked.expiredEffects.length > 0) {
     lines.push(`Expired effects: ${ticked.expiredEffects.map((effect) => effect.name || effect.id).join(', ')}.`);
   }
 
   return {
     worldState: nextState,
-    reply: `${lines.join('\n\n')}\n\n${endLine}`,
+    reply: [lines.join('\n\n'), endLine].filter(Boolean).join('\n\n'),
   };
 }
 

@@ -28,6 +28,32 @@ const wizardSheet = {
   },
 };
 
+const warlockSheet = {
+  identity: { name: 'Vex', level: 1, class: 'warlock', class_name: 'Warlock' },
+  abilities: { modifiers: { dex: 1, cha: 3 } },
+  derived_stats: {
+    hp: 8,
+    max_hp: 8,
+    armor_class: 12,
+    initiative: 1,
+    spell_save_dc: 13,
+  },
+  spellcasting: {
+    ability: 'cha',
+    spells_prepared: ['hellish_rebuke'],
+    slots: { 1: 1 },
+  },
+};
+
+const dualReactionSheet = {
+  ...warlockSheet,
+  spellcasting: {
+    ...warlockSheet.spellcasting,
+    spells_prepared: ['shield', 'hellish_rebuke'],
+    slots: { 1: 2 },
+  },
+};
+
 function combatant(name, initiative, overrides = {}) {
   return {
     name,
@@ -75,6 +101,18 @@ function combatWorld({ slots = 1, combatants = null, turnIndex = 0 } = {}) {
 function sequenceRolls(values) {
   let index = 0;
   return () => values[index++] ?? values[values.length - 1] ?? 1;
+}
+
+function warlockWorld({ slots = 1, combatants = null } = {}) {
+  const world = combatWorld({
+    slots,
+    combatants: combatants || [
+      { name: 'Vex', initiative: 18, hp: 8, max_hp: 8, ac: 12, is_player: true, conditions: [] },
+      combatant('Skeleton', 8, { hp: 30, max_hp: 30 }),
+    ],
+  });
+  world.player_stats.spell_slots = { 1: slots };
+  return world;
 }
 
 test('Shield pauses a creature hit, spends the Reaction and slot, then turns the hit into a miss', () => {
@@ -441,4 +479,252 @@ test('Dash keeps its granted movement through a Shielded Opportunity Attack and 
   assert.equal(resolved.worldState.combat_state.turn_resources.movement_remaining, 20);
   assert.equal(resolved.worldState.player_stats.last_movement.feet, 40);
   assert.match(resolved.reply, /You move 40 feet/);
+});
+
+test('Hellish Rebuke opens after creature damage and resumes without replaying the triggering attack', () => {
+  const pending = advanceEnemyTurns({
+    worldState: warlockWorld(),
+    characterSheet: warlockSheet,
+    playerTurnNote: 'You end your turn.',
+    rollDie: sequenceRolls([12, 3]),
+  });
+  const resolved = adjudicate({
+    message: 'Cast Hellish Rebuke.',
+    worldState: pending.worldState,
+    characterSheet: warlockSheet,
+    rollDie: sequenceRolls([2, 6, 7]),
+  });
+  const skeleton = resolved.worldState.combat_state.combatants.find((entry) => entry.name === 'Skeleton');
+
+  assert.equal(pending.worldState.pending_reaction.trigger, 'damage_taken');
+  assert.equal(pending.worldState.pending_reaction.resume.stage, 'after_attack');
+  assert.equal(pending.worldState.player_stats.hp, 4);
+  assert.equal(resolved.worldState.player_stats.hp, 4);
+  assert.equal(resolved.worldState.player_stats.spell_slots[1], 0);
+  assert.equal(skeleton.hp, 17);
+  assert.match(resolved.reply, /Hellish Rebuke/);
+  assert.match(resolved.reply, /Save fails/);
+});
+
+test('declining Hellish Rebuke continues the creature round without applying the same hit twice', () => {
+  const pending = advanceEnemyTurns({
+    worldState: warlockWorld(),
+    characterSheet: warlockSheet,
+    playerTurnNote: 'You end your turn.',
+    rollDie: sequenceRolls([12, 3]),
+  });
+  const resolved = adjudicate({
+    message: 'Decline reaction.',
+    worldState: pending.worldState,
+    characterSheet: warlockSheet,
+  });
+
+  assert.equal(resolved.worldState.player_stats.hp, 4);
+  assert.equal(resolved.worldState.player_stats.spell_slots[1], 1);
+  assert.match(resolved.reply, /decline the Reaction/);
+});
+
+test('Hellish Rebuke damages the creature that triggered it instead of the first enemy in initiative', () => {
+  const pending = advanceEnemyTurns({
+    worldState: warlockWorld({
+      combatants: [
+        { name: 'Vex', initiative: 18, hp: 8, max_hp: 8, ac: 12, is_player: true, conditions: [] },
+        combatant('Skeleton', 8, { hp: 30, max_hp: 30 }),
+        combatant('Cultist', 6, { hp: 30, max_hp: 30 }),
+      ],
+    }),
+    characterSheet: warlockSheet,
+    playerTurnNote: 'You end your turn.',
+    rollDie: sequenceRolls([1, 12, 3]),
+  });
+  const resolved = adjudicate({
+    message: 'Use Hellish Rebuke.',
+    worldState: pending.worldState,
+    characterSheet: warlockSheet,
+    rollDie: sequenceRolls([2, 6, 7]),
+  });
+  const skeleton = resolved.worldState.combat_state.combatants.find((entry) => entry.name === 'Skeleton');
+  const cultist = resolved.worldState.combat_state.combatants.find((entry) => entry.name === 'Cultist');
+
+  assert.equal(pending.worldState.pending_reaction.source_actor.name, 'Cultist');
+  assert.equal(skeleton.hp, 30);
+  assert.equal(cultist.hp, 17);
+});
+
+test('Hellish Rebuke can interrupt an Opportunity Attack and movement resumes after retaliation', () => {
+  const pending = adjudicate({
+    message: 'I retreat 10 feet away from the skeleton.',
+    worldState: warlockWorld(),
+    characterSheet: warlockSheet,
+    rollDie: sequenceRolls([12, 3]),
+  });
+  const resolved = adjudicate({
+    message: 'Cast Hellish Rebuke.',
+    worldState: pending.worldState,
+    characterSheet: warlockSheet,
+    rollDie: sequenceRolls([2, 6, 7]),
+  });
+  const skeleton = resolved.worldState.combat_state.combatants.find((entry) => entry.name === 'Skeleton');
+
+  assert.equal(pending.worldState.pending_reaction.resume.type, 'combat_movement');
+  assert.equal(pending.worldState.pending_reaction.resume.stage, 'after_attack');
+  assert.equal(pending.worldState.player_stats.last_movement, undefined);
+  assert.equal(resolved.worldState.player_stats.hp, 4);
+  assert.equal(resolved.worldState.player_stats.last_movement.feet, 10);
+  assert.equal(resolved.worldState.combat_state.turn_resources.movement_remaining, 20);
+  assert.equal(skeleton.hp, 17);
+  assert.match(resolved.reply, /You move 10 feet/);
+});
+
+test('Hellish Rebuke does not open a Reaction window without a remaining spell slot', () => {
+  const world = warlockWorld({ slots: 0 });
+  const resolved = advanceEnemyTurns({
+    worldState: world,
+    characterSheet: {
+      ...warlockSheet,
+      spellcasting: { ...warlockSheet.spellcasting, slots: { 1: 0 } },
+    },
+    playerTurnNote: 'You end your turn.',
+    rollDie: sequenceRolls([12, 3]),
+  });
+
+  assert.equal(resolved.worldState.pending_reaction, null);
+  assert.equal(resolved.worldState.player_stats.hp, 4);
+  assert.match(resolved.reply, /Hit for 4 damage/);
+});
+
+test('Hellish Rebuke ending the last attacker also ends combat after the saved continuation resumes', () => {
+  const pending = advanceEnemyTurns({
+    worldState: warlockWorld({
+      combatants: [
+        { name: 'Vex', initiative: 18, hp: 8, max_hp: 8, ac: 12, is_player: true, conditions: [] },
+        combatant('Skeleton', 8, { hp: 5, max_hp: 5 }),
+      ],
+    }),
+    characterSheet: warlockSheet,
+    playerTurnNote: 'You end your turn.',
+    rollDie: sequenceRolls([12, 3]),
+  });
+  const resolved = adjudicate({
+    message: 'Cast Hellish Rebuke.',
+    worldState: pending.worldState,
+    characterSheet: warlockSheet,
+    rollDie: sequenceRolls([2, 6, 7]),
+  });
+
+  assert.equal(resolved.worldState.combat_state, null);
+  assert.match(resolved.reply, /Combat ends/);
+  assert.doesNotMatch(resolved.reply, /Round 2 begins/);
+});
+
+test('declining Shield can open a chained Hellish Rebuke window after the resumed hit', () => {
+  const firstPending = advanceEnemyTurns({
+    worldState: warlockWorld({ slots: 2 }),
+    characterSheet: dualReactionSheet,
+    playerTurnNote: 'You end your turn.',
+    rollDie: sequenceRolls([12]),
+  });
+  const secondPending = adjudicate({
+    message: 'Decline reaction.',
+    worldState: firstPending.worldState,
+    characterSheet: dualReactionSheet,
+    rollDie: sequenceRolls([3]),
+  });
+  const resolved = adjudicate({
+    message: 'Cast Hellish Rebuke.',
+    worldState: secondPending.worldState,
+    characterSheet: dualReactionSheet,
+    rollDie: sequenceRolls([2, 6, 7]),
+  });
+  const skeleton = resolved.worldState.combat_state.combatants.find((entry) => entry.name === 'Skeleton');
+
+  assert.equal(firstPending.worldState.pending_reaction.trigger, 'attack_hit');
+  assert.equal(secondPending.worldState.pending_reaction.trigger, 'damage_taken');
+  assert.equal(secondPending.worldState.player_stats.hp, 4);
+  assert.equal(resolved.worldState.player_stats.hp, 4);
+  assert.equal(resolved.worldState.player_stats.spell_slots[1], 1);
+  assert.equal(skeleton.hp, 17);
+});
+
+test('Opportunity Attack movement survives chained Shield decline and Hellish Rebuke windows', () => {
+  const firstPending = adjudicate({
+    message: 'I retreat 10 feet away from the skeleton.',
+    worldState: warlockWorld({ slots: 2 }),
+    characterSheet: dualReactionSheet,
+    rollDie: sequenceRolls([12]),
+  });
+  const secondPending = adjudicate({
+    message: 'Decline reaction.',
+    worldState: firstPending.worldState,
+    characterSheet: dualReactionSheet,
+    rollDie: sequenceRolls([3]),
+  });
+  const resolved = adjudicate({
+    message: 'Cast Hellish Rebuke.',
+    worldState: secondPending.worldState,
+    characterSheet: dualReactionSheet,
+    rollDie: sequenceRolls([2, 6, 7]),
+  });
+
+  assert.equal(firstPending.worldState.pending_reaction.trigger, 'attack_hit');
+  assert.equal(secondPending.worldState.pending_reaction.trigger, 'damage_taken');
+  assert.equal(secondPending.worldState.player_stats.last_movement, undefined);
+  assert.equal(resolved.worldState.player_stats.hp, 4);
+  assert.equal(resolved.worldState.player_stats.last_movement.feet, 10);
+  assert.equal(resolved.worldState.combat_state.turn_resources.movement_remaining, 20);
+});
+
+test('Hellish Rebuke deals half damage when the triggering creature succeeds on its Dexterity save', () => {
+  const pending = advanceEnemyTurns({
+    worldState: warlockWorld(),
+    characterSheet: warlockSheet,
+    playerTurnNote: 'You end your turn.',
+    rollDie: sequenceRolls([12, 3]),
+  });
+  const resolved = adjudicate({
+    message: 'Cast Hellish Rebuke.',
+    worldState: pending.worldState,
+    characterSheet: warlockSheet,
+    rollDie: sequenceRolls([20, 6, 7]),
+  });
+  const skeleton = resolved.worldState.combat_state.combatants.find((entry) => entry.name === 'Skeleton');
+
+  assert.equal(skeleton.hp, 24);
+  assert.match(resolved.reply, /Save succeeds/);
+  assert.match(resolved.reply, /6 fire damage/);
+});
+
+test('Hellish Rebuke requires a visible triggering creature within 60 feet', () => {
+  const player = { name: 'Vex', initiative: 18, hp: 8, max_hp: 8, ac: 12, is_player: true, conditions: [], position: { map_id: 'road', q: 0, r: 0 } };
+  const distant = advanceEnemyTurns({
+    worldState: warlockWorld({
+      combatants: [
+        player,
+        combatant('Distant Archer', 8, {
+          hp: 30,
+          max_hp: 30,
+          position: { map_id: 'road', q: 13, r: 0 },
+        }),
+      ],
+    }),
+    characterSheet: warlockSheet,
+    playerTurnNote: 'You end your turn.',
+    rollDie: sequenceRolls([12, 3]),
+  });
+  const hidden = advanceEnemyTurns({
+    worldState: warlockWorld({
+      combatants: [
+        player,
+        combatant('Hidden Archer', 8, { hp: 30, max_hp: 30, visible: false }),
+      ],
+    }),
+    characterSheet: warlockSheet,
+    playerTurnNote: 'You end your turn.',
+    rollDie: sequenceRolls([12, 3]),
+  });
+
+  assert.equal(distant.worldState.pending_reaction, null);
+  assert.equal(hidden.worldState.pending_reaction, null);
+  assert.equal(distant.worldState.player_stats.hp, 4);
+  assert.equal(hidden.worldState.player_stats.hp, 4);
 });
