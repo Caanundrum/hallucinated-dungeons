@@ -63,6 +63,11 @@ const {
   resolveHelpAction,
 } = require('./helpActionEngine');
 const {
+  applyHideCheckOutcome,
+  clearPlayerHidden,
+  isHideActionCheck,
+} = require('./hiddenStateEngine');
+const {
   applyWeaponMasteryOnHit,
   applyWeaponMasteryOnMiss,
   consumeVexAdvantage,
@@ -244,7 +249,8 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
 
   const modifier = getCheckModifier(characterSheet, check);
   const bonus = getActiveBonusDice(worldState, 'check', { skill: check.skill })[0] || null;
-  const dc = chooseDc(intent.raw, check, worldState, inCombat);
+  const hideAction = isHideActionCheck({ rule_action: intent.ruleAction, skill: check.skill, intent: intent.raw });
+  const dc = hideAction ? 15 : chooseDc(intent.raw, check, worldState, inCombat);
   const conditionSubject = getPlayerConditionSubject(characterSheet, worldState);
   const conditionMode = getD20ConditionMode({
     subject: conditionSubject,
@@ -281,8 +287,9 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
     advantage_mode: advantageMode,
     advantage_sources: advantageSources,
     dc,
-    dc_source: buildDcSource(dc, intent.raw, inCombat),
+    dc_source: buildDcSource(dc, intent.raw, inCombat, { hideAction }),
     intent: intent.raw,
+    rule_action: hideAction ? 'hide' : intent.ruleAction || null,
     consumes: inCombat ? 'action' : 'exploration',
     combat: Boolean(inCombat),
     created_turn: currentTurn,
@@ -501,6 +508,15 @@ function resolveCheckRoll({ pending, result, worldState, characterSheet }) {
   }
 
   let reply = buildCheckResolutionReply(pending, result, outcome);
+  const hiddenOutcome = applyHideCheckOutcome({
+    pending,
+    result,
+    outcome,
+    worldState: nextState,
+    characterSheet,
+  });
+  nextState = hiddenOutcome.worldState;
+  if (hiddenOutcome.lines.length) reply += `\n\n${hiddenOutcome.lines.join('\n\n')}`;
   if (!pending.combat) {
     const advanced = advanceNarrativeTime({
       message: pending.intent || '',
@@ -1340,6 +1356,14 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
   ];
   if (advantageMode) lines.push(`Attack roll has ${advantageMode} from ${formatList(lucky.sources)}.`);
   if (lucky.note) lines.push(lucky.note);
+  const reveal = clearPlayerHidden({ worldState: attackState, reason: 'attack' });
+  if (reveal.revealed) {
+    attackState = reveal.worldState;
+    combat = cloneCombatState(reveal.combat);
+    player = combat.combatants.find((combatant) => combatant.is_player);
+    target = findCombatTarget(combat, target.name) || target;
+    lines.push(reveal.line);
+  }
 
   const consumeEffectIds = [];
   let sneakAttackUsed = false;
@@ -1615,6 +1639,14 @@ function resolveExtraWeaponAttackRoll({
     ...ammunitionSpent.lines,
   ];
   if (advantageMode) lines.push(`${resultLabel} has ${advantageMode} from ${formatList(sources)}.`);
+  const reveal = clearPlayerHidden({ worldState, reason: 'attack' });
+  if (reveal.revealed) {
+    worldState = reveal.worldState;
+    combat = cloneCombatState(reveal.combat);
+    player = combat.combatants.find((combatant) => combatant.is_player);
+    target = findCombatTarget(combat, target.name) || target;
+    lines.push(reveal.line);
+  }
 
   const consumeEffectIds = [...attackRoll.bonusDice.expireEffectIds];
   Object.assign(target, consumeVexAdvantage(target));
@@ -2170,7 +2202,8 @@ function chooseDc(_text, check, worldState, inCombat) {
   return Math.max(5, Math.min(30, dc));
 }
 
-function buildDcSource(dc, _text, inCombat) {
+function buildDcSource(dc, _text, inCombat, options = {}) {
+  if (options.hideAction) return 'Hide action fixed DC 15';
   const parts = [`base adventuring DC ${DEFAULT_CHECK_DC}`];
   if (dc > DEFAULT_CHECK_DC) parts.push('increased for scene pressure, opposition, or difficult circumstances');
   if (inCombat) parts.push('combat pressure applies');

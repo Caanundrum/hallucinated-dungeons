@@ -1,5 +1,5 @@
 {
-  "version": "4C.6-H17",
+  "version": "4C.6-H18",
   "status_definitions": {
     "implemented": "Exposed and mechanically enforced for the current supported level/scope.",
     "partial": "Exposed and partially enforced, but missing at least one meaningful rules interaction.",
@@ -13,7 +13,7 @@
     "dodge": { "status": "implemented", "implementation": "Dodge can impose disadvantage on creature attacks." },
     "grapple": { "status": "implemented", "implementation": "Grapple uses Attack action option and target save." },
     "help": { "status": "partial", "implementation": "Help spends the Action and stores one-use Advantage for matching attack or check handoffs; full multiplayer ally turns and richer task targeting remain incomplete." },
-    "hide": { "status": "partial", "implementation": "Prompts Stealth checks, but full hidden/visibility state is incomplete." },
+    "hide": { "status": "partial", "implementation": "Hide uses the fixed DC 15 Stealth check, applies server-owned Hidden state on success, grants attack Advantage, imposes attack Disadvantage against the hidden character, and clears on attacks/spells; full cover, line-of-sight, and map visibility remain incomplete." },
     "influence": { "status": "partial", "implementation": "Prompts social checks, but NPC attitude state is incomplete." },
     "magic": { "status": "partial", "implementation": "Spell casting uses a server-owned Reaction registry for attack-hit Shield and damage-triggered Hellish Rebuke windows; falling-state reactions and additional trigger families remain incomplete." },
     "ready": { "status": "partial", "implementation": "Ready spends the Action and can store a weapon attack that triggers as a Reaction before the next player turn; readied spells and item actions remain deferred." },

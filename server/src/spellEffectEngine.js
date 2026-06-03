@@ -23,6 +23,7 @@ const {
   hasOriginFeat,
 } = require('./originFeatEngine');
 const { applyGiantAncestryOnHit } = require('./giantAncestryEngine');
+const { clearPlayerHidden } = require('./hiddenStateEngine');
 const { assertValidRulesEffects } = require('./refereeContracts');
 
 const CONCENTRATION_DURATIONS = {
@@ -436,6 +437,13 @@ function finishSpellAction({ spell, worldState, combat, lines, activeCombat }) {
       reply: lines.join('\n\n'),
       consumesTurn: false,
     };
+  }
+
+  const reveal = clearPlayerHidden({ worldState: { ...worldState, combat_state: combat }, reason: 'spell' });
+  if (reveal.revealed) {
+    worldState = reveal.worldState;
+    combat = reveal.combat;
+    lines.push(reveal.line);
   }
 
   const enemiesAlive = combat.combatants.some((combatant) => !combatant.is_player && Number(combatant.hp) > 0);

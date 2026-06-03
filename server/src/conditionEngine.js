@@ -29,6 +29,12 @@ const TARGET_ADVANTAGE_CONDITIONS = new Set([
 ]);
 
 const TARGET_DISADVANTAGE_CONDITIONS = new Set([
+  'hidden',
+  'invisible',
+]);
+
+const ATTACKER_ADVANTAGE_CONDITIONS = new Set([
+  'hidden',
   'invisible',
 ]);
 
@@ -88,6 +94,9 @@ function getAttackMode({ attacker = {}, target = {}, defenderDodging = false } =
   }
   if (attackerConditions.has('frightened')) disadvantage = true;
 
+  for (const condition of ATTACKER_ADVANTAGE_CONDITIONS) {
+    if (attackerConditions.has(condition)) advantage = true;
+  }
   for (const condition of TARGET_ADVANTAGE_CONDITIONS) {
     if (targetConditions.has(condition)) advantage = true;
   }
@@ -162,6 +171,9 @@ function getAttackModeSources({ attacker = {}, target = {}, defenderDodging = fa
   if (attackerConditions.has('frightened')) sources.push('Frightened attacker');
   if (defenderDodging) sources.push('Dodge');
 
+  for (const condition of ATTACKER_ADVANTAGE_CONDITIONS) {
+    if (attackerConditions.has(condition)) sources.push(`${formatCondition(condition)} attacker`);
+  }
   for (const condition of TARGET_ADVANTAGE_CONDITIONS) {
     if (targetConditions.has(condition)) sources.push(`${formatCondition(condition)} target`);
   }

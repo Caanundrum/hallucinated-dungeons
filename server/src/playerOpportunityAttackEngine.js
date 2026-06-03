@@ -26,6 +26,7 @@ const {
   rollWeaponDamage,
 } = require('./originFeatEngine');
 const { applyHelpToAttack } = require('./helpActionEngine');
+const { clearPlayerHidden } = require('./hiddenStateEngine');
 const { getAutoD20RerollRules } = require('./resourceEngine');
 const { getWeaponReach } = require('./combatPositionEngine');
 
@@ -156,6 +157,14 @@ function resolvePlayerOpportunityAttack({
   const consumeEffectIds = [...(attackRoll.bonusDice?.expireEffectIds || [])];
   lines.push(`**Opportunity Attack:** you strike ${defender.name} with ${prepared.attack.name}. Attack roll: ${attackRoll.rollText} vs AC ${defender.ac}.`);
   if (advantageMode) lines.push(`Opportunity Attack has ${advantageMode} from ${formatList(advantageSources)}.`);
+  const reveal = clearPlayerHidden({ worldState: nextWorldState, reason: 'attack' });
+  if (reveal.revealed) {
+    nextWorldState = reveal.worldState;
+    nextCombat = reveal.combat;
+    attacker = nextCombat.combatants?.find((combatant) => combatant.is_player) || attacker;
+    defender = findCombatantByName(nextCombat, defender.name) || defender;
+    lines.push(reveal.line);
+  }
 
   if (hit) {
     const damage = rollWeaponDamage({
