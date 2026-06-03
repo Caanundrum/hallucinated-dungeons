@@ -29,6 +29,7 @@ const {
   resolveCreatureMovementBeforeAction,
   resumeCreatureMovementAfterReaction,
 } = require('./creatureMovementEngine');
+const { resolveReadiedActionTrigger } = require('./readyActionEngine');
 const {
   REACTION_RESUME_STAGES,
   REACTION_RESUME_TYPES,
@@ -96,35 +97,52 @@ function resolveCreatureTurns({
         && Number(movement.actor?.hp || 0) > 0
         && Number(player.hp || 0) > 0
       ) {
-        const action = resolveCreatureAction({
-          actor: movement.actor,
-          player,
-          characterSheet,
+        const readied = resolveReadiedActionTrigger({
           worldState: nextWorldState,
+          combat,
+          player,
+          actor: movement.actor,
+          characterSheet,
           rollDie,
-          playerDodging,
-          allowReactionWindow: true,
+          trigger: 'after creature movement',
         });
-        combatants[actorIndex] = action.actor;
-        player = action.player;
-        nextWorldState = action.worldState || nextWorldState;
-        lines.push(...action.lines);
-        damageEvents.push(...(action.damageEvents || []));
-        if (action.pendingReaction) {
-          return pauseCreatureTurns({
-            combat,
-            combatants,
+        combat.combatants = readied.combat.combatants;
+        combatants = combat.combatants;
+        combatants[actorIndex] = readied.actor;
+        player = readied.player;
+        nextWorldState = readied.worldState || nextWorldState;
+        lines.push(...readied.lines);
+        if (Number(readied.actor?.hp || 0) > 0 && Number(player.hp || 0) > 0) {
+          const action = resolveCreatureAction({
+            actor: readied.actor,
             player,
-            lines,
-            damageEvents,
-            nextWorldState,
-            pendingReaction: action.pendingReaction,
-            actorIndex,
-            actingIndexes,
-            nextOffset: Number(continuation.next_offset || 0),
-            advanceRound,
+            characterSheet,
+            worldState: nextWorldState,
+            rollDie,
             playerDodging,
+            allowReactionWindow: true,
           });
+          combatants[actorIndex] = action.actor;
+          player = action.player;
+          nextWorldState = action.worldState || nextWorldState;
+          lines.push(...action.lines);
+          damageEvents.push(...(action.damageEvents || []));
+          if (action.pendingReaction) {
+            return pauseCreatureTurns({
+              combat,
+              combatants,
+              player,
+              lines,
+              damageEvents,
+              nextWorldState,
+              pendingReaction: action.pendingReaction,
+              actorIndex,
+              actingIndexes,
+              nextOffset: Number(continuation.next_offset || 0),
+              advanceRound,
+              playerDodging,
+            });
+          }
         }
       }
     } else if (
@@ -211,6 +229,26 @@ function resolveCreatureTurns({
         if (Number(player.hp || 0) <= 0) break;
         continue;
       }
+    }
+
+    const readied = resolveReadiedActionTrigger({
+      worldState: nextWorldState,
+      combat,
+      player,
+      actor: combatants[index],
+      characterSheet,
+      rollDie,
+      trigger: 'creature turn',
+    });
+    combat.combatants = readied.combat.combatants;
+    combatants = combat.combatants;
+    combatants[index] = readied.actor;
+    player = readied.player;
+    nextWorldState = readied.worldState || nextWorldState;
+    lines.push(...readied.lines);
+    if (Number(readied.actor?.hp || 0) <= 0) {
+      if (Number(player.hp || 0) <= 0) break;
+      continue;
     }
 
     const action = resolveCreatureAction({

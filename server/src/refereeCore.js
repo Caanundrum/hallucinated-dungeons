@@ -95,6 +95,7 @@ const {
   resolveDisengageAction,
   resumeCombatMovement,
 } = require('./combatMovementEngine');
+const { resolveReadyAction } = require('./readyActionEngine');
 
 const DEFAULT_CHECK_DC = 15;
 
@@ -1091,6 +1092,9 @@ function resolveInitiative({ pending, result, worldState, characterSheet, rollDi
 }
 
 function resolveCombatAction({ message, intent, worldState, characterSheet, currentTurn, rollDie }) {
+  const readyAction = resolveReadyAction({ message, worldState, characterSheet });
+  if (readyAction) return readyAction;
+
   if (intent.castsSpell) return null;
 
   const maneuver = isUnarmedAttackIntent(message) ? null : getCombatManeuverIntent(message);

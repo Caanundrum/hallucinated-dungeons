@@ -68,6 +68,7 @@ Current registered examples:
 - `attack_hit`: Shield resolves before damage.
 - `damage_taken`: Hellish Rebuke resolves after damage.
 - `creature_leaves_reach`: a player Opportunity Attack resolves before the creature finishes moving.
+- `ready`: a readied weapon attack is stored as a turn resource and resolves as a Reaction when the trigger occurs before the next player turn.
 
 Planned trigger families include falling creatures and Magic Missile targeting. They remain inactive until their underlying state exists.
 
