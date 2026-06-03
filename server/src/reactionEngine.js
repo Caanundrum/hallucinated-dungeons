@@ -1,6 +1,7 @@
 const { spendTurnResource } = require('./actionEconomy');
 const { getCombatantDistanceFeet } = require('./combatPositionEngine');
 const { getContentBundle } = require('./contentData');
+const { canMakePlayerOpportunityAttack } = require('./playerOpportunityAttackEngine');
 const { resolveSpellCast, resolveSpellOutcome } = require('./spellEffectEngine');
 const { getKnownSpellInfo } = require('./spellcastingEngine');
 const {
@@ -102,6 +103,33 @@ function buildDamageTakenReaction({
   });
 }
 
+function buildCreatureLeavesReachReaction({
+  actor = {},
+  player = {},
+  movement = {},
+  worldState = {},
+  characterSheet = {},
+} = {}) {
+  if (!canMakePlayerOpportunityAttack({ worldState, characterSheet, player, target: actor })) return null;
+  return buildPendingReactionWindow({
+    trigger: REACTION_TRIGGERS.CREATURE_LEAVES_REACH,
+    triggerLabel: `${actor.name || 'Creature'} leaves your reach`,
+    triggerPrompt: `${actor.name || 'A creature'} is leaving your reach.`,
+    resumeStage: REACTION_RESUME_STAGES.BEFORE_MOVEMENT,
+    options: [{
+      id: 'opportunity_attack',
+      reaction_id: 'opportunity_attack',
+      type: 'weapon_attack',
+      label: 'Make Opportunity Attack',
+    }],
+    source_actor: {
+      id: actor.id || null,
+      name: actor.name || 'Creature',
+    },
+    movement_frame: movement,
+  });
+}
+
 function buildReactionWindow({
   trigger,
   triggerLabel,
@@ -195,7 +223,37 @@ function resolvePendingReactionChoice({
     return castSpellReaction({ option, worldState, characterSheet, pendingReaction, rollDie });
   }
 
+  if (option?.type === 'weapon_attack') {
+    return spendWeaponReaction({ option, worldState, characterSheet, pendingReaction });
+  }
+
   return null;
+}
+
+function spendWeaponReaction({
+  option = {},
+  worldState = {},
+  characterSheet = {},
+  pendingReaction,
+} = {}) {
+  const spent = spendTurnResource(worldState, 'reaction', option.label || 'Reaction attack', characterSheet);
+  if (!spent.ok) {
+    return unavailableReaction({ worldState, pendingReaction, reply: spent.reply });
+  }
+  return {
+    handled: true,
+    resolved: true,
+    logType: `referee_reaction_${option.reaction_id || option.id}`,
+    pendingReaction: {
+      ...pendingReaction,
+      chosen_option: option,
+    },
+    worldState: {
+      ...spent.worldState,
+      pending_reaction: null,
+    },
+    reply: `You spend your **Reaction** to make an **Opportunity Attack**. The fleeing party will be notified by blade.`,
+  };
 }
 
 function castSpellReaction({
@@ -285,7 +343,12 @@ function parsePendingReactionChoice(message = '', pendingReaction = {}) {
     [entry.id, entry.spell_id, entry.label]
       .map(normalizeText)
       .filter(Boolean)
-      .some((candidate) => normalized.includes(candidate.replace(/^cast /, '')))
+      .some((candidate) => {
+        const stripped = candidate.replace(/^(?:cast|make|use)\s+/, '');
+        return normalized.includes(candidate)
+          || normalized.includes(stripped)
+          || candidate.includes(normalized);
+      })
   ));
   return option?.id || null;
 }
@@ -327,6 +390,7 @@ function normalizeText(value) {
 
 module.exports = {
   buildAttackHitReaction,
+  buildCreatureLeavesReachReaction,
   buildDamageTakenReaction,
   canOfferShieldReaction,
   formatPendingReactionPrompt,

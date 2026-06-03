@@ -26,6 +26,10 @@ const {
   buildDamageTakenReaction,
 } = require('./reactionEngine');
 const {
+  resolveCreatureMovementBeforeAction,
+  resumeCreatureMovementAfterReaction,
+} = require('./creatureMovementEngine');
+const {
   REACTION_RESUME_STAGES,
   REACTION_RESUME_TYPES,
   buildReactionResume,
@@ -40,7 +44,7 @@ function resolveCreatureTurns({
   resumeReaction = null,
 } = {}) {
   const combat = cloneCombatState(worldState.combat_state);
-  const combatants = Array.isArray(combat.combatants) ? combat.combatants : [];
+  let combatants = Array.isArray(combat.combatants) ? combat.combatants : [];
   let playerIndex = combatants.findIndex((combatant) => combatant.is_player);
   if (playerIndex < 0) {
     combatants.unshift(buildPlayerCombatant(characterSheet, worldState));
@@ -70,7 +74,60 @@ function resolveCreatureTurns({
   if (continuation) {
     const actorIndex = Number(continuation.actor_index);
     const actor = combatants[actorIndex];
-    if (
+    if (continuation.creature_movement && actor && !actor.is_player && Number(actor.hp || 0) > 0) {
+      const movement = resumeCreatureMovementAfterReaction({
+        actor,
+        player,
+        combat,
+        worldState: nextWorldState,
+        characterSheet,
+        pendingReaction: resumeReaction,
+        rollDie,
+      });
+      combat.combatants = movement.combat.combatants;
+      combatants = combat.combatants;
+      combatants[actorIndex] = movement.actor;
+      player = movement.player;
+      nextWorldState = movement.worldState || nextWorldState;
+      lines.push(...movement.lines);
+
+      if (
+        movement.actionAvailable
+        && Number(movement.actor?.hp || 0) > 0
+        && Number(player.hp || 0) > 0
+      ) {
+        const action = resolveCreatureAction({
+          actor: movement.actor,
+          player,
+          characterSheet,
+          worldState: nextWorldState,
+          rollDie,
+          playerDodging,
+          allowReactionWindow: true,
+        });
+        combatants[actorIndex] = action.actor;
+        player = action.player;
+        nextWorldState = action.worldState || nextWorldState;
+        lines.push(...action.lines);
+        damageEvents.push(...(action.damageEvents || []));
+        if (action.pendingReaction) {
+          return pauseCreatureTurns({
+            combat,
+            combatants,
+            player,
+            lines,
+            damageEvents,
+            nextWorldState,
+            pendingReaction: action.pendingReaction,
+            actorIndex,
+            actingIndexes,
+            nextOffset: Number(continuation.next_offset || 0),
+            advanceRound,
+            playerDodging,
+          });
+        }
+      }
+    } else if (
       continuation.stage !== REACTION_RESUME_STAGES.AFTER_ATTACK
       && actor
       && !actor.is_player
@@ -115,9 +172,50 @@ function resolveCreatureTurns({
     const actor = combatants[index];
     if (!actor || actor.is_player || Number(actor.hp || 0) <= 0) continue;
 
+    if (!getTurnBlockReason(actor)) {
+      const movement = resolveCreatureMovementBeforeAction({
+        actor,
+        player,
+        combat,
+        worldState: nextWorldState,
+        characterSheet,
+        rollDie,
+        allowReactionWindow: true,
+      });
+      combat.combatants = movement.combat.combatants;
+      combatants = combat.combatants;
+      combatants[index] = movement.actor;
+      player = movement.player;
+      nextWorldState = movement.worldState || nextWorldState;
+      lines.push(...movement.lines);
+      if (movement.pendingReaction) {
+        return pauseCreatureTurns({
+          combat,
+          combatants,
+          player,
+          lines,
+          damageEvents,
+          nextWorldState,
+          pendingReaction: movement.pendingReaction,
+          actorIndex: index,
+          actingIndexes,
+          nextOffset: offset + 1,
+          advanceRound,
+          playerDodging,
+          resumePayload: {
+            creature_movement: movement.movement,
+          },
+        });
+      }
+      if (!movement.actionAvailable || Number(movement.actor?.hp || 0) <= 0) {
+        if (Number(player.hp || 0) <= 0) break;
+        continue;
+      }
+    }
+
     const action = resolveCreatureAction({
       actor: {
-        ...actor,
+        ...combatants[index],
         reaction_available: true,
       },
       player,
@@ -407,6 +505,7 @@ function pauseCreatureTurns({
   nextOffset,
   advanceRound,
   playerDodging,
+  resumePayload = {},
 }) {
   const playerIndex = combatants.findIndex((combatant) => combatant.is_player);
   combat.turn_index = actorIndex;
@@ -430,6 +529,7 @@ function pauseCreatureTurns({
         player_dodging: Boolean(playerDodging),
         damage_events: damageEvents,
         stage: pendingReaction.resume_stage || REACTION_RESUME_STAGES.BEFORE_ATTACK,
+        ...resumePayload,
       }),
     },
   };

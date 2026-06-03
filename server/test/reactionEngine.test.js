@@ -54,6 +54,21 @@ const dualReactionSheet = {
   },
 };
 
+const fighterSheet = {
+  identity: { name: 'Bran', level: 1, class: 'fighter', class_name: 'Fighter' },
+  abilities: { modifiers: { str: 3, dex: 1 } },
+  derived_stats: {
+    hp: 12,
+    max_hp: 12,
+    armor_class: 16,
+    initiative: 1,
+    attack_breakdowns: [
+      { weapon_id: 'longsword', name: 'Longsword', ability: 'str', attack_total: 5, damage_formula: '1d8+3' },
+    ],
+  },
+  equipped: { main_hand: 'longsword', off_hand: null },
+};
+
 function combatant(name, initiative, overrides = {}) {
   return {
     name,
@@ -113,6 +128,40 @@ function warlockWorld({ slots = 1, combatants = null } = {}) {
   });
   world.player_stats.spell_slots = { 1: slots };
   return world;
+}
+
+function fighterWorld({ combatants = null } = {}) {
+  return {
+    active_effects: [],
+    player_stats: {
+      hp: 12,
+      max_hp: 12,
+      armor_class: 16,
+    },
+    combat_state: {
+      active: true,
+      round: 1,
+      turn_index: 0,
+      turn_resources: {
+        actor: 'player',
+        action_available: false,
+        bonus_action_available: true,
+        reaction_available: true,
+        movement_remaining: 30,
+        used: [{ resource: 'action', label: 'Attack' }],
+      },
+      combatants: combatants || [
+        { name: 'Bran', initiative: 18, hp: 12, max_hp: 12, ac: 16, is_player: true, conditions: [], position: { map_id: 'road', q: 0, r: 0 } },
+        combatant('Skeleton', 8, {
+          hp: 8,
+          max_hp: 8,
+          behavior: 'fleeing',
+          speed: 30,
+          position: { map_id: 'road', q: 1, r: 0 },
+        }),
+      ],
+    },
+  };
 }
 
 test('Shield pauses a creature hit, spends the Reaction and slot, then turns the hit into a miss', () => {
@@ -704,6 +753,7 @@ test('Hellish Rebuke requires a visible triggering creature within 60 feet', () 
           hp: 30,
           max_hp: 30,
           position: { map_id: 'road', q: 13, r: 0 },
+          attack: { name: 'shortbow shot', attack_kind: 'ranged', attack_bonus: 3, damage_formula: '1d4+1' },
         }),
       ],
     }),
@@ -727,4 +777,128 @@ test('Hellish Rebuke requires a visible triggering creature within 60 feet', () 
   assert.equal(hidden.worldState.pending_reaction, null);
   assert.equal(distant.worldState.player_stats.hp, 4);
   assert.equal(hidden.worldState.player_stats.hp, 4);
+});
+
+test('a creature leaving player reach opens an Opportunity Attack before movement completes', () => {
+  const pending = advanceEnemyTurns({
+    worldState: fighterWorld(),
+    characterSheet: fighterSheet,
+    playerTurnNote: 'You end your turn.',
+  });
+  const before = pending.worldState.combat_state.combatants.find((entry) => entry.name === 'Skeleton');
+  const resolved = adjudicate({
+    message: 'Opportunity attack.',
+    worldState: pending.worldState,
+    characterSheet: fighterSheet,
+    rollDie: sequenceRolls([10, 4]),
+  });
+  const after = resolved.worldState.combat_state.combatants.find((entry) => entry.name === 'Skeleton');
+
+  assert.equal(pending.worldState.pending_reaction.trigger, 'creature_leaves_reach');
+  assert.equal(pending.worldState.pending_reaction.resume.stage, 'before_movement');
+  assert.deepEqual(before.position, { map_id: 'road', q: 1, r: 0 });
+  assert.equal(after.hp, 1);
+  assert.deepEqual(after.position, { map_id: 'road', q: 7, r: 0 });
+  assert.equal(resolved.worldState.combat_state.round, 2);
+  assert.equal(resolved.worldState.combat_state.turn_resources.reaction_available, true);
+  assert.match(resolved.reply, /Opportunity Attack/);
+  assert.match(resolved.reply, /Hit for 7 damage/);
+  assert.match(resolved.reply, /Skeleton moves 30 feet to hex \(7, 0\)/);
+});
+
+test('declining a creature movement Reaction lets the original movement continue without an attack', () => {
+  const pending = advanceEnemyTurns({
+    worldState: fighterWorld(),
+    characterSheet: fighterSheet,
+    playerTurnNote: 'You end your turn.',
+  });
+  const resolved = adjudicate({
+    message: 'Decline reaction.',
+    worldState: pending.worldState,
+    characterSheet: fighterSheet,
+  });
+  const skeleton = resolved.worldState.combat_state.combatants.find((entry) => entry.name === 'Skeleton');
+
+  assert.equal(skeleton.hp, 8);
+  assert.deepEqual(skeleton.position, { map_id: 'road', q: 7, r: 0 });
+  assert.match(resolved.reply, /decline the Reaction/);
+  assert.doesNotMatch(resolved.reply, /Hit for/);
+});
+
+test('an Opportunity Attack that drops the moving creature stops its movement and can end combat', () => {
+  const pending = advanceEnemyTurns({
+    worldState: fighterWorld({
+      combatants: [
+        { name: 'Bran', initiative: 18, hp: 12, max_hp: 12, ac: 16, is_player: true, conditions: [], position: { map_id: 'road', q: 0, r: 0 } },
+        combatant('Skeleton', 8, {
+          hp: 6,
+          max_hp: 6,
+          behavior: 'fleeing',
+          speed: 30,
+          position: { map_id: 'road', q: 1, r: 0 },
+        }),
+      ],
+    }),
+    characterSheet: fighterSheet,
+    playerTurnNote: 'You end your turn.',
+  });
+  const resolved = adjudicate({
+    message: 'Make Opportunity Attack.',
+    worldState: pending.worldState,
+    characterSheet: fighterSheet,
+    rollDie: sequenceRolls([10, 4]),
+  });
+
+  assert.equal(resolved.worldState.combat_state, null);
+  assert.match(resolved.reply, /falls before leaving your reach/);
+  assert.match(resolved.reply, /Combat ends/);
+  assert.doesNotMatch(resolved.reply, /Skeleton moves 30 feet/);
+});
+
+test('a creature that Disengages before leaving reach does not open an Opportunity Attack', () => {
+  const result = advanceEnemyTurns({
+    worldState: fighterWorld({
+      combatants: [
+        { name: 'Bran', initiative: 18, hp: 12, max_hp: 12, ac: 16, is_player: true, conditions: [], position: { map_id: 'road', q: 0, r: 0 } },
+        combatant('Skeleton', 8, {
+          hp: 8,
+          max_hp: 8,
+          movement_plan: { direction: 'away', feet: 30, disengage: true, reason: 'disengage and retreat' },
+          position: { map_id: 'road', q: 1, r: 0 },
+        }),
+      ],
+    }),
+    characterSheet: fighterSheet,
+    playerTurnNote: 'You end your turn.',
+  });
+  const skeleton = result.worldState.combat_state.combatants.find((entry) => entry.name === 'Skeleton');
+
+  assert.equal(result.worldState.pending_reaction, null);
+  assert.deepEqual(skeleton.position, { map_id: 'road', q: 7, r: 0 });
+  assert.match(result.reply, /Disengage/);
+});
+
+test('a melee creature outside reach moves toward the player before attacking', () => {
+  const result = advanceEnemyTurns({
+    worldState: fighterWorld({
+      combatants: [
+        { name: 'Bran', initiative: 18, hp: 12, max_hp: 12, ac: 12, is_player: true, conditions: [], position: { map_id: 'road', q: 0, r: 0 } },
+        combatant('Skeleton', 8, {
+          hp: 8,
+          max_hp: 8,
+          speed: 10,
+          position: { map_id: 'road', q: 3, r: 0 },
+        }),
+      ],
+    }),
+    characterSheet: fighterSheet,
+    playerTurnNote: 'You end your turn.',
+    rollDie: sequenceRolls([17, 2]),
+  });
+  const skeleton = result.worldState.combat_state.combatants.find((entry) => entry.name === 'Skeleton');
+
+  assert.deepEqual(skeleton.position, { map_id: 'road', q: 1, r: 0 });
+  assert.equal(result.worldState.player_stats.hp, 9);
+  assert.match(result.reply, /Skeleton moves 10 feet to hex \(1, 0\)/);
+  assert.match(result.reply, /Skeleton uses claw/);
 });

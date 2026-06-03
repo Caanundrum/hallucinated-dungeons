@@ -24,10 +24,11 @@ const {
 const { getContentBundle } = require('../src/contentData');
 
 test('referee contract exposes one versioned vocabulary for current and planned engine seams', () => {
-  assert.equal(REFEREE_CONTRACT_VERSION, '4C.6-H14A');
+  assert.equal(REFEREE_CONTRACT_VERSION, '4C.6-H15');
   assert.equal(REACTION_TRIGGERS.ATTACK_HIT, 'attack_hit');
   assert.equal(REACTION_TRIGGERS.DAMAGE_TAKEN, 'damage_taken');
   assert.equal(REACTION_TRIGGERS.CREATURE_LEAVES_REACH, 'creature_leaves_reach');
+  assert.equal(REACTION_RESUME_STAGES.BEFORE_MOVEMENT, 'before_movement');
   assert.equal(REACTION_RESUME_TYPES.COMBAT_MOVEMENT, 'combat_movement');
   assert.equal(ENTITY_TYPES.ACTIVE_EFFECT, 'active_effect');
   assert.equal(RULES_EFFECT_TARGETS.ARMOR_CLASS_BONUS, 'armor_class_bonus');

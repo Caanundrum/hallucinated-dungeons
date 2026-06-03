@@ -67,8 +67,9 @@ Current registered examples:
 
 - `attack_hit`: Shield resolves before damage.
 - `damage_taken`: Hellish Rebuke resolves after damage.
+- `creature_leaves_reach`: a player Opportunity Attack resolves before the creature finishes moving.
 
-Planned trigger families include creatures leaving reach, falling creatures, and Magic Missile targeting. They remain inactive until their underlying state exists.
+Planned trigger families include falling creatures and Magic Missile targeting. They remain inactive until their underlying state exists.
 
 ## Rules Effects
 

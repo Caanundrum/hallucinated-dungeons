@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 
-const REFEREE_CONTRACT_VERSION = '4C.6-H14A';
+const REFEREE_CONTRACT_VERSION = '4C.6-H15';
 
 const REACTION_TRIGGERS = freezeValues({
   ATTACK_HIT: 'attack_hit',
@@ -13,6 +13,8 @@ const REACTION_TRIGGERS = freezeValues({
 const REACTION_RESUME_STAGES = freezeValues({
   BEFORE_ATTACK: 'before_attack',
   AFTER_ATTACK: 'after_attack',
+  BEFORE_MOVEMENT: 'before_movement',
+  AFTER_MOVEMENT: 'after_movement',
 });
 
 const REACTION_RESUME_TYPES = freezeValues({
