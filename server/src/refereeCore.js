@@ -68,6 +68,10 @@ const {
   isHideActionCheck,
 } = require('./hiddenStateEngine');
 const {
+  applySocialCheckOutcome,
+  buildSocialPendingMetadata,
+} = require('./socialStateEngine');
+const {
   applyWeaponMasteryOnHit,
   applyWeaponMasteryOnMiss,
   consumeVexAdvantage,
@@ -290,6 +294,7 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
     dc_source: buildDcSource(dc, intent.raw, inCombat, { hideAction }),
     intent: intent.raw,
     rule_action: hideAction ? 'hide' : intent.ruleAction || null,
+    ...buildSocialPendingMetadata({ intent, worldState }),
     consumes: inCombat ? 'action' : 'exploration',
     combat: Boolean(inCombat),
     created_turn: currentTurn,
@@ -517,6 +522,14 @@ function resolveCheckRoll({ pending, result, worldState, characterSheet }) {
   });
   nextState = hiddenOutcome.worldState;
   if (hiddenOutcome.lines.length) reply += `\n\n${hiddenOutcome.lines.join('\n\n')}`;
+  const socialOutcome = applySocialCheckOutcome({
+    pending,
+    result,
+    outcome,
+    worldState: nextState,
+  });
+  nextState = socialOutcome.worldState;
+  if (socialOutcome.lines.length) reply += `\n\n${socialOutcome.lines.join('\n\n')}`;
   if (!pending.combat) {
     const advanced = advanceNarrativeTime({
       message: pending.intent || '',

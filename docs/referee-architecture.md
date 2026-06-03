@@ -105,6 +105,8 @@ The Help action is stored as a one-use rules handoff, not narration memory. A ma
 
 The Hide action stores `hidden` as combat state after a successful fixed-DC Hide check. Hidden affects attack advantage/disadvantage through the shared condition engine and clears when the character attacks or casts a spell; future map visibility and line-of-sight rules should extend this state instead of replacing it.
 
+Influence checks write target NPC attitude/leverage into `npc_states` after the roll resolves. Unclear multi-target social actions do not mutate state until a target is clear.
+
 ## Extension Rule
 
 When adding a mechanic:
