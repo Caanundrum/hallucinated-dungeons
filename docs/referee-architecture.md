@@ -101,6 +101,8 @@ The Game Master owns:
 - improvised fictional details consistent with entity state
 - proposals for uncertain actions that the referee resolves
 
+The Help action is stored as a one-use rules handoff, not narration memory. A matching attack or ability check consumes the handoff and gains Advantage before the helper's next turn; unclear Help declarations ask for a beneficiary and task before spending the Action.
+
 ## Extension Rule
 
 When adding a mechanic:

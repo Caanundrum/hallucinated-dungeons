@@ -58,6 +58,11 @@ const {
   rollWeaponDamage,
 } = require('./originFeatEngine');
 const {
+  applyHelpToAttack,
+  applyHelpToPendingCheck,
+  resolveHelpAction,
+} = require('./helpActionEngine');
+const {
   applyWeaponMasteryOnHit,
   applyWeaponMasteryOnMiss,
   consumeVexAdvantage,
@@ -260,7 +265,7 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
   });
   const advantageMode = combineAdvantageModes(conditionMode, activeAdvantageSources.length ? 'advantage' : null);
   const advantageSources = [...conditionSources, ...activeAdvantageSources];
-  const pendingRoll = {
+  let pendingRoll = {
     id: `roll_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     kind: check.skill ? 'skill_check' : 'ability_check',
     skill: check.skill,
@@ -284,6 +289,9 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
     success_result: successTextFor(check),
     failure_result: failureTextFor(check),
   };
+  const helped = applyHelpToPendingCheck({ worldState: nextWorldState, pendingRoll, characterSheet });
+  nextWorldState = helped.worldState;
+  pendingRoll = helped.pendingRoll;
 
   return {
     handled: true,
@@ -292,7 +300,7 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
       ...nextWorldState,
       pending_roll: pendingRoll,
     },
-    reply: `Make a DC ${dc} ${check.label}.${formatAdvantageModeText(advantageMode, advantageSources)}${bonus ? ` Add ${bonus.die} from ${bonus.label}.` : ''}${inCombat ? ' This uses your Action.' : ''} [CHECK: id=${pendingRoll.id}${check.skill ? ` skill=${check.skill}` : ''} ability=${check.ability} modifier=${modifier.total} breakdown="${sanitizeTagValue(modifier.breakdown)}"${formatBonusDieTag(bonus)}]`,
+    reply: `Make a DC ${dc} ${check.label}.${formatAdvantageModeText(pendingRoll.advantage_mode, pendingRoll.advantage_sources)}${bonus ? ` Add ${bonus.die} from ${bonus.label}.` : ''}${inCombat ? ' This uses your Action.' : ''} [CHECK: id=${pendingRoll.id}${check.skill ? ` skill=${check.skill}` : ''} ability=${check.ability} modifier=${modifier.total} breakdown="${sanitizeTagValue(modifier.breakdown)}"${formatBonusDieTag(bonus)}]`,
   };
 }
 
@@ -1095,6 +1103,9 @@ function resolveCombatAction({ message, intent, worldState, characterSheet, curr
   const readyAction = resolveReadyAction({ message, worldState, characterSheet });
   if (readyAction) return readyAction;
 
+  const helpAction = resolveHelpAction({ message, intent, worldState, characterSheet });
+  if (helpAction) return helpAction;
+
   if (intent.castsSpell) return null;
 
   const maneuver = isUnarmedAttackIntent(message) ? null : getCombatManeuverIntent(message);
@@ -1288,12 +1299,23 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
   const lightExtra = getLightExtraAttack({ characterSheet, primaryAttack: attack, message });
   const propertyMode = getWeaponPropertyAttackMode({ attack, characterSheet, player, target, combat });
   const propertySources = getWeaponPropertyAttackSources({ attack, characterSheet, player, target, combat });
-  const lucky = applyLuckyToImmediateD20({
-    message,
+  const helped = applyHelpToAttack({
     worldState: ammunitionSpent.worldState,
-    characterSheet,
+    combat,
+    attacker: player,
+    target,
     advantageMode: combineAdvantageModes(getAttackAdvantageMode(player, target), propertyMode),
     sources: [...getAttackAdvantageSources(player, target), ...propertySources],
+  });
+  combat = helped.combat;
+  player = helped.attacker;
+  target = helped.target;
+  const lucky = applyLuckyToImmediateD20({
+    message,
+    worldState: helped.worldState,
+    characterSheet,
+    advantageMode: helped.advantageMode,
+    sources: helped.sources,
   });
   let attackState = lucky.worldState;
   const advantageMode = lucky.advantageMode;
@@ -1557,11 +1579,24 @@ function resolveExtraWeaponAttackRoll({
   player = combat.combatants.find((combatant) => combatant.is_player);
   target = findCombatTarget(combat, target.name) || target;
   const propertyMode = getWeaponPropertyAttackMode({ attack, characterSheet, player, target, combat });
-  const advantageMode = combineAdvantageModes(getAttackAdvantageMode(player, target), propertyMode);
-  const sources = [
+  let sources = [
     ...getAttackAdvantageSources(player, target),
     ...getWeaponPropertyAttackSources({ attack, characterSheet, player, target, combat }),
   ];
+  const helped = applyHelpToAttack({
+    worldState,
+    combat,
+    attacker: player,
+    target,
+    advantageMode: combineAdvantageModes(getAttackAdvantageMode(player, target), propertyMode),
+    sources,
+  });
+  worldState = helped.worldState;
+  combat = helped.combat;
+  player = helped.attacker;
+  target = helped.target;
+  sources = helped.sources;
+  const advantageMode = helped.advantageMode;
   const attackRoll = resolveD20Test({
     kind: 'attack',
     modifier: attack.attackBonus,

@@ -25,6 +25,7 @@ const {
   buildUnarmedAttack,
   rollWeaponDamage,
 } = require('./originFeatEngine');
+const { applyHelpToAttack } = require('./helpActionEngine');
 const { getAutoD20RerollRules } = require('./resourceEngine');
 const { getWeaponReach } = require('./combatPositionEngine');
 
@@ -120,11 +121,24 @@ function resolvePlayerOpportunityAttack({
     target: defender,
     combat: nextCombat,
   });
-  const advantageMode = combineAdvantageModes(getAttackAdvantageMode(attacker, defender), propertyMode);
-  const advantageSources = [
+  let advantageSources = [
     ...getAttackAdvantageSources(attacker, defender),
     ...getWeaponPropertyAttackSources({ attack: prepared.attack, characterSheet, player: attacker, target: defender, combat: nextCombat }),
   ];
+  const helped = applyHelpToAttack({
+    worldState: nextWorldState,
+    combat: nextCombat,
+    attacker,
+    target: defender,
+    advantageMode: combineAdvantageModes(getAttackAdvantageMode(attacker, defender), propertyMode),
+    sources: advantageSources,
+  });
+  nextWorldState = helped.worldState;
+  nextCombat = helped.combat;
+  attacker = helped.attacker;
+  defender = helped.target;
+  advantageSources = helped.sources;
+  const advantageMode = helped.advantageMode;
   Object.assign(defender, consumeVexAdvantage(defender));
   const attackRoll = resolveD20Test({
     kind: 'attack',
