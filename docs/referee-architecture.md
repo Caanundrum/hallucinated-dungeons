@@ -111,6 +111,8 @@ Search and Study checks write target/location discovery records into `discovery_
 
 Basic object interactions update `object_states` and carried-object `inventory_state` before Game Master narration. The Game Master narrates the visible result from that state; taking a portable object removes it from scene presence, while reading/opening/using an object records the interaction without inventing new powers or secret shortcuts.
 
+Locked objects and known armed traps are object challenges, not free narration. Opening a locked object or disarming an established trap creates a server-owned Dexterity (`Thieves' Tools`) pending check, and the roll result mutates `object_states` before the Game Master narrates the aftermath. Triggered trap damage, container contents, and full tool-task coverage remain future extensions of this same state.
+
 ## Extension Rule
 
 When adding a mechanic:

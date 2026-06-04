@@ -1040,6 +1040,100 @@ test('combat object interactions spend the Utilize action and update object stat
   assert.match(result.reply, /Your turn remains open/);
 });
 
+test('locked objects create a Thieves Tools pending check and unlock on success', () => {
+  const rogueSheet = {
+    ...characterSheet,
+    abilities: { modifiers: { ...characterSheet.abilities.modifiers, dex: 3 } },
+    proficiencies: { tools: ['thieves_tools'] },
+    derived_stats: { ...characterSheet.derived_stats, proficiency_bonus: 2 },
+  };
+  const prompted = adjudicate({
+    message: 'Pick the lock on the iron chest.',
+    worldState: worldState({
+      scene_presence: {
+        exact_location: 'Morrowgate town gate',
+        location_type: 'gate',
+        present_npcs: [],
+        present_objects: ['iron chest'],
+        available_exits: ['town square'],
+        nearby_locations: [],
+      },
+      object_states: {
+        iron_chest: { name: 'iron chest', present: true, locked: true, lock_dc: 17 },
+      },
+    }),
+    characterSheet: rogueSheet,
+    currentTurn: 11,
+  });
+  const resolved = adjudicate({
+    message: `[ROLL REQUEST: ${prompted.worldState.pending_roll.id}]`,
+    worldState: prompted.worldState,
+    characterSheet: rogueSheet,
+    rollDie: sequenceRolls([12]),
+  });
+
+  assert.equal(prompted.logType, 'referee_object_challenge_pending');
+  assert.equal(prompted.worldState.pending_roll.kind, 'ability_check');
+  assert.equal(prompted.worldState.pending_roll.object_challenge_type, 'lock');
+  assert.equal(prompted.worldState.pending_roll.dc, 17);
+  assert.equal(prompted.worldState.pending_roll.modifier, 5);
+  assert.match(prompted.reply, /Thieves' Tools/);
+  assert.equal(resolved.worldState.object_states.iron_chest.locked, false);
+  assert.equal(resolved.worldState.object_states.iron_chest.unlocked, true);
+  assert.match(resolved.reply, /now unlocked/);
+});
+
+test('combat trap disarm spends Utilize and updates trap state on success', () => {
+  const rogueSheet = {
+    ...characterSheet,
+    abilities: { modifiers: { ...characterSheet.abilities.modifiers, dex: 3 } },
+    proficiencies: { tools: ['thieves_tools'] },
+    derived_stats: { ...characterSheet.derived_stats, proficiency_bonus: 2 },
+  };
+  const prompted = adjudicate({
+    message: 'Disarm the trap on the iron chest.',
+    worldState: worldState({
+      scene_presence: {
+        exact_location: 'Morrowgate town gate',
+        location_type: 'gate',
+        present_npcs: ['Goblin'],
+        present_objects: ['iron chest'],
+        available_exits: ['town square'],
+        nearby_locations: [],
+      },
+      object_states: {
+        iron_chest: { name: 'iron chest', present: true, trap: { armed: true, known: true, dc: 16 } },
+      },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', hp: 12, max_hp: 12, ac: 16, is_player: true },
+          { name: 'Goblin', hp: 8, max_hp: 8, ac: 12, is_player: false },
+        ],
+      },
+    }),
+    characterSheet: rogueSheet,
+  });
+  const resolved = adjudicate({
+    message: `[ROLL REQUEST: ${prompted.worldState.pending_roll.id}]`,
+    worldState: prompted.worldState,
+    characterSheet: rogueSheet,
+    rollDie: sequenceRolls([14]),
+  });
+
+  assert.equal(prompted.worldState.pending_roll.object_challenge_type, 'trap');
+  assert.equal(prompted.worldState.pending_roll.modifier, 5);
+  assert.equal(prompted.worldState.combat_state.turn_resources.action_available, false);
+  assert.match(prompted.reply, /Utilize/);
+  assert.equal(resolved.worldState.object_states.iron_chest.trap.armed, false);
+  assert.equal(resolved.worldState.object_states.iron_chest.trap.disarmed, true);
+  assert.equal(resolved.worldState.combat_state.round, 1);
+  assert.match(resolved.reply, /trap is disarmed/);
+  assert.match(resolved.reply, /Your turn remains open/);
+});
+
 test('blocks a second action in the same combat turn', () => {
   const result = adjudicate({
     message: 'I attack the goblin.',

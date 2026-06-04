@@ -75,7 +75,11 @@ const {
   applyDiscoveryCheckOutcome,
   buildDiscoveryPendingMetadata,
 } = require('./discoveryStateEngine');
-const { resolveObjectInteraction } = require('./objectInteractionEngine');
+const {
+  applyObjectChallengeOutcome,
+  resolveObjectChallenge,
+  resolveObjectInteraction,
+} = require('./objectInteractionEngine');
 const {
   applyWeaponMasteryOnHit,
   applyWeaponMasteryOnMiss,
@@ -186,6 +190,17 @@ function adjudicate({ message, worldState = {}, characterSheet = null, currentTu
 
   if (intent.save) {
     return promptSavingThrow({ intent, worldState: state, characterSheet: sheet, currentTurn, inCombat: Boolean(state.combat_state?.active) });
+  }
+
+  if (!state.combat_state?.active) {
+    const objectChallenge = resolveObjectChallengeAction({
+      message: text,
+      worldState: state,
+      characterSheet: sheet,
+      currentTurn,
+      inCombat: false,
+    });
+    if (objectChallenge) return objectChallenge;
   }
 
   if (state.combat_state?.active) {
@@ -544,6 +559,14 @@ function resolveCheckRoll({ pending, result, worldState, characterSheet }) {
   });
   nextState = discoveryOutcome.worldState;
   if (discoveryOutcome.lines.length) reply += `\n\n${discoveryOutcome.lines.join('\n\n')}`;
+  const objectOutcome = applyObjectChallengeOutcome({
+    pending,
+    result,
+    outcome,
+    worldState: nextState,
+  });
+  nextState = objectOutcome.worldState;
+  if (objectOutcome.lines.length) reply += `\n\n${objectOutcome.lines.join('\n\n')}`;
   if (!pending.combat) {
     const advanced = advanceNarrativeTime({
       message: pending.intent || '',
@@ -1149,6 +1172,15 @@ function resolveCombatAction({ message, intent, worldState, characterSheet, curr
   const helpAction = resolveHelpAction({ message, intent, worldState, characterSheet });
   if (helpAction) return helpAction;
 
+  const objectChallenge = resolveObjectChallengeAction({
+    message,
+    worldState,
+    characterSheet,
+    currentTurn,
+    inCombat: true,
+  });
+  if (objectChallenge) return objectChallenge;
+
   const objectInteraction = resolveObjectInteraction({ message, worldState });
   if (objectInteraction?.handled) {
     return {
@@ -1237,6 +1269,97 @@ function resolveCombatAction({ message, intent, worldState, characterSheet, curr
     logType: 'referee_combat_action_needed',
     worldState,
     reply: 'Combat is active and initiative is running. What action do you take this turn: **Attack**, **Shove**, **Grapple**, **Dodge**, **Disengage**, **Hide**, **Search**, **Study**, **Help**, **Ready**, **Utilize**, or a valid spell/action from your sheet?',
+  };
+}
+
+function resolveObjectChallengeAction({ message, worldState, characterSheet, currentTurn = 0, inCombat = false } = {}) {
+  const challenge = resolveObjectChallenge({ message, worldState });
+  if (!challenge) return null;
+  if (challenge.handled) {
+    return {
+      handled: true,
+      logType: challenge.logType,
+      worldState,
+      reply: challenge.response,
+    };
+  }
+
+  let nextWorldState = worldState;
+  if (inCombat) {
+    const spent = spendTurnResource(worldState, 'action', 'Utilize', characterSheet);
+    if (!spent.ok) {
+      return { handled: true, logType: 'referee_action_unavailable', worldState: spent.worldState, reply: spent.reply };
+    }
+    nextWorldState = spent.worldState;
+  }
+
+  const modifier = getObjectChallengeModifier(characterSheet, challenge);
+  const conditionSubject = getPlayerConditionSubject(characterSheet, worldState);
+  const conditionMode = getD20ConditionMode({
+    subject: conditionSubject,
+    testType: 'ability_check',
+    ability: 'dex',
+  });
+  const conditionSources = getD20ConditionSources({
+    subject: conditionSubject,
+    testType: 'ability_check',
+    ability: 'dex',
+  });
+  const activeAdvantageSources = getActiveD20AdvantageSources(worldState, {
+    testType: 'ability_check',
+    ability: 'dex',
+  });
+  const advantageMode = combineAdvantageModes(conditionMode, activeAdvantageSources.length ? 'advantage' : null);
+  const advantageSources = [...conditionSources, ...activeAdvantageSources];
+  const pendingRoll = {
+    id: `roll_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    kind: 'ability_check',
+    ability: 'dex',
+    label: challenge.label,
+    formula: `1d20${formatSigned(modifier.total)}`,
+    modifier: modifier.total,
+    modifier_breakdown: modifier.breakdown,
+    reroll_rules: getAutoD20RerollRules(characterSheet),
+    advantage_mode: advantageMode,
+    advantage_sources: advantageSources,
+    dc: challenge.dc,
+    dc_source: `${challenge.type === 'trap' ? 'trap disarm' : 'lock'} DC from object state; default 15`,
+    intent: message,
+    consumes: inCombat ? 'action' : 'exploration',
+    combat: Boolean(inCombat),
+    created_turn: currentTurn,
+    success_result: challenge.successResult,
+    failure_result: challenge.failureResult,
+    object_challenge: true,
+    object_challenge_type: challenge.type,
+    object_action: challenge.action,
+    object_target_key: challenge.target.key,
+    object_target_name: challenge.target.name,
+  };
+
+  return {
+    handled: true,
+    logType: 'referee_object_challenge_pending',
+    worldState: {
+      ...nextWorldState,
+      pending_roll: pendingRoll,
+    },
+    reply: `Make a DC ${challenge.dc} ${challenge.label} to ${challenge.action} ${challenge.target.name}.${formatAdvantageModeText(advantageMode, advantageSources)}${inCombat ? ' This uses your Action as the **Utilize** action.' : ''} [CHECK: id=${pendingRoll.id} ability=dex modifier=${modifier.total} breakdown="${sanitizeTagValue(modifier.breakdown)}"]`,
+  };
+}
+
+function getObjectChallengeModifier(characterSheet = {}, challenge = {}) {
+  const abilityMod = Number(characterSheet.abilities?.modifiers?.dex || 0);
+  const toolId = challenge.tool || 'thieves_tools';
+  const toolName = toolId === 'thieves_tools' ? "Thieves' Tools" : titleCase(toolId.replaceAll('_', ' '));
+  const hasToolProficiency = (characterSheet.proficiencies?.tools || []).includes(toolId);
+  const proficiency = Number(characterSheet.derived_stats?.proficiency_bonus || proficiencyBonus(characterSheet.identity?.level || characterSheet.derived_stats?.level || 1));
+  const toolBonus = hasToolProficiency ? proficiency : 0;
+  return {
+    total: abilityMod + toolBonus,
+    breakdown: hasToolProficiency
+      ? `DEX modifier ${formatSigned(abilityMod)} + ${toolName} proficiency ${formatSigned(proficiency)} = ${formatSigned(abilityMod + toolBonus)}`
+      : `DEX modifier ${formatSigned(abilityMod)}; no ${toolName} proficiency = ${formatSigned(abilityMod)}`,
   };
 }
 
