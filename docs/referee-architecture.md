@@ -113,6 +113,8 @@ Basic object interactions update `object_states` and carried-object `inventory_s
 
 Locked objects and known armed traps are object challenges, not free narration. Opening a locked object or disarming an established trap creates a server-owned Dexterity (`Thieves' Tools`) pending check, and the roll result mutates `object_states` before the Game Master narrates the aftermath. Triggered trap damage, container contents, and full tool-task coverage remain future extensions of this same state.
 
+Passive equipment and attuned item effects are projected into `active_effects` when a character is synced into world state. The referee consumes those effects for skill checks, saving throws, weapon attack and damage bonuses, spell attack bonuses, spell save DC bonuses, and skill advantage; existing spell effects are preserved. Item charges, activation timing, equip/unequip actions, and inventory UI are intentionally deferred to the inventory phase so they can share one state model instead of becoming a glittering junk drawer.
+
 ## Extension Rule
 
 When adding a mechanic:

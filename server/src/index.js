@@ -29,6 +29,9 @@ const {
   applyActiveEffectsToCharacterSheet,
 } = require('./spellEffectEngine');
 const {
+  syncEquipmentEffectsToWorldState,
+} = require('./equipmentEffectEngine');
+const {
   spendTurnResource,
   getSpellActionResource,
 } = require('./actionEconomy');
@@ -660,12 +663,13 @@ function normalizeActiveCharacterWorldState(worldState, characterSheet, characte
       ? currentPlayerStats.ammunition_spent_since_recovery || {}
       : {},
   };
-  return {
+  const baseWorldState = {
     ...worldState,
     active_effects: characterSheet.derived_stats?.active_spell_effects || worldState.active_effects || [],
     player_stats: nextPlayerStats,
     combat_state: alignCombatPlayerToCharacter(worldState.combat_state, characterSheet, nextPlayerStats),
   };
+  return syncEquipmentEffectsToWorldState(baseWorldState, characterSheet);
 }
 
 function buildCharacterAmmunitionState(characterSheet = {}) {

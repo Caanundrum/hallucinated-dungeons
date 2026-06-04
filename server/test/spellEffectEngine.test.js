@@ -11,7 +11,11 @@ const {
   resolveSpellOutcome,
   tickActiveEffects,
   getActiveBonusDice,
+  getActiveCheckBonuses,
+  getActiveSavingThrowBonuses,
+  getActiveAttackRollBonuses,
   getActiveDamageDice,
+  getActiveSpellAttackBonus,
 } = require('../src/spellEffectEngine');
 const { advanceEnemyTurns } = require('../src/refereeCore');
 
@@ -259,6 +263,25 @@ test('Guidance requires a 2024 skill choice and applies only to that skill', () 
   assert.equal(getActiveBonusDice(cast.worldState, 'check', { skill: 'perception' }).length, 0);
 });
 
+test('active flat item bonuses are filtered by skill, save, weapon, and class context', () => {
+  const state = worldState({
+    active_effects: [
+      { id: 'quiet_cloak', name: 'Quiet Cloak', rules_effects: [{ target: 'skill_check_bonus', skill: 'stealth', value: 2, label: 'Quiet Cloak' }] },
+      { id: 'stubborn_ring', name: 'Stubborn Ring', rules_effects: [{ target: 'saving_throw_bonus', ability: 'wis', value: 1, label: 'Stubborn Ring' }] },
+      { id: 'bright_wand', name: 'Bright Wand', rules_effects: [{ target: 'spell_attack_bonus', class_id: 'wizard', value: 1, label: 'Bright Wand' }] },
+      { id: 'sharp_blade', name: 'Sharp Blade', rules_effects: [{ target: 'weapon_attack_bonus', value: 1, label: 'Sharp Blade' }] },
+    ],
+  });
+
+  assert.deepEqual(getActiveCheckBonuses(state, { skill: 'stealth' }).map((bonus) => bonus.value), [2]);
+  assert.deepEqual(getActiveCheckBonuses(state, { skill: 'perception' }), []);
+  assert.deepEqual(getActiveSavingThrowBonuses(state, { ability: 'wis' }).map((bonus) => bonus.value), [1]);
+  assert.deepEqual(getActiveSavingThrowBonuses(state, { ability: 'dex' }), []);
+  assert.deepEqual(getActiveAttackRollBonuses(state, { attack: { name: 'Longsword' } }).map((bonus) => bonus.value), [1]);
+  assert.equal(getActiveSpellAttackBonus(state, casterSheet()), 1);
+  assert.equal(getActiveSpellAttackBonus(state, casterSheet({ identity: { class: 'cleric', class_name: 'Cleric' } })), 0);
+});
+
 test('Armor of Agathys uses the 2024 Bonus Action casting time', () => {
   const spell = content.spells.find((item) => item.id === 'armor_of_agathys');
   const cast = resolveSpellCast({
@@ -386,6 +409,28 @@ test('Fire Bolt uses spell attack bonus and can consume a combat turn', () => {
   assert.equal(outcome.consumesTurn, true);
   assert.equal(target.hp, 5);
   assert.match(outcome.reply, /12\+5 = 17 vs AC 12/);
+});
+
+test('active spell attack bonuses apply to spell attack resolution', () => {
+  const cast = resolveSpellCast({
+    message: 'I cast Fire Bolt at the skeleton.',
+    content,
+    characterSheet: casterSheet(),
+    worldState: combatWorld({
+      active_effects: [
+        { id: 'wand_focus', name: 'Wand Focus', rules_effects: [{ target: 'spell_attack_bonus', class_id: 'wizard', value: 1, label: 'Wand Focus' }] },
+      ],
+    }),
+  });
+  const outcome = resolveSpellOutcome({
+    spellCast: cast,
+    characterSheet: cast.characterSheet,
+    worldState: cast.worldState,
+    rollDie: sequenceRolls([6, 5]),
+  });
+
+  assert.match(outcome.reply, /6\+6 = 12 vs AC 12/);
+  assert.match(outcome.reply, /Active spell attack bonus: Wand Focus \+1/);
 });
 
 test("Fire's Burn can ride a damaging spell attack hit", () => {

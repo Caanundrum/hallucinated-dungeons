@@ -7,6 +7,9 @@ const {
   applyStartOfTurnEffects,
   consumeActiveEffects,
   getActiveBonusDice,
+  getActiveCheckBonuses,
+  getActiveSavingThrowBonuses,
+  getActiveAttackRollBonuses,
   getActiveD20AdvantageSources,
   getActiveDamageBonuses,
   getActiveDamageDice,
@@ -271,7 +274,7 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
     nextWorldState = spent.worldState;
   }
 
-  const modifier = getCheckModifier(characterSheet, check);
+  const modifier = getCheckModifier(characterSheet, check, worldState);
   const bonus = getActiveBonusDice(worldState, 'check', { skill: check.skill })[0] || null;
   const hideAction = isHideActionCheck({ rule_action: intent.ruleAction, skill: check.skill, intent: intent.raw });
   const dc = hideAction ? 15 : chooseDc(intent.raw, check, worldState, inCombat);
@@ -339,7 +342,7 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
 
 function promptSavingThrow({ intent, worldState, characterSheet, currentTurn = 0, inCombat }) {
   const save = intent.save;
-  const modifier = getSavingThrowModifier(characterSheet, save.ability);
+  const modifier = getSavingThrowModifier(characterSheet, save.ability, worldState);
   const bonus = getActiveBonusDice(worldState, 'save')[0] || null;
   const dc = chooseDc(intent.raw, save, worldState, inCombat);
   const conditionSubject = getPlayerConditionSubject(characterSheet, worldState);
@@ -936,7 +939,7 @@ function completeLongRest(worldState, characterSheet = {}) {
   return {
     worldState: mergeWorldResources({
       ...worldState,
-      active_effects: [],
+      active_effects: (worldState.active_effects || []).filter((effect) => effect.permanent || effect.source_type === 'equipment'),
       pending_roll: null,
       player_stats: {
         ...(worldState.player_stats || {}),
@@ -1508,9 +1511,11 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
   });
   let attackState = lucky.worldState;
   const advantageMode = lucky.advantageMode;
+  const activeAttackBonuses = getActiveAttackRollBonuses(attackState, { attack, characterSheet });
+  const activeAttackBonusTotal = activeAttackBonuses.reduce((sum, bonus) => sum + Number(bonus.value || 0), 0);
   const attackRoll = resolveD20Test({
     kind: 'attack',
-    modifier: attack.attackBonus,
+    modifier: attack.attackBonus + activeAttackBonusTotal,
     dc: Number(target.ac || 10),
     advantageMode,
     bonusDice: getActiveBonusDice(attackState, 'attack'),
@@ -1528,6 +1533,7 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
     ...ammunitionSpent.lines,
   ];
   if (advantageMode) lines.push(`Attack roll has ${advantageMode} from ${formatList(lucky.sources)}.`);
+  if (activeAttackBonuses.length) lines.push(`Active attack bonus: ${activeAttackBonuses.map((bonus) => `${bonus.label} ${formatSigned(bonus.value)}`).join(', ')}.`);
   if (lucky.note) lines.push(lucky.note);
   const reveal = clearPlayerHidden({ worldState: attackState, reason: 'attack' });
   if (reveal.revealed) {
@@ -1794,9 +1800,11 @@ function resolveExtraWeaponAttackRoll({
   target = helped.target;
   sources = helped.sources;
   const advantageMode = helped.advantageMode;
+  const activeAttackBonuses = getActiveAttackRollBonuses(worldState, { attack, characterSheet });
+  const activeAttackBonusTotal = activeAttackBonuses.reduce((sum, bonus) => sum + Number(bonus.value || 0), 0);
   const attackRoll = resolveD20Test({
     kind: 'attack',
-    modifier: attack.attackBonus,
+    modifier: attack.attackBonus + activeAttackBonusTotal,
     dc: Number(target.ac || 10),
     advantageMode,
     bonusDice: getActiveBonusDice(worldState, 'attack'),
@@ -1812,6 +1820,7 @@ function resolveExtraWeaponAttackRoll({
     ...ammunitionSpent.lines,
   ];
   if (advantageMode) lines.push(`${resultLabel} has ${advantageMode} from ${formatList(sources)}.`);
+  if (activeAttackBonuses.length) lines.push(`Active attack bonus: ${activeAttackBonuses.map((bonus) => `${bonus.label} ${formatSigned(bonus.value)}`).join(', ')}.`);
   const reveal = clearPlayerHidden({ worldState, reason: 'attack' });
   if (reveal.revealed) {
     worldState = reveal.worldState;
@@ -2224,7 +2233,7 @@ function buildConcentrationPrompt({ worldState, characterSheet = {}, damageEvent
   const playerDamage = damageEvents.filter((event) => event.target === 'player' && Number(event.amount || 0) > 0);
   if (concentrationEffects.length === 0 || playerDamage.length === 0) return null;
 
-  const modifier = getSavingThrowModifier(characterSheet, 'con');
+  const modifier = getSavingThrowModifier(characterSheet, 'con', worldState);
   const bonus = getActiveBonusDice(worldState, 'save')[0] || null;
   const highestDamage = Math.max(...playerDamage.map((event) => Number(event.amount || 0)));
   const dc = Math.max(10, Math.floor(highestDamage / 2));
@@ -2329,35 +2338,56 @@ function cloneCombatState(combatState) {
   return JSON.parse(JSON.stringify(combatState || { active: true, round: 1, turn_index: 0, combatants: [] }));
 }
 
-function getCheckModifier(characterSheet, check) {
+function getCheckModifier(characterSheet, check, worldState = {}) {
+  const activeBonuses = getActiveCheckBonuses(worldState, {
+    skill: check.skill,
+    ability: check.ability,
+  });
+  const activeTotal = activeBonuses.reduce((sum, bonus) => sum + Number(bonus.value || 0), 0);
+  const activeBreakdown = activeBonuses.length
+    ? ` + ${activeBonuses.map((bonus) => `${bonus.label} ${formatSigned(bonus.value)}`).join(' + ')}`
+    : '';
   const skillData = check.skill ? characterSheet?.derived_stats?.skill_modifiers?.[check.skill] : null;
   if (skillData) {
+    const baseTotal = Number(skillData.total || 0);
+    const total = baseTotal + activeTotal;
+    const baseBreakdown = `${String(skillData.ability || check.ability).toUpperCase()} ${skillData.proficient ? '+ proficiency' : 'only'} = ${formatSigned(baseTotal)}`;
     return {
-      total: Number(skillData.total || 0),
-      breakdown: `${String(skillData.ability || check.ability).toUpperCase()} ${skillData.proficient ? '+ proficiency' : 'only'} = ${formatSigned(skillData.total)}`,
+      total,
+      breakdown: activeBonuses.length ? `${baseBreakdown}${activeBreakdown} = ${formatSigned(total)}` : baseBreakdown,
     };
   }
 
   const abilityMod = Number(characterSheet?.abilities?.modifiers?.[check.ability] || 0);
+  const abilityBreakdown = `${check.ability.toUpperCase()} modifier ${formatSigned(abilityMod)}`;
   return {
-    total: abilityMod,
-    breakdown: `${check.ability.toUpperCase()} modifier ${formatSigned(abilityMod)}`,
+    total: abilityMod + activeTotal,
+    breakdown: activeBonuses.length ? `${abilityBreakdown}${activeBreakdown} = ${formatSigned(abilityMod + activeTotal)}` : abilityBreakdown,
   };
 }
 
-function getSavingThrowModifier(characterSheet, ability) {
+function getSavingThrowModifier(characterSheet, ability, worldState = {}) {
+  const activeBonuses = getActiveSavingThrowBonuses(worldState, { ability });
+  const activeTotal = activeBonuses.reduce((sum, bonus) => sum + Number(bonus.value || 0), 0);
+  const activeBreakdown = activeBonuses.length
+    ? ` + ${activeBonuses.map((bonus) => `${bonus.label} ${formatSigned(bonus.value)}`).join(' + ')}`
+    : '';
   const saveData = characterSheet?.derived_stats?.saving_throw_modifiers?.[ability];
   if (saveData) {
+    const baseTotal = Number(saveData.total || 0);
+    const total = baseTotal + activeTotal;
+    const baseBreakdown = `${ability.toUpperCase()} ${saveData.proficient ? '+ proficiency' : 'only'} = ${formatSigned(baseTotal)}`;
     return {
-      total: Number(saveData.total || 0),
-      breakdown: `${ability.toUpperCase()} ${saveData.proficient ? '+ proficiency' : 'only'} = ${formatSigned(saveData.total)}`,
+      total,
+      breakdown: activeBonuses.length ? `${baseBreakdown}${activeBreakdown} = ${formatSigned(total)}` : baseBreakdown,
     };
   }
 
   const abilityMod = Number(characterSheet?.abilities?.modifiers?.[ability] || 0);
+  const abilityBreakdown = `${ability.toUpperCase()} modifier ${formatSigned(abilityMod)}`;
   return {
-    total: abilityMod,
-    breakdown: `${ability.toUpperCase()} modifier ${formatSigned(abilityMod)}`,
+    total: abilityMod + activeTotal,
+    breakdown: activeBonuses.length ? `${abilityBreakdown}${activeBreakdown} = ${formatSigned(abilityMod + activeTotal)}` : abilityBreakdown,
   };
 }
 

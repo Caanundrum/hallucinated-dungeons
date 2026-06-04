@@ -1,5 +1,5 @@
 {
-  "version": "4C.6-H22",
+  "version": "4C.6-H23",
   "status_definitions": {
     "implemented": "Exposed and mechanically enforced for the current supported level/scope.",
     "partial": "Exposed and partially enforced, but missing at least one meaningful rules interaction.",
@@ -151,7 +151,7 @@
     "tool": "partial",
     "currency": "partial",
     "background_equipment": "deferred",
-    "item": "deferred"
+    "item": "partial"
   },
   "weapon_masteries": {
     "cleave": "partial",
@@ -178,15 +178,15 @@
   "equipment_rules": {
     "armor_formula": "implemented",
     "shield_bonus": "implemented",
-    "weapon_attack_bonus": "partial",
-    "weapon_damage_bonus": "partial",
-    "skill_check_bonus": "partial",
-    "skill_advantage": "deferred",
-    "saving_throw_bonus": "partial",
+    "weapon_attack_bonus": "implemented",
+    "weapon_damage_bonus": "implemented",
+    "skill_check_bonus": "implemented",
+    "skill_advantage": "implemented",
+    "saving_throw_bonus": "implemented",
     "speed_bonus": "partial",
     "initiative_bonus": "implemented",
-    "spell_attack_bonus": "partial",
-    "spell_save_dc_bonus": "partial",
+    "spell_attack_bonus": "implemented",
+    "spell_save_dc_bonus": "implemented",
     "ammunition": "implemented",
     "finesse": "implemented",
     "heavy": "implemented",

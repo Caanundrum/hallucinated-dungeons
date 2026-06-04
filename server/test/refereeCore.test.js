@@ -338,6 +338,32 @@ test('prompts deterministic saving throws with character save modifiers', () => 
   assert.match(result.reply, /\[SAVE: id=.*ability=dex/);
 });
 
+test('active item bonuses change pending skill checks and saving throws', () => {
+  const stealth = adjudicate({
+    message: 'I hide behind the rain barrel.',
+    worldState: worldState({
+      active_effects: [
+        { id: 'equipment_cloak_of_quiet_steps', name: 'Cloak of Quiet Steps', rules_effects: [{ target: 'skill_check_bonus', skill: 'stealth', value: 2, label: 'Cloak of Quiet Steps' }] },
+      ],
+    }),
+    characterSheet,
+  });
+  const save = adjudicate({
+    message: 'I dive away from the falling rocks.',
+    worldState: worldState({
+      active_effects: [
+        { id: 'equipment_ring_of_sure_feet', name: 'Ring of Sure Feet', rules_effects: [{ target: 'saving_throw_bonus', ability: 'dex', value: 1, label: 'Ring of Sure Feet' }] },
+      ],
+    }),
+    characterSheet,
+  });
+
+  assert.equal(stealth.worldState.pending_roll.modifier, 5);
+  assert.match(stealth.worldState.pending_roll.modifier_breakdown, /Cloak of Quiet Steps \+2/);
+  assert.equal(save.worldState.pending_roll.modifier, 4);
+  assert.match(save.worldState.pending_roll.modifier_breakdown, /Ring of Sure Feet \+1/);
+});
+
 test('prompts a social check for speeches meant to change minds', () => {
   const result = adjudicate({
     message: 'I give a speech to convince the frightened guards to hold the gate.',
@@ -1995,6 +2021,81 @@ test('Archery Fighting Style updates older ranged sheets during referee attack r
 
   assert.equal(cultist.hp, 15);
   assert.match(result.reply, /Attack roll: 14 \(natural 8; 8\+6=14\) vs AC 14/);
+});
+
+test('active weapon attack bonuses change referee attack rolls', () => {
+  const result = adjudicate({
+    message: 'Attack the Cultist with my longsword.',
+    worldState: worldState({
+      active_effects: [
+        { id: 'equipment_longsword_plus_1', name: 'Longsword +1', source_type: 'equipment', source_item_id: 'longsword_plus_1', rules_effects: [{ target: 'weapon_attack_bonus', value: 1, label: 'Longsword +1' }] },
+      ],
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', initiative: 18, hp: 12, max_hp: 12, ac: 16, is_player: true, conditions: [] },
+          { name: 'Cultist', initiative: 8, hp: 20, max_hp: 20, ac: 11, is_player: false, conditions: [], attack: { name: 'dagger', attack_bonus: 2, damage_formula: '1d4+1' } },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      derived_stats: {
+        ...characterSheet.derived_stats,
+        attack_breakdowns: [
+          { weapon_id: 'longsword', name: 'Longsword', ability: 'str', attack_total: 5, damage_formula: '1d8+3' },
+        ],
+      },
+    },
+    rollDie: sequenceRolls([5, 4]),
+  });
+
+  assert.match(result.reply, /Attack roll: 11 \(natural 5; 5\+6=11\) vs AC 11/);
+  assert.match(result.reply, /Active attack bonus: Longsword \+1 \+1/);
+});
+
+test('runtime equipment effects do not double-count magic already baked into weapon sheets', () => {
+  const result = adjudicate({
+    message: 'Attack the Cultist with my longsword.',
+    worldState: worldState({
+      active_effects: [
+        { id: 'equipment_longsword_plus_1', name: 'Longsword +1', source_type: 'equipment', source_item_id: 'longsword_plus_1', rules_effects: [{ target: 'weapon_attack_bonus', value: 1, label: 'Longsword +1' }, { target: 'weapon_damage_bonus', value: 1, label: 'Longsword +1' }] },
+      ],
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', initiative: 18, hp: 12, max_hp: 12, ac: 16, is_player: true, conditions: [] },
+          { name: 'Cultist', initiative: 8, hp: 20, max_hp: 20, ac: 12, is_player: false, conditions: [], attack: { name: 'dagger', attack_bonus: 2, damage_formula: '1d4+1' } },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      derived_stats: {
+        ...characterSheet.derived_stats,
+        attack_breakdowns: [
+          {
+            weapon_id: 'longsword_plus_1',
+            name: 'Longsword +1',
+            ability: 'str',
+            attack_total: 6,
+            damage_formula: '1d8+4',
+            attack_parts: [{ label: 'Weapon magic', value: 1 }],
+            damage_parts: [{ label: 'Weapon magic', value: 1 }],
+          },
+        ],
+      },
+    },
+    rollDie: sequenceRolls([6, 4]),
+  });
+
+  assert.match(result.reply, /Attack roll: 12 \(natural 6; 6\+6=12\) vs AC 12/);
+  assert.doesNotMatch(result.reply, /Active attack bonus/);
+  assert.match(result.reply, /Hit for 8 damage/);
 });
 
 test('declared paired Light weapons resolve a Nick extra attack inside the Attack action', () => {

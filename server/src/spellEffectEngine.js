@@ -149,7 +149,9 @@ function resolveSpellAttack({ spell, rule, characterSheet, worldState, rollDie }
   let { combat, target } = context;
   const { activeCombat } = context;
 
-  const attackBonus = Number(characterSheet?.derived_stats?.spell_attack_bonus || 0);
+  const baseAttackBonus = Number(characterSheet?.derived_stats?.spell_attack_bonus || 0);
+  const activeAttackBonus = getActiveSpellAttackBonus(worldState, characterSheet);
+  const attackBonus = baseAttackBonus + activeAttackBonus;
   const attacker = getPlayerCombatant(combat, characterSheet, worldState);
   const conditionMode = getAttackMode({ attacker, target });
   const activeAdvantageSources = getActiveSpellAttackAdvantageSources(worldState, characterSheet);
@@ -174,6 +176,9 @@ function resolveSpellAttack({ spell, rule, characterSheet, worldState, rollDie }
   const lines = [
     `You cast **${spell.name}** at ${target.name}. Spell attack: ${attackRoll.text}${formatSigned(attackBonus)} = ${total} vs AC ${target.ac}.`,
   ];
+  if (activeAttackBonus) {
+    lines.push(`Active spell attack bonus: ${getActiveSpellAttackSources(worldState, characterSheet).join(', ')} ${formatSigned(activeAttackBonus)}.`);
+  }
   if (attackMode) {
     lines.push(`Spell attack has ${attackMode} from ${formatList(lucky.sources)}.`);
   }
@@ -617,6 +622,25 @@ function normalizeName(value) {
   return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
+function normalizeComparableId(value) {
+  return normalizeName(value).replace(/\s+/g, '');
+}
+
+function isWeaponMagicAlreadyInSheet(characterSheet = {}, attack = {}, effect = {}) {
+  const weaponKey = normalizeComparableId(attack.weaponId || attack.weapon_id || attack.name);
+  const sourceKey = normalizeComparableId(effect.source_item_id || effect.sourceItemId || effect.source_item_name || effect.sourceItemName || effect.name);
+  if (!weaponKey || !sourceKey) return false;
+  if (!weaponKey.includes(sourceKey) && !sourceKey.includes(weaponKey)) return false;
+
+  return (characterSheet?.derived_stats?.attack_breakdowns || [])
+    .filter((entry) => {
+      const entryKey = normalizeComparableId(entry.weapon_id || entry.weaponId || entry.name);
+      return entryKey && (entryKey.includes(weaponKey) || weaponKey.includes(entryKey));
+    })
+    .some((entry) => [...(entry.attack_parts || []), ...(entry.damage_parts || [])]
+      .some((part) => /weapon magic/i.test(String(part.label || part.source || ''))));
+}
+
 function comparableTargetNames(value) {
   const normalized = normalizeName(value);
   const stripped = normalized
@@ -1033,6 +1057,51 @@ function getActiveBonusDice(worldState = {}, bonusType, context = {}) {
     }));
 }
 
+function getActiveCheckBonuses(worldState = {}, context = {}) {
+  const skill = normalizeName(context.skill);
+  const ability = normalizeName(context.ability);
+  return normalizeEffects(worldState.active_effects || [])
+    .flatMap((effect) => (effect.rules_effects || []).map((rule) => ({ effect, rule })))
+    .filter(({ rule }) => rule.target === 'skill_check_bonus')
+    .filter(({ rule }) => !rule.skill || (skill && normalizeName(rule.skill) === skill))
+    .filter(({ rule }) => !rule.ability || (ability && normalizeName(rule.ability) === ability))
+    .map(({ effect, rule }) => ({
+      effectId: effect.id,
+      value: Number(rule.value || 0),
+      label: rule.label || effect.name || 'Active effect',
+    }))
+    .filter((bonus) => bonus.value !== 0);
+}
+
+function getActiveSavingThrowBonuses(worldState = {}, context = {}) {
+  const ability = normalizeName(context.ability);
+  return normalizeEffects(worldState.active_effects || [])
+    .flatMap((effect) => (effect.rules_effects || []).map((rule) => ({ effect, rule })))
+    .filter(({ rule }) => rule.target === 'saving_throw_bonus')
+    .filter(({ rule }) => !rule.ability || (ability && normalizeName(rule.ability) === ability))
+    .map(({ effect, rule }) => ({
+      effectId: effect.id,
+      value: Number(rule.value || 0),
+      label: rule.label || effect.name || 'Active effect',
+    }))
+    .filter((bonus) => bonus.value !== 0);
+}
+
+function getActiveAttackRollBonuses(worldState = {}, context = {}) {
+  const attackAbility = normalizeName(context.attack?.ability);
+  return normalizeEffects(worldState.active_effects || [])
+    .flatMap((effect) => (effect.rules_effects || []).map((rule) => ({ effect, rule })))
+    .filter(({ rule }) => rule.target === 'weapon_attack_bonus')
+    .filter(({ rule }) => !rule.ability || (attackAbility && normalizeName(rule.ability) === attackAbility))
+    .filter(({ effect }) => !isWeaponMagicAlreadyInSheet(context.characterSheet, context.attack, effect))
+    .map(({ effect, rule }) => ({
+      effectId: effect.id,
+      value: Number(rule.value || 0),
+      label: rule.label || effect.name || 'Active effect',
+    }))
+    .filter((bonus) => bonus.value !== 0);
+}
+
 function getActiveDamageDice(worldState = {}, target = null) {
   const targetName = normalizeName(typeof target === 'string' ? target : target?.name);
   return normalizeEffects(worldState.active_effects || [])
@@ -1059,6 +1128,7 @@ function getActiveDamageBonuses(worldState = {}, context = {}) {
     .flatMap((effect) => (effect.rules_effects || []).map((rule) => ({ effect, rule })))
     .filter(({ rule }) => rule.target === 'weapon_damage_bonus')
     .filter(({ rule }) => !rule.ability || (attackAbility && normalizeName(rule.ability) === attackAbility))
+    .filter(({ effect }) => !isWeaponMagicAlreadyInSheet(context.characterSheet, context.attack, effect))
     .map(({ effect, rule }) => ({
       effectId: effect.id,
       value: Number(rule.value || 0),
@@ -1078,10 +1148,14 @@ function getActiveDamageResistances(worldState = {}) {
 
 function getActiveD20AdvantageSources(worldState = {}, context = {}) {
   const ability = normalizeName(context.ability);
+  const skill = normalizeName(context.skill);
   const testType = normalizeName(context.testType);
   return normalizeEffects(worldState.active_effects || [])
     .flatMap((effect) => (effect.rules_effects || []).map((rule) => ({ effect, rule })))
     .filter(({ rule }) => {
+      if (rule.target === 'skill_advantage' && testType === 'skill_check') {
+        return !rule.skill || (skill && normalizeName(rule.skill) === skill);
+      }
       if (rule.target === 'ability_check_advantage' && (testType === 'ability_check' || testType === 'skill_check')) {
         return !rule.ability || normalizeName(rule.ability) === ability;
       }
@@ -1096,6 +1170,28 @@ function getActiveD20AdvantageSources(worldState = {}, context = {}) {
 function getActiveSpellSaveDcBonus(worldState = {}, characterSheet = {}) {
   return getActiveSpellSaveDcBonuses(worldState, characterSheet)
     .reduce((sum, bonus) => sum + Number(bonus.value || 0), 0);
+}
+
+function getActiveSpellAttackBonus(worldState = {}, characterSheet = {}) {
+  return getActiveSpellAttackBonuses(worldState, characterSheet)
+    .reduce((sum, bonus) => sum + Number(bonus.value || 0), 0);
+}
+
+function getActiveSpellAttackSources(worldState = {}, characterSheet = {}) {
+  return getActiveSpellAttackBonuses(worldState, characterSheet).map((bonus) => bonus.label);
+}
+
+function getActiveSpellAttackBonuses(worldState = {}, characterSheet = {}) {
+  const classId = normalizeName(characterSheet.identity?.class || characterSheet.identity?.class_name);
+  return normalizeEffects(worldState.active_effects || [])
+    .flatMap((effect) => (effect.rules_effects || []).map((rule) => ({ effect, rule })))
+    .filter(({ rule }) => rule.target === 'spell_attack_bonus')
+    .filter(({ rule }) => !rule.class_id || normalizeName(rule.class_id) === classId)
+    .map(({ effect, rule }) => ({
+      value: Number(rule.value || 0),
+      label: rule.label || effect.name || 'Active effect',
+    }))
+    .filter((bonus) => bonus.value !== 0);
 }
 
 function getActiveSpellSaveDcSources(worldState = {}, characterSheet = {}) {
@@ -1187,10 +1283,15 @@ module.exports = {
   applyStartOfTurnEffects,
   consumeActiveEffects,
   getActiveBonusDice,
+  getActiveCheckBonuses,
+  getActiveSavingThrowBonuses,
+  getActiveAttackRollBonuses,
   getActiveDamageDice,
   getActiveDamageBonuses,
   getActiveDamageResistances,
   getActiveD20AdvantageSources,
+  getActiveSpellAttackBonus,
+  getActiveSpellAttackSources,
   getActiveSpellAttackAdvantageSources,
   getActiveSpellSaveDcBonus,
   formatBonusDieTag,
