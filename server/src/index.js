@@ -1281,9 +1281,13 @@ io.on('connection', (socket) => {
       if (spellAction.handled) {
         return;
       }
-      const effectiveWorldState = spellAction.worldState || activeWorldState;
+      let effectiveWorldState = spellAction.worldState || activeWorldState;
 
       const mechanics = resolvePreNarration({ message, worldState: effectiveWorldState });
+      if (mechanics.worldState && mechanics.worldState !== effectiveWorldState) {
+        effectiveWorldState = mechanics.worldState;
+        await db.updateWorldState(sessionId, effectiveWorldState);
+      }
       if (mechanics.handled) {
         await db.saveMessage(sessionId, 'player_dm1', message, currentTurn);
         await db.saveMessage(sessionId, 'dm1', mechanics.response, currentTurn);

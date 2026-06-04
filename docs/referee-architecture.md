@@ -109,6 +109,8 @@ Influence checks write target NPC attitude/leverage into `npc_states` after the 
 
 Search and Study checks write target/location discovery records into `discovery_state` after the roll resolves. The referee records whether the roll established a reliable discovery; the Game Master still narrates the specific clue or read from the established scene and campaign facts.
 
+Basic object interactions update `object_states` and carried-object `inventory_state` before Game Master narration. The Game Master narrates the visible result from that state; taking a portable object removes it from scene presence, while reading/opening/using an object records the interaction without inventing new powers or secret shortcuts.
+
 ## Extension Rule
 
 When adding a mechanic:

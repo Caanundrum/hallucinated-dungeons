@@ -70,7 +70,7 @@ test('adapts scene_presence into future-ready entity state', () => {
     characterSheet: characterSheet(),
   });
 
-  assert.equal(context.version, '4C.6-H20');
+  assert.equal(context.version, '4C.6-H21');
   assert.equal(context.position_state.mode, 'scene_zone');
   assert.equal(context.actor.entity_id, 'pc:char_ari');
   assert.ok(context.entity_state.some((entity) => entity.id === 'npc:older_gate_guard'));
@@ -96,6 +96,34 @@ test('supports entity lookup and interaction checks without relying on narration
   assert.equal(canInteract(context, 'wax sealed note', 'read').ok, true);
   assert.equal(canInteract(context, 'the inn', 'read').ok, false);
   assert.equal(canInteract(context, 'the inn', 'move').ok, true);
+});
+
+test('treats carried objects as reachable rules entities', () => {
+  const context = buildRulesContext({
+    worldState: worldState({
+      scene_presence: {
+        exact_location: 'Morrowgate town gate',
+        location_type: 'gate',
+        present_npcs: ['older gate guard'],
+        present_objects: ['palisade gate'],
+        available_exits: ['town square'],
+        nearby_locations: [],
+      },
+      object_states: {
+        wax_sealed_note: { name: 'wax-sealed note', carried_by: 'player', location: 'carried_by_player', is_read: true },
+      },
+      inventory_state: {
+        carried_objects: [{ name: 'wax-sealed note', source_location: 'Morrowgate town gate' }],
+      },
+    }),
+    characterSheet: characterSheet(),
+  });
+
+  const note = findEntity(context, 'wax sealed note', { requirePresent: true });
+  assert.equal(note.id, 'object:wax_sealed_note');
+  assert.equal(note.object_state.carried_by, 'player');
+  assert.equal(note.position.relation, 'carried_by_player');
+  assert.equal(canInteract(context, 'wax sealed note', 'read').ok, true);
 });
 
 test('merges combatants into the same entity model instead of a separate rules island', () => {
@@ -171,7 +199,7 @@ test('summarizes rules context for DM prompts without handing rules authority to
   });
   const summary = summarizeRulesContextForPrompt(context);
 
-  assert.match(summary, /Rules context version: 4C\.6-H20/);
+  assert.match(summary, /Rules context version: 4C\.6-H21/);
   assert.match(summary, /Actor: pc:char_ari/);
   assert.match(summary, /object:wax_sealed_note=wet wax-sealed note|object:wax_sealed_note=wax-sealed note/);
   assert.match(summary, /presence, reachability, visibility, and interactions/);

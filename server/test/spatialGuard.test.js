@@ -140,6 +140,29 @@ test('allows reachable container contents from recent narration when extractor i
   assert.equal(checkSpatialAction('Examine the silver token.', state, { recentNarration }), null);
 });
 
+test('allows carried objects even after they are removed from scene presence', () => {
+  const state = {
+    current_location: 'Bracken Hollow town gate',
+    scene_presence: {
+      exact_location: 'Bracken Hollow town gate',
+      location_type: 'gate',
+      present_npcs: ['gate guard'],
+      present_objects: ['muddy road'],
+      available_exits: ['town square', 'road'],
+      nearby_locations: [],
+    },
+    object_states: {
+      wax_sealed_note: { name: 'wax-sealed note', carried_by: 'player', location: 'carried_by_player' },
+    },
+    inventory_state: {
+      carried_objects: [{ name: 'wax-sealed note', source_location: 'Bracken Hollow town gate' }],
+    },
+  };
+
+  assert.equal(checkSpatialAction('Read the note.', state), null);
+  assert.equal(checkSpatialAction('Open the wax-sealed note.', state), null);
+});
+
 test('allows visible details of recently described present objects', () => {
   const state = {
     current_location: 'Bellwatch Hollow',

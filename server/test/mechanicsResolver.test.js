@@ -81,3 +81,49 @@ test('frames movement during active combat as turn-bound instead of free explora
   assert.match(result.narrativeFrame, /opportunity attacks/);
   assert.match(result.narrativeFrame, /Resolve the combat turn before returning control/);
 });
+
+test('records present object interactions before narration while keeping DM narration active', () => {
+  const result = resolvePreNarration({
+    message: 'I take the wax-sealed note.',
+    worldState: {
+      current_location: 'Morrowgate',
+      scene_presence: {
+        exact_location: 'Morrowgate town gate',
+        location_type: 'gate',
+        present_npcs: ['older gate guard'],
+        present_objects: ['wax-sealed note', 'palisade gate'],
+        available_exits: ['town square'],
+        nearby_locations: [],
+      },
+      object_states: {},
+      inventory_state: { carried_objects: [] },
+    },
+  });
+
+  assert.equal(result.handled, false);
+  assert.equal(result.skipSpatialGuard, true);
+  assert.equal(result.worldState.object_states.wax_sealed_note.carried_by, 'player');
+  assert.deepEqual(result.worldState.scene_presence.present_objects, ['palisade gate']);
+  assert.match(result.narrativeFrame, /OBJECT INTERACTION/);
+});
+
+test('blocks impossible present object takes before narration', () => {
+  const result = resolvePreNarration({
+    message: 'I take the palisade gate.',
+    worldState: {
+      current_location: 'Morrowgate',
+      scene_presence: {
+        exact_location: 'Morrowgate town gate',
+        location_type: 'gate',
+        present_npcs: ['older gate guard'],
+        present_objects: ['palisade gate'],
+        available_exits: ['town square'],
+        nearby_locations: [],
+      },
+    },
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.logType, 'object_interaction_blocked');
+  assert.match(result.response, /not a portable object/);
+});

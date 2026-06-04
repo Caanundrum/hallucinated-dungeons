@@ -61,6 +61,20 @@ function buildRulesContext({
       index,
       position,
       interactions: objectInteractions(name),
+      objectState: objectStateFor(worldState, name),
+    }));
+  }
+
+  for (const [index, item] of getCarriedObjects(worldState).entries()) {
+    const name = item.name;
+    upsertEntity(entityMap, sceneEntity({
+      type: 'object',
+      name,
+      source: 'inventory_state.carried_objects',
+      index,
+      position: { ...position, relation: 'carried_by_player' },
+      interactions: objectInteractions(name),
+      objectState: objectStateFor(worldState, name) || { carried_by: 'player' },
     }));
   }
 
@@ -192,7 +206,7 @@ function partyPresenceEntity(row, position) {
   };
 }
 
-function sceneEntity({ type, name, source, index, position, interactions }) {
+function sceneEntity({ type, name, source, index, position, interactions, objectState = null }) {
   return {
     id: uniqueSceneId(type, name, index),
     type,
@@ -204,6 +218,7 @@ function sceneEntity({ type, name, source, index, position, interactions }) {
     position,
     visibility: { visible: true },
     interactions,
+    object_state: objectState || undefined,
   };
 }
 
@@ -430,6 +445,26 @@ function objectInteractions(name) {
     attack: /\b(door|barrel|crate|object|dummy|target)\b/.test(text),
     use: true,
   };
+}
+
+function objectStateFor(worldState = {}, name = '') {
+  const key = normalizeId(name);
+  return worldState.object_states?.[key] || null;
+}
+
+function getCarriedObjects(worldState = {}) {
+  const listed = Array.isArray(worldState.inventory_state?.carried_objects)
+    ? worldState.inventory_state.carried_objects
+    : [];
+  const objectStateCarried = Object.values(worldState.object_states || {})
+    .filter((entry) => entry?.carried_by === 'player')
+    .map((entry) => ({ name: entry.name, source_location: entry.location || '' }));
+  const byKey = new Map();
+  for (const item of [...listed, ...objectStateCarried]) {
+    if (!item?.name) continue;
+    byKey.set(normalizeId(item.name), { name: item.name, source_location: item.source_location || '' });
+  }
+  return [...byKey.values()];
 }
 
 function inferObjectType(name) {

@@ -1,4 +1,5 @@
 const { resolveIntent } = require('./intentResolver');
+const { resolveObjectInteraction } = require('./objectInteractionEngine');
 
 function resolvePreNarration({ message, worldState }) {
   const intent = resolveIntent(message);
@@ -16,11 +17,29 @@ function resolvePreNarration({ message, worldState }) {
     };
   }
 
+  const objectInteraction = resolveObjectInteraction({ message, worldState });
+  if (objectInteraction?.handled) {
+    return {
+      intent,
+      handled: true,
+      response: objectInteraction.response,
+      logType: objectInteraction.logType,
+      worldState: objectInteraction.worldState,
+      skipSpatialGuard: true,
+      narrativeFrame: '',
+    };
+  }
+
   return {
     intent,
     handled: false,
-    skipSpatialGuard: intent.isMechanicsAction,
-    narrativeFrame: buildNarrativeFrame(intent, worldState),
+    worldState: objectInteraction?.worldState || worldState,
+    logType: objectInteraction?.logType || null,
+    skipSpatialGuard: Boolean(objectInteraction?.skipSpatialGuard) || intent.isMechanicsAction,
+    narrativeFrame: [
+      objectInteraction?.narrativeFrame,
+      buildNarrativeFrame(intent, objectInteraction?.worldState || worldState),
+    ].filter(Boolean).join('\n'),
   };
 }
 

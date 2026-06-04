@@ -24,7 +24,7 @@ const {
 const { getContentBundle } = require('../src/contentData');
 
 test('referee contract exposes one versioned vocabulary for current and planned engine seams', () => {
-  assert.equal(REFEREE_CONTRACT_VERSION, '4C.6-H20');
+  assert.equal(REFEREE_CONTRACT_VERSION, '4C.6-H21');
   assert.equal(REACTION_TRIGGERS.ATTACK_HIT, 'attack_hit');
   assert.equal(REACTION_TRIGGERS.DAMAGE_TAKEN, 'damage_taken');
   assert.equal(REACTION_TRIGGERS.CREATURE_LEAVES_REACH, 'creature_leaves_reach');
@@ -134,6 +134,24 @@ test('authoritative state allows one blocking interrupt at a time', () => {
 
   assert.deepEqual(validateAuthoritativeState(invalid), ['pending_roll and pending_reaction cannot both be open.']);
   assert.throws(() => assertValidAuthoritativeState(invalid), /cannot both be open/);
+});
+
+test('authoritative object and carried inventory state validates its shape', () => {
+  assert.deepEqual(validateAuthoritativeState({
+    object_states: {
+      wax_sealed_note: { name: 'wax-sealed note', carried_by: 'player' },
+    },
+    inventory_state: {
+      carried_objects: [{ name: 'wax-sealed note' }],
+    },
+  }), []);
+  assert.deepEqual(validateAuthoritativeState({
+    object_states: [],
+    inventory_state: { carried_objects: {} },
+  }), [
+    'object_states must be an object.',
+    'inventory_state.carried_objects must be an array.',
+  ]);
 });
 
 function collectRulesEffects(values = []) {

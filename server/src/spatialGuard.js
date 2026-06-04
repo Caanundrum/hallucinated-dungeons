@@ -209,9 +209,20 @@ function isKnownPresentOrReachable(worldState, term, options = {}) {
   return listIncludesTerm([location, scene.location_type], term)
     || listIncludesTerm(scene.present_npcs, term)
     || listIncludesTerm(scene.present_objects, term)
+    || listIncludesTerm(carriedObjectNames(worldState), term)
     || listIncludesTerm(scene.available_exits, term)
     || listIncludesTerm(scene.nearby_locations, term)
     || recentNarrationEstablishesReachableObject(options.recentNarration, term);
+}
+
+function carriedObjectNames(worldState = {}) {
+  const listed = Array.isArray(worldState.inventory_state?.carried_objects)
+    ? worldState.inventory_state.carried_objects.map((item) => item?.name)
+    : [];
+  const stateCarried = Object.values(worldState.object_states || {})
+    .filter((entry) => entry?.carried_by === 'player')
+    .map((entry) => entry.name);
+  return [...listed, ...stateCarried].filter(Boolean);
 }
 
 function recentNarrationEstablishesReachableObject(recentNarration, term) {

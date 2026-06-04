@@ -1005,6 +1005,41 @@ test('resolved combat skill checks leave the remainder of the player turn open',
   assert.doesNotMatch(resolved.reply, /Goblin uses/);
 });
 
+test('combat object interactions spend the Utilize action and update object state', () => {
+  const result = adjudicate({
+    message: 'Open the torn satchel.',
+    worldState: worldState({
+      scene_presence: {
+        exact_location: 'Morrowgate town gate',
+        location_type: 'gate',
+        present_npcs: ['Goblin'],
+        present_objects: ['torn satchel'],
+        available_exits: ['town square'],
+        nearby_locations: [],
+      },
+      object_states: {},
+      inventory_state: { carried_objects: [] },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', hp: 12, max_hp: 12, ac: 16, is_player: true },
+          { name: 'Goblin', hp: 8, max_hp: 8, ac: 12, is_player: false },
+        ],
+      },
+    }),
+    characterSheet,
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.logType, 'referee_combat_object_interaction');
+  assert.equal(result.worldState.object_states.torn_satchel.is_open, true);
+  assert.equal(result.worldState.combat_state.turn_resources.action_available, false);
+  assert.match(result.reply, /Utilize/);
+  assert.match(result.reply, /Your turn remains open/);
+});
+
 test('blocks a second action in the same combat turn', () => {
   const result = adjudicate({
     message: 'I attack the goblin.',

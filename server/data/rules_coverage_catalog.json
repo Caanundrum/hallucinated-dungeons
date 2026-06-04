@@ -1,5 +1,5 @@
 {
-  "version": "4C.6-H20",
+  "version": "4C.6-H21",
   "status_definitions": {
     "implemented": "Exposed and mechanically enforced for the current supported level/scope.",
     "partial": "Exposed and partially enforced, but missing at least one meaningful rules interaction.",
@@ -20,9 +20,9 @@
     "search": { "status": "partial", "implementation": "Prompts Search-style checks and persists target/location discovery state after roll resolution; hidden-content generation, repeated-search DC changes, and map-square search granularity remain incomplete." },
     "shove": { "status": "implemented", "implementation": "Shove uses Attack action option and target save." },
     "study": { "status": "partial", "implementation": "Prompts Study-style Investigation/Insight checks and persists target object/NPC knowledge state after roll resolution; exact lore reveals, secret taxonomy, and skill-family expansion remain incomplete." },
-    "utilize": { "status": "partial", "implementation": "Object interaction exists through narration/spatial guard, not full item rules." },
+    "utilize": { "status": "partial", "implementation": "Basic present-object interactions can update object and carried-inventory state before narration; complex item activations, tools, locks, traps, and magic items remain incomplete." },
     "opportunity_attack": { "status": "partial", "implementation": "Enemy and player melee Opportunity Attacks resolve through Reaction windows or prepared Reaction attacks, including resumable movement and Shield/Hellish Rebuke interactions." },
-    "object_interaction": { "status": "partial", "implementation": "Spatial guard checks presence; item/object state is not complete." }
+    "object_interaction": { "status": "partial", "implementation": "Spatial guard checks presence; take/open/close/read/use basics update object_states and inventory_state before DM narration; full equipment, container, lock, trap, and item-effect rules remain incomplete." }
   },
   "conditions": {
     "blinded": "partial",

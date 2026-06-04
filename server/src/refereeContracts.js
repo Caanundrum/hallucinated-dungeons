@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 
-const REFEREE_CONTRACT_VERSION = '4C.6-H20';
+const REFEREE_CONTRACT_VERSION = '4C.6-H21';
 
 const REACTION_TRIGGERS = freezeValues({
   ATTACK_HIT: 'attack_hit',
@@ -212,6 +212,19 @@ function validateAuthoritativeState(worldState = {}) {
   }
   if (worldState.combat_state !== undefined && worldState.combat_state !== null && !isPlainObject(worldState.combat_state)) {
     errors.push('combat_state must be an object or null.');
+  }
+  if (worldState.object_states !== undefined && !isPlainObject(worldState.object_states)) {
+    errors.push('object_states must be an object.');
+  }
+  if (worldState.inventory_state !== undefined) {
+    if (!isPlainObject(worldState.inventory_state)) {
+      errors.push('inventory_state must be an object.');
+    } else if (
+      worldState.inventory_state.carried_objects !== undefined
+      && !Array.isArray(worldState.inventory_state.carried_objects)
+    ) {
+      errors.push('inventory_state.carried_objects must be an array.');
+    }
   }
   return errors;
 }

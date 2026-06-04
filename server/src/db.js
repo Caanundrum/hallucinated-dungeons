@@ -238,6 +238,8 @@ const DEFAULT_WORLD_STATE = {
   npcs_encountered:  [],
   npc_states:        {},
   discovery_state:   { searches: {}, studies: {} },
+  object_states:     {},
+  inventory_state:   { carried_objects: [] },
   story_flags:       {},
   active_quest:      '',
   session_turn:      0,

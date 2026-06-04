@@ -75,6 +75,7 @@ const {
   applyDiscoveryCheckOutcome,
   buildDiscoveryPendingMetadata,
 } = require('./discoveryStateEngine');
+const { resolveObjectInteraction } = require('./objectInteractionEngine');
 const {
   applyWeaponMasteryOnHit,
   applyWeaponMasteryOnMiss,
@@ -1148,6 +1149,29 @@ function resolveCombatAction({ message, intent, worldState, characterSheet, curr
   const helpAction = resolveHelpAction({ message, intent, worldState, characterSheet });
   if (helpAction) return helpAction;
 
+  const objectInteraction = resolveObjectInteraction({ message, worldState });
+  if (objectInteraction?.handled) {
+    return {
+      handled: true,
+      logType: objectInteraction.logType,
+      worldState: objectInteraction.worldState,
+      reply: objectInteraction.response,
+    };
+  }
+  if (objectInteraction) {
+    const spent = spendTurnResource(worldState, 'action', 'Utilize', characterSheet);
+    if (!spent.ok) {
+      return { handled: true, logType: 'referee_action_unavailable', worldState: spent.worldState, reply: spent.reply };
+    }
+    const applied = resolveObjectInteraction({ message, worldState: spent.worldState });
+    const continued = continuePlayerTurn(
+      applied.worldState,
+      `You take the **Utilize** action to ${applied.intent.action} ${applied.target.name}. Object state is updated for narration.`,
+      characterSheet,
+    );
+    return { handled: true, logType: 'referee_combat_object_interaction', ...continued };
+  }
+
   if (intent.castsSpell) return null;
 
   const maneuver = isUnarmedAttackIntent(message) ? null : getCombatManeuverIntent(message);
@@ -1212,7 +1236,7 @@ function resolveCombatAction({ message, intent, worldState, characterSheet, curr
     handled: true,
     logType: 'referee_combat_action_needed',
     worldState,
-    reply: 'Combat is active and initiative is running. What action do you take this turn: **Attack**, **Shove**, **Grapple**, **Dodge**, **Disengage**, **Hide**, **Search**, **Study**, **Help**, **Ready**, or a valid spell/action from your sheet?',
+    reply: 'Combat is active and initiative is running. What action do you take this turn: **Attack**, **Shove**, **Grapple**, **Dodge**, **Disengage**, **Hide**, **Search**, **Study**, **Help**, **Ready**, **Utilize**, or a valid spell/action from your sheet?',
   };
 }
 
