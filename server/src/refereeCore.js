@@ -72,6 +72,10 @@ const {
   buildSocialPendingMetadata,
 } = require('./socialStateEngine');
 const {
+  applyDiscoveryCheckOutcome,
+  buildDiscoveryPendingMetadata,
+} = require('./discoveryStateEngine');
+const {
   applyWeaponMasteryOnHit,
   applyWeaponMasteryOnMiss,
   consumeVexAdvantage,
@@ -294,6 +298,7 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
     dc_source: buildDcSource(dc, intent.raw, inCombat, { hideAction }),
     intent: intent.raw,
     rule_action: hideAction ? 'hide' : intent.ruleAction || null,
+    ...buildDiscoveryPendingMetadata({ intent, worldState }),
     ...buildSocialPendingMetadata({ intent, worldState }),
     consumes: inCombat ? 'action' : 'exploration',
     combat: Boolean(inCombat),
@@ -530,6 +535,14 @@ function resolveCheckRoll({ pending, result, worldState, characterSheet }) {
   });
   nextState = socialOutcome.worldState;
   if (socialOutcome.lines.length) reply += `\n\n${socialOutcome.lines.join('\n\n')}`;
+  const discoveryOutcome = applyDiscoveryCheckOutcome({
+    pending,
+    result,
+    outcome,
+    worldState: nextState,
+  });
+  nextState = discoveryOutcome.worldState;
+  if (discoveryOutcome.lines.length) reply += `\n\n${discoveryOutcome.lines.join('\n\n')}`;
   if (!pending.combat) {
     const advanced = advanceNarrativeTime({
       message: pending.intent || '',

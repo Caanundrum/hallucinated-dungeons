@@ -107,6 +107,8 @@ The Hide action stores `hidden` as combat state after a successful fixed-DC Hide
 
 Influence checks write target NPC attitude/leverage into `npc_states` after the roll resolves. Unclear multi-target social actions do not mutate state until a target is clear.
 
+Search and Study checks write target/location discovery records into `discovery_state` after the roll resolves. The referee records whether the roll established a reliable discovery; the Game Master still narrates the specific clue or read from the established scene and campaign facts.
+
 ## Extension Rule
 
 When adding a mechanic:

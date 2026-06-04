@@ -1,0 +1,247 @@
+const DISCOVERY_SKILLS = new Set(['insight', 'investigation', 'perception', 'survival']);
+
+function buildDiscoveryPendingMetadata({ intent = {}, worldState = {} } = {}) {
+  const check = intent.check || {};
+  if (!DISCOVERY_SKILLS.has(check.skill)) return {};
+  const action = inferDiscoveryAction(intent);
+  if (!action) return {};
+  const target = inferDiscoveryTarget({ message: intent.raw, action, skill: check.skill, worldState });
+  return {
+    discovery: true,
+    discovery_action: action,
+    discovery_target: target.name,
+    discovery_target_type: target.type,
+  };
+}
+
+function applyDiscoveryCheckOutcome({
+  pending = {},
+  result = {},
+  outcome = '',
+  worldState = {},
+} = {}) {
+  if (!isDiscoveryCheck(pending)) return { worldState, lines: [] };
+
+  const action = pending.discovery_action || inferDiscoveryAction({ raw: pending.intent, ruleAction: pending.rule_action, check: pending });
+  if (!action) return { worldState, lines: [] };
+
+  const target = {
+    name: pending.discovery_target || inferDiscoveryTarget({
+      message: pending.intent,
+      action,
+      skill: pending.skill,
+      worldState,
+    }).name,
+    type: pending.discovery_target_type || 'unknown',
+  };
+  if (!target.name) {
+    return {
+      worldState,
+      lines: ['**Discovery:** no clear searchable or studyable target was identified, so no lasting discovery state changes. The clue cabinet remains politely unfiled.'],
+    };
+  }
+
+  const nextState = upsertDiscoveryState({
+    worldState,
+    action,
+    target,
+    skill: pending.skill,
+    outcome,
+    total: result.total,
+    dc: pending.dc,
+    intent: pending.intent,
+  });
+  return {
+    worldState: nextState,
+    lines: [formatDiscoveryLine({ action, targetName: target.name, outcome })],
+  };
+}
+
+function isDiscoveryCheck(pending = {}) {
+  return Boolean(pending.discovery) || Boolean(inferDiscoveryAction({
+    raw: pending.intent,
+    ruleAction: pending.rule_action,
+    check: pending,
+  }));
+}
+
+function inferDiscoveryAction(intent = {}) {
+  const raw = String(intent.raw || intent.intent || '');
+  const ruleAction = intent.ruleAction || intent.rule_action || null;
+  const skill = intent.check?.skill || intent.skill || null;
+  if (ruleAction === 'search' || ruleAction === 'study') return ruleAction;
+  if (/\b(?:search|scan|look around|listen|watch for|keep watch|check the area|track|tracks|trail|footprints|spoor)\b/i.test(raw)) return 'search';
+  if (/\b(?:study|investigate|examine|inspect|read|judge|size up|sense|gauge)\b/i.test(raw)) return 'study';
+  if (skill === 'perception' || skill === 'survival') return 'search';
+  if (skill === 'insight' || skill === 'investigation') return 'study';
+  return null;
+}
+
+function upsertDiscoveryState({
+  worldState = {},
+  action = '',
+  target = {},
+  skill = '',
+  outcome = '',
+  total = null,
+  dc = null,
+  intent = '',
+} = {}) {
+  const key = discoveryKey(target.name);
+  if (!key) return worldState;
+  const bucket = action === 'search' ? 'searches' : 'studies';
+  const currentState = normalizeDiscoveryState(worldState.discovery_state);
+  const existing = currentState[bucket][key] || {};
+  const success = outcome === 'success';
+  const nearMiss = outcome === 'near_miss';
+  const entry = {
+    ...existing,
+    target: existing.target || target.name,
+    target_type: existing.target_type || target.type || 'unknown',
+    location: worldState.scene_presence?.exact_location || worldState.current_location || existing.location || '',
+    last_outcome: outcome,
+    best_outcome: bestOutcome(existing.best_outcome, outcome),
+    discovered: Boolean(existing.discovered || success),
+    partial: Boolean(existing.partial || nearMiss),
+    attempts: Number(existing.attempts || 0) + 1,
+    last_check: {
+      skill,
+      total: Number(total || 0),
+      dc: Number(dc || 0),
+      outcome,
+    },
+    history: [
+      ...(existing.history || []),
+      {
+        skill,
+        total: Number(total || 0),
+        dc: Number(dc || 0),
+        outcome,
+        intent: String(intent || '').slice(0, 240),
+      },
+    ].slice(-5),
+  };
+
+  return {
+    ...worldState,
+    discovery_state: {
+      ...currentState,
+      [bucket]: {
+        ...currentState[bucket],
+        [key]: entry,
+      },
+    },
+  };
+}
+
+function inferDiscoveryTarget({ message = '', action = '', skill = '', worldState = {} } = {}) {
+  const scene = worldState.scene_presence || {};
+  const entities = [
+    ...(scene.present_npcs || []).map((name) => ({ name, type: 'npc' })),
+    ...(scene.present_objects || []).map((name) => ({ name, type: 'object' })),
+  ].filter((entry) => entry.name);
+  const normalizedMessage = normalizeName(message);
+  const direct = entities.find((entry) => mentionsName(normalizedMessage, entry.name));
+  if (direct) return direct;
+
+  const explicit = extractExplicitTarget(message);
+  if (explicit) {
+    const match = entities.find((entry) => namesMatch(entry.name, explicit));
+    if (match) return match;
+  }
+
+  if (action === 'search' || isAreaSearch({ message, skill })) {
+    return {
+      name: scene.exact_location || worldState.current_location || 'current area',
+      type: 'location',
+    };
+  }
+
+  if (entities.length === 1) return entities[0];
+  return { name: null, type: null };
+}
+
+function extractExplicitTarget(message = '') {
+  const match = String(message || '').match(/\b(?:search|scan|study|investigate|examine|inspect|read|watch|listen to|judge|size up|sense|gauge)\s+(?:the\s+|that\s+|a\s+|an\s+)?([a-z][a-z' -]{1,50}?)(?:\s+(?:for|to|with|about|carefully|closely|again|before|after)\b|[,.!?]|$)/i);
+  if (!match?.[1]) return null;
+  return cleanTarget(match[1]);
+}
+
+function isAreaSearch({ message = '', skill = '' } = {}) {
+  return skill === 'perception'
+    || skill === 'survival'
+    || /\b(?:area|room|surroundings|around|tracks|trail|footprints|signs|clues)\b/i.test(String(message || ''));
+}
+
+function formatDiscoveryLine({ action, targetName, outcome }) {
+  if (outcome === 'success') {
+    return `**Discovery:** ${targetName} now has a successful ${action} result on record. The DM can reveal what that target or area can fairly provide.`;
+  }
+  if (outcome === 'near_miss') {
+    return `**Discovery:** ${targetName} has a partial ${action} result on record, but no confirmed discovery yet. The trail is coughing, not singing.`;
+  }
+  return `**Discovery:** ${targetName} has a failed ${action} attempt on record. No reliable new discovery is established from this roll.`;
+}
+
+function bestOutcome(current = '', next = '') {
+  const rank = { failure: 0, near_miss: 1, success: 2 };
+  return (rank[next] || 0) > (rank[current] || 0) ? next : (current || next);
+}
+
+function normalizeDiscoveryState(value = {}) {
+  const state = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  return {
+    searches: { ...(state.searches || {}) },
+    studies: { ...(state.studies || {}) },
+  };
+}
+
+function mentionsName(normalizedMessage = '', name = '') {
+  const normalized = normalizeName(name);
+  const singular = singularize(normalized);
+  return hasWholePhrase(normalizedMessage, normalized) || hasWholePhrase(normalizedMessage, singular);
+}
+
+function namesMatch(left = '', right = '') {
+  const l = normalizeName(left);
+  const r = normalizeName(right);
+  if (!l || !r) return false;
+  return l === r || hasWholePhrase(l, r) || hasWholePhrase(r, l) || singularize(l) === singularize(r);
+}
+
+function cleanTarget(value = '') {
+  return String(value || '')
+    .replace(/\b(?:the|a|an|my|their|his|her|our|current|nearby|careful|closely)\b/gi, ' ')
+    .replace(/\b(?:face|expression|demeanor|mood|room|area|surroundings)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function discoveryKey(name = '') {
+  return normalizeName(name).replace(/\s+/g, '_');
+}
+
+function normalizeName(value = '') {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function singularize(value = '') {
+  return String(value || '').replace(/\b([a-z]{3,})s\b/g, '$1');
+}
+
+function hasWholePhrase(normalizedMessage = '', normalizedPhrase = '') {
+  if (!normalizedMessage || !normalizedPhrase) return false;
+  return new RegExp(`(?:^| )${escapeRegExp(normalizedPhrase)}(?: |$)`).test(normalizedMessage);
+}
+
+function escapeRegExp(value = '') {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+module.exports = {
+  applyDiscoveryCheckOutcome,
+  buildDiscoveryPendingMetadata,
+  inferDiscoveryAction,
+  inferDiscoveryTarget,
+  isDiscoveryCheck,
+};

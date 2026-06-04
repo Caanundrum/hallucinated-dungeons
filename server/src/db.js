@@ -237,6 +237,7 @@ const DEFAULT_WORLD_STATE = {
   locations_visited: [],
   npcs_encountered:  [],
   npc_states:        {},
+  discovery_state:   { searches: {}, studies: {} },
   story_flags:       {},
   active_quest:      '',
   session_turn:      0,
