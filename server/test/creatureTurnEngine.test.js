@@ -222,6 +222,32 @@ test('Orc Relentless Endurance keeps the player at 1 HP and persists the spent r
   assert.match(result.lines[0], /Relentless Endurance/);
 });
 
+test('Orc Relentless Endurance does not prevent instant death from massive damage', () => {
+  const result = resolveCreatureTurns({
+    worldState: {
+      player_stats: { hp: 4, max_hp: 12, armor_class: 10 },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', initiative: 18, hp: 4, max_hp: 12, ac: 10, is_player: true, conditions: [] },
+          combatant('Ogre', 8, { attack: { name: 'devastating club', attack_bonus: 8, damage_formula: '2d10+8', damage_type: 'bludgeoning' } }),
+        ],
+      },
+    },
+    characterSheet: {
+      ...characterSheet,
+      identity: { name: 'Ari', species: 'orc' },
+    },
+    rollDie: sequenceRolls([12, 8, 8]),
+  });
+
+  assert.equal(result.player.hp, 0);
+  assert.equal(result.worldState.player_stats.resources, undefined);
+  assert.doesNotMatch(result.lines[0], /Relentless Endurance/);
+});
+
 test('primed Lucky defense imposes disadvantage on one creature attack and is consumed', () => {
   const result = resolveCreatureTurns({
     worldState: {

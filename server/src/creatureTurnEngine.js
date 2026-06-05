@@ -1,10 +1,10 @@
 const crypto = require('crypto');
 const { rollD20WithMode } = require('./d20RollEngine');
 const {
-  applyDamage,
   formatDamageAdjustment,
   rollDamageFormula,
 } = require('./damageHealingEngine');
+const { applyDamageToPlayer } = require('./playerDamageEngine');
 const {
   getAttackMode,
   getAttackModeSources,
@@ -13,10 +13,6 @@ const {
   getTurnBlockReason,
 } = require('./conditionEngine');
 const { getActiveDamageResistances } = require('./spellEffectEngine');
-const {
-  buildResourceState,
-  spendResource,
-} = require('./resourceEngine');
 const { consumeSapAfterAttack } = require('./weaponRulesEngine');
 const { getRuntimeArmorClass } = require('./fightingStyleEngine');
 const {
@@ -456,43 +452,40 @@ function resolveCreatureAttackHit({
     worldState: reduction.worldState,
     damage: reduction.incomingDamage,
     damageType: attack.damage_type || attack.damageType || null,
+    source: actor.name,
   });
   const thunder = applyPrimedGiantAncestryRetaliation({
     actor,
-    worldState: reduction.worldState,
+    worldState: applied.worldState,
     characterSheet,
     damageTaken: applied.amount,
     rollDie,
-  });
-  const endurance = applyRelentlessEndurance({
-    player: applied.player,
-    characterSheet,
-    worldState: thunder.worldState,
   });
   const retaliation = getMeleeRetaliation(worldState, applied.beforeTempHp);
   const nextActor = retaliation
     ? { ...thunder.actor, hp: Math.max(0, Number(thunder.actor.hp || 0) - retaliation.damage) }
     : thunder.actor;
   const resolvedActor = consumeSapAfterAttack(nextActor);
+  const safeguardLine = applied.safeguardLines.join('');
   const retaliationLine = retaliation
     ? ` ${retaliation.label} lashes back for ${retaliation.damage} ${retaliation.damageType} damage. ${actor.name}: (${actor.hp} -> ${nextActor.hp} HP).`
     : '';
-  const pendingReaction = allowReactionWindow && Number(endurance.player.hp || 0) > 0
+  const pendingReaction = allowReactionWindow && Number(applied.player.hp || 0) > 0
     ? buildDamageTakenReaction({
         actor: resolvedActor,
         attack,
-        player: endurance.player,
+        player: applied.player,
         damageTaken: applied.amount,
-        worldState: endurance.worldState,
+        worldState: thunder.worldState,
         characterSheet,
       })
     : null;
   return {
     actor: resolvedActor,
-    player: endurance.player,
-    worldState: endurance.worldState,
+    player: applied.player,
+    worldState: thunder.worldState,
     lines: [
-      `${actor.name} uses ${attack.name}: rolls ${frame.roll_text} vs AC ${ac}${frame.mode_text || ''}. ${criticalHit ? '**Critical hit.** ' : ''}Hit for ${applied.amount} damage${formatDamageAdjustment(applied.adjustment)}${applied.absorbed ? ` (${applied.absorbed} absorbed by temporary HP)` : ''}. ${player.name}: (${before} -> ${endurance.player.hp} HP).${endurance.line}${retaliationLine}`,
+      `${actor.name} uses ${attack.name}: rolls ${frame.roll_text} vs AC ${ac}${frame.mode_text || ''}. ${criticalHit ? '**Critical hit.** ' : ''}Hit for ${applied.amount} damage${formatDamageAdjustment(applied.adjustment)}${applied.absorbed ? ` (${applied.absorbed} absorbed by temporary HP)` : ''}. ${player.name}: (${before} -> ${applied.player.hp} HP).${safeguardLine}${retaliationLine}`,
       ...reduction.lines,
       ...thunder.lines,
     ],
@@ -513,28 +506,6 @@ function consumeLuckyDefense(worldState = {}, shouldConsume = false) {
       ...(worldState.player_stats || {}),
       lucky_defense_primed: false,
     },
-  };
-}
-
-function applyRelentlessEndurance({ player = {}, characterSheet = {}, worldState = {} } = {}) {
-  if (Number(player.hp || 0) > 0 || normalizeId(characterSheet.identity?.species) !== 'orc') {
-    return { player, worldState, line: '' };
-  }
-
-  const resources = buildResourceState(characterSheet, worldState);
-  if (Number(resources.relentless_endurance?.remaining || 0) <= 0) {
-    return { player, worldState, line: '' };
-  }
-
-  const spent = spendResource({ worldState, characterSheet, resource: 'relentless_endurance' });
-  if (!spent.ok) return { player, worldState, line: '' };
-  return {
-    player: {
-      ...player,
-      hp: 1,
-    },
-    worldState: spent.worldState,
-    line: ' **Relentless Endurance** keeps you at 1 HP instead of dropping to 0.',
   };
 }
 
@@ -688,25 +659,6 @@ function combatantMatchesCharacter(combatant = {}, characterSheet = {}, worldSta
   if (expectedId && combatant.character_id !== expectedId) return false;
   if (!combatant.character_id && expectedName && combatant.name && combatant.name !== expectedName) return false;
   return true;
-}
-
-function applyDamageToPlayer({ player, characterSheet, worldState, damage, damageType = null }) {
-  const target = {
-    ...player,
-    hp: player.hp ?? getCurrentHp(characterSheet, worldState),
-    temp_hp: player.temp_hp ?? worldState.player_stats?.temp_hp ?? characterSheet.derived_stats?.temp_hp ?? 0,
-    resistances: player.resistances || worldState.player_stats?.resistances || characterSheet.resistances || [],
-    vulnerabilities: player.vulnerabilities || worldState.player_stats?.vulnerabilities || characterSheet.vulnerabilities || [],
-    immunities: player.immunities || worldState.player_stats?.immunities || characterSheet.immunities || [],
-  };
-  const applied = applyDamage({ target, amount: damage, damageType });
-  return {
-    ...applied,
-    beforeTempHp: applied.beforeTempHp,
-    absorbed: applied.absorbed,
-    hpDamage: applied.hpDamage,
-    player: applied.target,
-  };
 }
 
 function getMeleeRetaliation(worldState = {}, beforeTempHp = 0) {

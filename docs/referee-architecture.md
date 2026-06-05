@@ -119,6 +119,8 @@ Exhaustion is parsed as a numeric condition level from either `exhaustion_level`
 
 Automatic d20 rerolls are attached to every server-owned player d20 test through pending-roll or immediate-roll metadata. Halfling Luck rerolls natural 1s before the selected result is interpreted, including initiative and death saving throws; Heroic Inspiration and Lucky remain explicit resources layered on top of the same d20 pipeline.
 
+Fatal player damage safeguards are centralized in `playerDamageEngine` before death-save state is entered. Orc Relentless Endurance now applies to deterministic player damage through that shared path, spends its Long Rest resource, and does not fire when massive damage would kill the character outright.
+
 ## Extension Rule
 
 When adding a mechanic:
