@@ -8,6 +8,8 @@ const {
 const {
   getAttackMode,
   getAttackModeSources,
+  getConditionD20Modifier,
+  formatConditionD20Sources,
   getTurnBlockReason,
 } = require('./conditionEngine');
 const { getActiveDamageResistances } = require('./spellEffectEngine');
@@ -335,7 +337,8 @@ function resolveCreatureAction({
   const attackMode = getAttackMode({ attacker: actor, target: player, defenderDodging: playerDodging || luckyDefensePrimed });
   const attackRoll = rollD20WithMode(rollDie, attackMode);
   const natural = attackRoll.natural;
-  const attackBonus = Number(attack.attack_bonus || 0);
+  const conditionAttackModifier = getConditionD20Modifier(actor);
+  const attackBonus = Number(attack.attack_bonus || 0) + conditionAttackModifier;
   const attackTotal = natural + attackBonus;
   const ac = Number(player.ac || getArmorClass(characterSheet, worldState));
   const rollText = playerDodging
@@ -344,8 +347,13 @@ function resolveCreatureAction({
   const conditionSources = [
     ...getAttackModeSources({ attacker: actor, target: player, defenderDodging: playerDodging }),
     ...(luckyDefensePrimed ? ['Lucky'] : []),
+    ...formatConditionD20Sources(actor),
   ];
-  const modeText = attackMode ? ` (${attackMode}: ${conditionSources.join(', ')})` : '';
+  const modeText = attackMode
+    ? ` (${attackMode}: ${conditionSources.join(', ')})`
+    : conditionAttackModifier
+      ? ` (${conditionSources.join(', ')})`
+      : '';
   const nextWorldState = consumeLuckyDefense(worldState, luckyDefensePrimed);
   const criticalHit = natural === 20;
   const criticalMiss = natural === 1;

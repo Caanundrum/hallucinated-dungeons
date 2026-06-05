@@ -1,4 +1,10 @@
-const { getAttackMode, getAttackModeSources, getTurnBlockReason } = require('./conditionEngine');
+const {
+  getAttackMode,
+  getAttackModeSources,
+  getConditionD20Modifier,
+  formatConditionD20Sources,
+  getTurnBlockReason,
+} = require('./conditionEngine');
 const { getContentBundle } = require('./contentData');
 const { resolveD20Test } = require('./d20RollEngine');
 const {
@@ -141,9 +147,10 @@ function resolvePlayerOpportunityAttack({
   advantageSources = helped.sources;
   const advantageMode = helped.advantageMode;
   Object.assign(defender, consumeVexAdvantage(defender));
+  const conditionAttackModifier = getConditionD20Modifier(attacker);
   const attackRoll = resolveD20Test({
     kind: 'attack',
-    modifier: prepared.attack.attackBonus,
+    modifier: prepared.attack.attackBonus + conditionAttackModifier,
     dc: Number(defender.ac || 10),
     advantageMode,
     bonusDice: getActiveBonusDice(nextWorldState, 'attack'),
@@ -157,6 +164,7 @@ function resolvePlayerOpportunityAttack({
   const consumeEffectIds = [...(attackRoll.bonusDice?.expireEffectIds || [])];
   lines.push(`**Opportunity Attack:** you strike ${defender.name} with ${prepared.attack.name}. Attack roll: ${attackRoll.rollText} vs AC ${defender.ac}.`);
   if (advantageMode) lines.push(`Opportunity Attack has ${advantageMode} from ${formatList(advantageSources)}.`);
+  if (conditionAttackModifier) lines.push(`Condition modifier: ${formatConditionD20Sources(attacker).join(', ')}.`);
   const reveal = clearPlayerHidden({ worldState: nextWorldState, reason: 'attack' });
   if (reveal.revealed) {
     nextWorldState = reveal.worldState;

@@ -4,6 +4,8 @@ const RESOURCE_KEYS = {
   reaction: 'reaction_available',
 };
 
+const { applyConditionSpeedPenalty } = require('./conditionEngine');
+
 const RESOURCE_LABELS = {
   action: 'Action',
   bonus_action: 'Bonus Action',
@@ -213,11 +215,22 @@ function buildFreshTurnResources(characterSheet = {}, worldState = {}) {
 }
 
 function getSpeed(characterSheet = {}, worldState = {}) {
-  return Number(
+  const baseSpeed = Number(
     worldState.player_stats?.speed
       ?? characterSheet.derived_stats?.speed
       ?? 30,
   );
+  return applyConditionSpeedPenalty(baseSpeed, getPlayerConditionSubject(characterSheet, worldState));
+}
+
+function getPlayerConditionSubject(characterSheet = {}, worldState = {}) {
+  return {
+    conditions: [
+      ...(characterSheet.derived_stats?.conditions || []),
+      ...(worldState.player_stats?.conditions || []),
+    ],
+    exhaustion_level: worldState.player_stats?.exhaustion_level ?? characterSheet.derived_stats?.exhaustion_level,
+  };
 }
 
 module.exports = {

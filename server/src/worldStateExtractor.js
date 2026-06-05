@@ -55,6 +55,7 @@ Extract only the fields that changed. Use the HP narration standard "(before →
 - player_stats.armor_class: integer (AC, if established or changed)
 - player_stats.speed: integer (movement speed in feet, if changed by a condition or effect)
 - player_stats.conditions: string[] (FULL current conditions array — replace entirely, do not append. Use [] if no conditions remain.)
+- player_stats.exhaustion_level: integer 0-6 (current Exhaustion level if it changes; use 0 when Exhaustion ends)
 - player_stats.spell_slots: object (changed slot levels only — e.g. {"1": 2} means level-1 slots now at 2)
 - player_stats.death_saves: object (current totals — e.g. {"successes": 1, "failures": 0})
 - player_stats.weapon_name: string (primary weapon name if mentioned or established — e.g. "longsword", "shortbow", "dagger")
@@ -122,6 +123,7 @@ MERGE RULES:
 - active_effects: FULL REPLACE when provided; OMIT if unchanged
 - player_stats: key-merge (only include fields that changed)
 - player_stats.conditions: FULL REPLACE — return the complete current conditions array
+- player_stats.exhaustion_level: replace if changed
 - player_stats.spell_slots: key-merge (only changed slot levels)
 - player_stats.weapon_name: replace if established or changed
 - player_stats.ability_scores: key-merge (only include ability keys that were established or changed)

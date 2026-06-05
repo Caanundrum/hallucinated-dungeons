@@ -11,7 +11,7 @@ const {
   sameMap,
   setHexPosition,
 } = require('./combatPositionEngine');
-const { getTurnBlockReason } = require('./conditionEngine');
+const { applyConditionSpeedPenalty, getTurnBlockReason } = require('./conditionEngine');
 const {
   resolveCreatureAction,
   resolveCreatureAttackHit,
@@ -505,7 +505,18 @@ function syncPlayerState(worldState = {}, player = {}) {
 }
 
 function getSpeed(characterSheet = {}, worldState = {}) {
-  return Number(worldState.player_stats?.speed ?? characterSheet.derived_stats?.speed ?? 30);
+  const baseSpeed = Number(worldState.player_stats?.speed ?? characterSheet.derived_stats?.speed ?? 30);
+  return applyConditionSpeedPenalty(baseSpeed, getPlayerConditionSubject(characterSheet, worldState));
+}
+
+function getPlayerConditionSubject(characterSheet = {}, worldState = {}) {
+  return {
+    conditions: [
+      ...(characterSheet.derived_stats?.conditions || []),
+      ...(worldState.player_stats?.conditions || []),
+    ],
+    exhaustion_level: worldState.player_stats?.exhaustion_level ?? characterSheet.derived_stats?.exhaustion_level,
+  };
 }
 
 function getRemainingMovement(worldState = {}) {

@@ -364,6 +364,41 @@ test('active item bonuses change pending skill checks and saving throws', () => 
   assert.match(save.worldState.pending_roll.modifier_breakdown, /Ring of Sure Feet \+1/);
 });
 
+test('Exhaustion changes referee pending check and save modifiers', () => {
+  const check = adjudicate({
+    message: "I study the clerk's face.",
+    worldState: worldState({ player_stats: { hp: 12, max_hp: 12, armor_class: 16, conditions: ['exhaustion_2'] } }),
+    characterSheet,
+  });
+  const save = adjudicate({
+    message: 'I dive away from the falling rocks.',
+    worldState: worldState({ player_stats: { hp: 12, max_hp: 12, armor_class: 16, exhaustion_level: 2 } }),
+    characterSheet,
+  });
+
+  assert.equal(check.worldState.pending_roll.modifier, 0);
+  assert.match(check.worldState.pending_roll.modifier_breakdown, /Exhaustion level 2 -4/);
+  assert.equal(save.worldState.pending_roll.modifier, -1);
+  assert.match(save.worldState.pending_roll.modifier_breakdown, /Exhaustion level 2 -4/);
+});
+
+test('Deafened only disadvantages hearing-dependent referee checks', () => {
+  const listen = adjudicate({
+    message: 'I listen for footsteps behind the door.',
+    worldState: worldState({ player_stats: { hp: 12, max_hp: 12, armor_class: 16, conditions: ['deafened'] } }),
+    characterSheet,
+  });
+  const look = adjudicate({
+    message: 'I look around the square for tracks.',
+    worldState: worldState({ player_stats: { hp: 12, max_hp: 12, armor_class: 16, conditions: ['deafened'] } }),
+    characterSheet,
+  });
+
+  assert.equal(listen.worldState.pending_roll.advantage_mode, 'disadvantage');
+  assert.match(listen.reply, /Deafened condition/);
+  assert.notEqual(look.worldState.pending_roll.advantage_mode, 'disadvantage');
+});
+
 test('prompts a social check for speeches meant to change minds', () => {
   const result = adjudicate({
     message: 'I give a speech to convince the frightened guards to hold the gate.',
@@ -2096,6 +2131,37 @@ test('runtime equipment effects do not double-count magic already baked into wea
   assert.match(result.reply, /Attack roll: 12 \(natural 6; 6\+6=12\) vs AC 12/);
   assert.doesNotMatch(result.reply, /Active attack bonus/);
   assert.match(result.reply, /Hit for 8 damage/);
+});
+
+test('Exhaustion applies to referee weapon attacks', () => {
+  const result = adjudicate({
+    message: 'Attack the Cultist with my longsword.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', initiative: 18, hp: 12, max_hp: 12, ac: 16, is_player: true, conditions: ['exhaustion_2'] },
+          { name: 'Cultist', initiative: 8, hp: 20, max_hp: 20, ac: 12, is_player: false, conditions: [], attack: { name: 'dagger', attack_bonus: 2, damage_formula: '1d4+1' } },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      derived_stats: {
+        ...characterSheet.derived_stats,
+        attack_breakdowns: [
+          { weapon_id: 'longsword', name: 'Longsword', ability: 'str', attack_total: 5, damage_formula: '1d8+3' },
+        ],
+      },
+    },
+    rollDie: sequenceRolls([10, 4]),
+  });
+
+  assert.match(result.reply, /Attack roll: 11 \(natural 10; 10\+1=11\) vs AC 12/);
+  assert.match(result.reply, /Condition modifier: Exhaustion level 2 -4/);
+  assert.match(result.reply, /Miss/);
 });
 
 test('declared paired Light weapons resolve a Nick extra attack inside the Attack action', () => {

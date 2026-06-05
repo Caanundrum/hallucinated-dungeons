@@ -229,6 +229,7 @@ function characterSheetToWorldStats(characterSheet, characterId = null) {
     class_choice_spells: characterSheet.class_choice_spells || characterSheet.spellcasting?.class_choice_spells || [],
     origin_magic: characterSheet.origin?.magic_initiate || {},
     conditions: stats.conditions || [],
+    exhaustion_level: stats.exhaustion_level ?? null,
     spell_slots: characterSheet.spellcasting?.slots || {},
     hit_dice: characterSheet.resources?.hit_dice || null,
     ammunition: buildCharacterAmmunitionState(characterSheet),
@@ -541,6 +542,7 @@ async function syncCharacterFromWorldState(socket, sessionId, { forceEmit = fals
     ['temp_hp', 'temp_hp'],
     ['armor_class', 'armor_class'],
     ['speed', 'speed'],
+    ['exhaustion_level', 'exhaustion_level'],
   ]) {
     if (stats[worldKey] !== undefined && stats[worldKey] !== null && nextDerived[sheetKey] !== stats[worldKey]) {
       nextDerived[sheetKey] = stats[worldKey];
@@ -700,6 +702,7 @@ function alignCombatPlayerToCharacter(combatState, characterSheet, playerStats) 
             temp_hp: Number(derived.temp_hp ?? playerStats.temp_hp ?? combatant.temp_hp ?? 0),
             ac: Number(derived.armor_class ?? playerStats.armor_class ?? combatant.ac ?? 10),
             conditions: derived.conditions || playerStats.conditions || combatant.conditions || [],
+            exhaustion_level: playerStats.exhaustion_level ?? derived.exhaustion_level ?? combatant.exhaustion_level ?? null,
           }
         : combatant
     )),

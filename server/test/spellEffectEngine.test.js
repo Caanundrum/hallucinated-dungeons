@@ -433,6 +433,36 @@ test('active spell attack bonuses apply to spell attack resolution', () => {
   assert.match(outcome.reply, /Active spell attack bonus: Wand Focus \+1/);
 });
 
+test('Exhaustion applies to spell attack resolution', () => {
+  const cast = resolveSpellCast({
+    message: 'I cast Fire Bolt at the skeleton.',
+    content,
+    characterSheet: casterSheet(),
+    worldState: combatWorld({
+      player_stats: { hp: 8, max_hp: 8, armor_class: 12, spell_slots: { 1: 1 }, conditions: ['exhaustion_2'] },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Mira', hp: 8, max_hp: 8, ac: 12, is_player: true, conditions: ['exhaustion_2'] },
+          { name: 'Skeleton', hp: 10, max_hp: 10, ac: 12, is_player: false, saves: { dex: 1, con: 1, wis: 0 } },
+        ],
+      },
+    }),
+  });
+  const outcome = resolveSpellOutcome({
+    spellCast: cast,
+    characterSheet: cast.characterSheet,
+    worldState: cast.worldState,
+    rollDie: sequenceRolls([10, 5]),
+  });
+
+  assert.match(outcome.reply, /10\+1 = 11 vs AC 12/);
+  assert.match(outcome.reply, /Condition modifier: Exhaustion level 2 -4/);
+  assert.match(outcome.reply, /Miss/);
+});
+
 test("Fire's Burn can ride a damaging spell attack hit", () => {
   const sheet = casterSheet({
     identity: { name: 'Mira', level: 1, class: 'wizard', class_name: 'Wizard', species: 'goliath' },
@@ -577,6 +607,45 @@ test('saving throw spell rolls target save against spell DC', () => {
   assert.equal(target.hp, 3);
   assert.equal(outcome.consumesTurn, true);
   assert.match(outcome.reply, /DEX save: 5\+1 = 6 vs DC 13/);
+});
+
+test('Exhaustion applies to target saving throws from spells', () => {
+  const sheet = casterSheet({
+    identity: { name: 'Mira', level: 1, class: 'cleric', class_name: 'Cleric' },
+    abilities: { modifiers: { wis: 3 } },
+    derived_stats: { spell_save_dc: 13 },
+    spellcasting: {
+      ability: 'wis',
+      cantrips_known: ['sacred_flame'],
+      spells_prepared: [],
+      slots: { 1: 1 },
+    },
+  });
+  const cast = resolveSpellCast({
+    message: 'I cast Sacred Flame at the skeleton.',
+    content,
+    characterSheet: sheet,
+    worldState: combatWorld({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Mira', hp: 8, max_hp: 8, ac: 12, is_player: true },
+          { name: 'Skeleton', hp: 10, max_hp: 10, ac: 12, is_player: false, saves: { dex: 1 }, conditions: ['exhaustion_2'] },
+        ],
+      },
+    }),
+  });
+  const outcome = resolveSpellOutcome({
+    spellCast: cast,
+    characterSheet: cast.characterSheet,
+    worldState: cast.worldState,
+    rollDie: sequenceRolls([12, 7]),
+  });
+
+  assert.match(outcome.reply, /DEX save: 12-3 = 9 \(Exhaustion level 2 -4\) vs DC 13/);
+  assert.match(outcome.reply, /Save fails/);
 });
 
 test('Healing Word restores HP and does not consume the combat action', () => {

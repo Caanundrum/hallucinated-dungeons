@@ -85,6 +85,16 @@ test('movement grants add Dash distance without consuming the action', () => {
   assert.equal(dashed.worldState.combat_state.turn_resources.action_available, true);
 });
 
+test('Exhaustion reduces combat movement resources', () => {
+  const exhausted = beginPlayerTurn(combatWorld({
+    player_stats: { speed: 30, conditions: ['exhaustion_2'] },
+  }), characterSheet);
+  const dashed = grantMovement(exhausted, exhausted.combat_state.turn_resources.movement_remaining, 'Dash', characterSheet);
+
+  assert.equal(exhausted.combat_state.turn_resources.movement_remaining, 20);
+  assert.equal(dashed.worldState.combat_state.turn_resources.movement_remaining, 40);
+});
+
 test('turn flags persist until the next player turn reset', () => {
   const started = beginPlayerTurn(combatWorld(), characterSheet);
   const flagged = setTurnFlag(started, 'dodging', true, characterSheet);

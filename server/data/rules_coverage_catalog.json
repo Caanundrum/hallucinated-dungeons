@@ -1,5 +1,5 @@
 {
-  "version": "4C.6-H23",
+  "version": "4C.6-H24",
   "status_definitions": {
     "implemented": "Exposed and mechanically enforced for the current supported level/scope.",
     "partial": "Exposed and partially enforced, but missing at least one meaningful rules interaction.",
@@ -27,8 +27,8 @@
   "conditions": {
     "blinded": "partial",
     "charmed": "partial",
-    "deafened": "deferred",
-    "exhaustion": "deferred",
+    "deafened": "partial",
+    "exhaustion": "implemented",
     "frightened": "partial",
     "grappled": "partial",
     "incapacitated": "partial",

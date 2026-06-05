@@ -57,11 +57,20 @@ const AUTO_FAIL_STR_DEX_SAVE_CONDITIONS = new Set([
 ]);
 
 function normalizeCondition(value) {
-  return String(value || '').toLowerCase().trim().replace(/[\s-]+/g, '_');
+  return String(value || '').toLowerCase().trim().replace(/[\s:=-]+/g, '_');
 }
 
 function getConditions(subject = {}) {
-  return (subject.conditions || []).map(normalizeCondition).filter(Boolean);
+  return (subject.conditions || []).map(normalizeConditionEntry).filter(Boolean);
+}
+
+function normalizeConditionEntry(entry) {
+  if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+    const id = normalizeCondition(entry.id || entry.condition || entry.name);
+    if (id === 'exhaustion' && entry.level != null) return `exhaustion_${clampExhaustionLevel(entry.level)}`;
+    return id;
+  }
+  return normalizeCondition(entry);
 }
 
 function hasCondition(subject, candidates = []) {
@@ -110,7 +119,7 @@ function getAttackMode({ attacker = {}, target = {}, defenderDodging = false } =
   return null;
 }
 
-function getD20ConditionMode({ subject = {}, target = {}, testType = 'ability_check', ability = null, skill = null, defenderDodging = false } = {}) {
+function getD20ConditionMode({ subject = {}, target = {}, testType = 'ability_check', ability = null, skill = null, defenderDodging = false, reason = '' } = {}) {
   if (testType === 'attack') return getAttackMode({ attacker: subject, target, defenderDodging });
 
   const conditions = new Set(getConditions(subject));
@@ -123,6 +132,7 @@ function getD20ConditionMode({ subject = {}, target = {}, testType = 'ability_ch
       if (conditions.has(condition)) disadvantage = true;
     }
     if (conditions.has('grappled') && normalizedAbility === 'str') disadvantage = true;
+    if (isHearingDependentCheck({ conditions, skill, ability, reason })) disadvantage = true;
   }
 
   if (testType === 'saving_throw' || testType === 'concentration_save') {
@@ -136,7 +146,7 @@ function getD20ConditionMode({ subject = {}, target = {}, testType = 'ability_ch
   return combineAdvantageMode({ advantage, disadvantage });
 }
 
-function getD20ConditionSources({ subject = {}, target = {}, testType = 'ability_check', ability = null, skill = null, defenderDodging = false } = {}) {
+function getD20ConditionSources({ subject = {}, target = {}, testType = 'ability_check', ability = null, skill = null, defenderDodging = false, reason = '' } = {}) {
   if (testType === 'attack') return getAttackModeSources({ attacker: subject, target, defenderDodging });
 
   const conditions = new Set(getConditions(subject));
@@ -148,6 +158,7 @@ function getD20ConditionSources({ subject = {}, target = {}, testType = 'ability
       if (conditions.has(condition)) sources.push(`${formatCondition(condition)} condition`);
     }
     if (conditions.has('grappled') && normalizedAbility === 'str') sources.push('Grappled condition');
+    if (isHearingDependentCheck({ conditions, skill, ability, reason })) sources.push('Deafened condition');
   }
 
   if (testType === 'saving_throw' || testType === 'concentration_save') {
@@ -196,15 +207,59 @@ function resolveSavingThrow({ target = {}, ability, dc, rollDie, bonus = 0 } = {
     };
   }
 
+  const conditionModifier = getConditionD20Modifier(target);
+  const totalBonus = Number(bonus || 0) + conditionModifier;
   const natural = rollDie(20);
-  const total = natural + Number(bonus || 0);
+  const total = natural + totalBonus;
   return {
     natural,
     total,
     success: total >= Number(dc || 10),
     automaticFailure: false,
-    text: `${natural}${formatSigned(bonus)} = ${total}`,
+    text: `${natural}${formatSigned(totalBonus)} = ${total}${conditionModifier ? ` (${formatConditionD20Sources(target).join(', ')})` : ''}`,
   };
+}
+
+function getExhaustionLevel(subject = {}) {
+  const direct = subject.exhaustion_level ?? subject.exhaustionLevel ?? subject.exhaustion;
+  const directLevel = Number(direct);
+  const conditionLevels = getConditions(subject)
+    .map((condition) => {
+      if (condition === 'exhaustion') return 1;
+      const match = condition.match(/^exhaustion_(\d+)$/);
+      return match ? Number(match[1]) : 0;
+    });
+  return clampExhaustionLevel(Math.max(0, directLevel || 0, ...conditionLevels));
+}
+
+function getConditionD20Modifier(subject = {}) {
+  return -2 * getExhaustionLevel(subject);
+}
+
+function formatConditionD20Sources(subject = {}) {
+  const level = getExhaustionLevel(subject);
+  return level > 0 ? [`Exhaustion level ${level} ${formatSigned(-2 * level)}`] : [];
+}
+
+function getConditionSpeedPenalty(subject = {}) {
+  return 5 * getExhaustionLevel(subject);
+}
+
+function applyConditionSpeedPenalty(speed, subject = {}) {
+  return Math.max(0, Number(speed || 0) - getConditionSpeedPenalty(subject));
+}
+
+function isHearingDependentCheck({ conditions, skill, ability, reason = '' } = {}) {
+  if (!conditions?.has('deafened')) return false;
+  const text = String(reason || '').toLowerCase();
+  const perceptionLike = normalizeCondition(skill) === 'perception' || normalizeCondition(ability) === 'wis';
+  return perceptionLike && /\b(?:hear|hearing|listen|sound|noise|voice|voices|footsteps?|whisper|whispers|echo|ringing|bell|bells)\b/.test(text);
+}
+
+function clampExhaustionLevel(value) {
+  const level = Math.floor(Number(value || 0));
+  if (!Number.isFinite(level) || level <= 0) return 0;
+  return Math.min(6, level);
 }
 
 function formatCondition(value) {
@@ -247,5 +302,10 @@ module.exports = {
   getAttackModeSources,
   getD20ConditionMode,
   getD20ConditionSources,
+  getExhaustionLevel,
+  getConditionD20Modifier,
+  formatConditionD20Sources,
+  getConditionSpeedPenalty,
+  applyConditionSpeedPenalty,
   resolveSavingThrow,
 };

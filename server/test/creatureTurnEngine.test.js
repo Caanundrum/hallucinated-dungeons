@@ -92,6 +92,29 @@ test('enemy-first initiative resolves only enemies before the player and keeps r
   assert.match(result.lines[0], /^Bandit Captain uses claw/);
 });
 
+test('Exhaustion applies to creature attack rolls', () => {
+  const result = resolveCreatureTurns({
+    worldState: {
+      player_stats: { hp: 12, max_hp: 12, armor_class: 16 },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', initiative: 18, hp: 12, max_hp: 12, ac: 16, is_player: true, conditions: [] },
+          combatant('Cultist', 8, { conditions: ['exhaustion_2'] }),
+        ],
+      },
+    },
+    characterSheet,
+    rollDie: sequenceRolls([15, 4]),
+  });
+
+  assert.match(result.lines[0], /15\+0 = 15 vs AC 16/);
+  assert.match(result.lines[0], /Exhaustion level 2 -4/);
+  assert.match(result.lines[0], /Miss/);
+});
+
 test('disabled creatures lose their turn and clear one-round command', () => {
   const result = resolveCreatureTurns({
     worldState: {

@@ -62,6 +62,19 @@ test('Dash spends an Action and grants extra movement equal to Speed', () => {
   assert.match(result.reply, /gain 30 feet of movement/);
 });
 
+test('Dash uses Exhaustion-reduced speed', () => {
+  const result = resolveDashAction({
+    message: 'I Dash.',
+    worldState: combatWorld({
+      player_stats: { hp: 12, max_hp: 12, armor_class: 14, speed: 30, conditions: ['exhaustion_2'] },
+    }),
+    characterSheet,
+  });
+
+  assert.equal(result.worldState.combat_state.turn_resources.movement_remaining, 40);
+  assert.match(result.reply, /gain 20 feet of movement/);
+});
+
 test('Disengage suppresses a scene-zone Opportunity Attack while moving away', () => {
   const result = resolveDisengageAction({
     message: 'I Disengage and move 20 feet away.',

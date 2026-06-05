@@ -9,6 +9,10 @@ const {
   getAttackMode,
   getD20ConditionMode,
   getD20ConditionSources,
+  getExhaustionLevel,
+  getConditionD20Modifier,
+  getConditionSpeedPenalty,
+  applyConditionSpeedPenalty,
   resolveSavingThrow,
 } = require('../src/conditionEngine');
 
@@ -45,6 +49,56 @@ test('conditions feed d20 check and save modes', () => {
     testType: 'saving_throw',
     ability: 'dex',
   }), ['Restrained condition']);
+});
+
+test('Deafened only affects hearing-dependent checks', () => {
+  const hearingMode = getD20ConditionMode({
+    subject: { conditions: ['deafened'] },
+    testType: 'skill_check',
+    ability: 'wis',
+    skill: 'perception',
+    reason: 'I listen at the door for footsteps.',
+  });
+  const sightMode = getD20ConditionMode({
+    subject: { conditions: ['deafened'] },
+    testType: 'skill_check',
+    ability: 'wis',
+    skill: 'perception',
+    reason: 'I scan the road for tracks.',
+  });
+
+  assert.equal(hearingMode, 'disadvantage');
+  assert.equal(sightMode, null);
+  assert.deepEqual(getD20ConditionSources({
+    subject: { conditions: ['deafened'] },
+    testType: 'skill_check',
+    ability: 'wis',
+    skill: 'perception',
+    reason: 'I listen for voices.',
+  }), ['Deafened condition']);
+});
+
+test('Exhaustion parses level and applies d20 and speed penalties', () => {
+  assert.equal(getExhaustionLevel({ conditions: ['exhaustion_2'] }), 2);
+  assert.equal(getExhaustionLevel({ exhaustion_level: 3, conditions: ['exhaustion'] }), 3);
+  assert.equal(getExhaustionLevel({ conditions: [{ id: 'exhaustion', level: 9 }] }), 6);
+  assert.equal(getConditionD20Modifier({ conditions: ['exhaustion_2'] }), -4);
+  assert.equal(getConditionSpeedPenalty({ conditions: ['exhaustion_2'] }), 10);
+  assert.equal(applyConditionSpeedPenalty(30, { conditions: ['exhaustion_2'] }), 20);
+});
+
+test('Exhaustion applies to saving throw rolls resolved by the condition engine', () => {
+  const result = resolveSavingThrow({
+    target: { conditions: ['exhaustion_2'] },
+    ability: 'wis',
+    dc: 10,
+    bonus: 3,
+    rollDie: () => 10,
+  });
+
+  assert.equal(result.total, 9);
+  assert.equal(result.success, false);
+  assert.match(result.text, /Exhaustion level 2 -4/);
 });
 
 test('incapacitating conditions automatically fail strength and dexterity saves', () => {

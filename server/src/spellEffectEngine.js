@@ -16,6 +16,8 @@ const {
 const {
   getAttackMode,
   getAttackModeSources,
+  getConditionD20Modifier,
+  formatConditionD20Sources,
   resolveSavingThrow,
 } = require('./conditionEngine');
 const {
@@ -149,10 +151,11 @@ function resolveSpellAttack({ spell, rule, characterSheet, worldState, rollDie }
   let { combat, target } = context;
   const { activeCombat } = context;
 
+  const attacker = getPlayerCombatant(combat, characterSheet, worldState);
   const baseAttackBonus = Number(characterSheet?.derived_stats?.spell_attack_bonus || 0);
   const activeAttackBonus = getActiveSpellAttackBonus(worldState, characterSheet);
-  const attackBonus = baseAttackBonus + activeAttackBonus;
-  const attacker = getPlayerCombatant(combat, characterSheet, worldState);
+  const conditionAttackBonus = getConditionD20Modifier(attacker);
+  const attackBonus = baseAttackBonus + activeAttackBonus + conditionAttackBonus;
   const conditionMode = getAttackMode({ attacker, target });
   const activeAdvantageSources = getActiveSpellAttackAdvantageSources(worldState, characterSheet);
   const attackSources = [
@@ -178,6 +181,9 @@ function resolveSpellAttack({ spell, rule, characterSheet, worldState, rollDie }
   ];
   if (activeAttackBonus) {
     lines.push(`Active spell attack bonus: ${getActiveSpellAttackSources(worldState, characterSheet).join(', ')} ${formatSigned(activeAttackBonus)}.`);
+  }
+  if (conditionAttackBonus) {
+    lines.push(`Condition modifier: ${formatConditionD20Sources(attacker).join(', ')}.`);
   }
   if (attackMode) {
     lines.push(`Spell attack has ${attackMode} from ${formatList(lucky.sources)}.`);
@@ -556,6 +562,7 @@ function getPlayerCombatant(combat, characterSheet = {}, worldState = {}) {
     character_id: worldState.player_stats?.character_id || characterSheet?.derived_stats?.character_id || null,
     name: characterSheet?.identity?.name || worldState.player_stats?.name || 'You',
     conditions: uniqueValues([...(characterSheet?.derived_stats?.conditions || []), ...(worldState.player_stats?.conditions || [])]),
+    exhaustion_level: worldState.player_stats?.exhaustion_level ?? characterSheet?.derived_stats?.exhaustion_level ?? null,
     resistances: uniqueValues([...(characterSheet.resistances || []), ...(worldState.player_stats?.resistances || [])]),
     is_player: true,
   };
