@@ -12,7 +12,7 @@ test('builds a machine-readable coverage matrix for all exposed content catalogs
   const content = getContentBundle();
   const matrix = buildRulesCoverageMatrix({ content });
 
-  assert.equal(matrix.version, '4C.6-H26');
+  assert.equal(matrix.version, '4C.6-H27');
   assert.equal(matrix.sections.classes.entries.length, content.classes.length);
   assert.equal(matrix.sections.species.entries.length, content.species.length);
   assert.equal(matrix.sections.origin_feats.entries.length, content.feats.length);
@@ -50,10 +50,13 @@ test('matrix flags the foundation gaps that block leveling work', () => {
   const classes = new Map(matrix.sections.classes.entries.map((entry) => [entry.id, entry]));
   const human = matrix.sections.species.entries.find((entry) => entry.id === 'human');
   const resourceful = human.children.find((entry) => entry.id === 'resourceful');
+  const halfling = matrix.sections.species.entries.find((entry) => entry.id === 'halfling');
+  const halflingLuck = halfling.children.find((entry) => entry.id === 'luck');
 
   assert.equal(resources.get('heroic_inspiration').status, STATUS.PARTIAL);
   assert.equal(feats.get('lucky').status, STATUS.PARTIAL);
   assert.equal(resourceful.status, STATUS.IMPLEMENTED);
+  assert.equal(halflingLuck.status, STATUS.IMPLEMENTED);
   assert.equal(classes.get('paladin').status, STATUS.PARTIAL);
   assert.equal(classes.get('wizard').status, STATUS.PARTIAL);
 });

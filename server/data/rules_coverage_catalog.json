@@ -1,5 +1,5 @@
 {
-  "version": "4C.6-H26",
+  "version": "4C.6-H27",
   "status_definitions": {
     "implemented": "Exposed and mechanically enforced for the current supported level/scope.",
     "partial": "Exposed and partially enforced, but missing at least one meaningful rules interaction.",
@@ -106,7 +106,7 @@
     "human.resourceful": "implemented",
     "human.skillful": "implemented",
     "human.versatile": "implemented",
-    "halfling.luck": "partial",
+    "halfling.luck": "implemented",
     "dwarf.dwarven_toughness": "implemented",
     "dwarf.dwarven_resilience": "implemented",
     "dwarf.stonecunning": "partial",

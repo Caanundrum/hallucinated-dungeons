@@ -117,6 +117,8 @@ Passive equipment and attuned item effects are projected into `active_effects` w
 
 Exhaustion is parsed as a numeric condition level from either `exhaustion_level` or condition labels such as `exhaustion_2`. It applies deterministic penalties to d20 tests and combat speed through the condition engine. Sensory impossibility is validated before a roll is created: Deafened blocks hearing-dependent checks, and Blinded blocks checks that clearly require sight, such as visual reading or inspection. Blind Fighting grants a rules-readable 10-foot blindsight sense and lets nearby melee attacks ignore sight-based attack penalties from Blinded, Hidden, or Invisible. Full sound-source, line-of-effect, total-cover, and map/senses modeling should extend that hook rather than broadening every Perception check.
 
+Automatic d20 rerolls are attached to every server-owned player d20 test through pending-roll or immediate-roll metadata. Halfling Luck rerolls natural 1s before the selected result is interpreted, including initiative and death saving throws; Heroic Inspiration and Lucky remain explicit resources layered on top of the same d20 pipeline.
+
 ## Extension Rule
 
 When adding a mechanic:

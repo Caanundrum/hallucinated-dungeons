@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 
-const REFEREE_CONTRACT_VERSION = '4C.6-H26';
+const REFEREE_CONTRACT_VERSION = '4C.6-H27';
 
 const REACTION_TRIGGERS = freezeValues({
   ATTACK_HIT: 'attack_hit',

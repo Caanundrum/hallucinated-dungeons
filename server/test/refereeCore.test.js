@@ -250,6 +250,37 @@ test('Halfling Luck automatically rerolls a natural 1 on a pending d20 test', ()
   assert.match(result.reply, /\*\*success\*\*/);
 });
 
+test('Halfling Luck applies to initiative rolls', () => {
+  const prompt = adjudicate({
+    message: 'I attack the hooded stranger.',
+    worldState: worldState({
+      scene_presence: {
+        exact_location: 'gate',
+        present_npcs: ['hooded stranger'],
+        present_objects: [],
+        available_exits: [],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      identity: { ...characterSheet.identity, species: 'halfling' },
+    },
+  });
+  const result = adjudicate({
+    message: `[ROLL REQUEST: ${prompt.worldState.pending_roll.id}]`,
+    worldState: prompt.worldState,
+    characterSheet: {
+      ...characterSheet,
+      identity: { ...characterSheet.identity, species: 'halfling' },
+    },
+    rollDie: sequenceRolls([1, 14, 10]),
+  });
+
+  assert.equal(prompt.worldState.pending_roll.kind, 'initiative');
+  assert.match(result.reply, /Halfling Luck rerolled 1->14/);
+  assert.match(result.reply, /Sir Testalot \(15\).*Hooded Stranger \(11\)/);
+});
+
 test('blocks new actions until a pending roll is resolved', () => {
   const result = adjudicate({
     message: 'I attack the goblin instead.',
@@ -1381,6 +1412,48 @@ test('prompts death saves at 0 HP and applies natural 1 as two failures', () => 
   assert.equal(result.worldState.player_stats.death_saves.failures, 2);
   assert.equal(result.worldState.combat_state.round, 2);
   assert.match(result.reply, /Natural 1 counts as two failures/);
+});
+
+test('Halfling Luck rerolls a natural 1 death save before death-save failure rules apply', () => {
+  const prompt = adjudicate({
+    message: 'I try to crawl away.',
+    worldState: worldState({
+      player_stats: {
+        hp: 0,
+        max_hp: 12,
+        armor_class: 16,
+        death_saves: { successes: 0, failures: 0 },
+      },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', hp: 0, max_hp: 12, ac: 16, is_player: true },
+          { name: 'Goblin', hp: 8, max_hp: 8, ac: 12, is_player: false },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      identity: { ...characterSheet.identity, species: 'halfling' },
+    },
+    currentTurn: 12,
+  });
+  const result = adjudicate({
+    message: `[ROLL REQUEST: ${prompt.worldState.pending_roll.id}]`,
+    worldState: prompt.worldState,
+    characterSheet: {
+      ...characterSheet,
+      identity: { ...characterSheet.identity, species: 'halfling' },
+    },
+    rollDie: sequenceRolls([1, 12]),
+  });
+
+  assert.equal(result.worldState.player_stats.death_saves.successes, 1);
+  assert.equal(result.worldState.player_stats.death_saves.failures, 0);
+  assert.match(result.reply, /Halfling Luck rerolled 1->12/);
+  assert.doesNotMatch(result.reply, /Natural 1 counts as two failures/);
 });
 
 test('natural 20 on a death save restores 1 HP and clears death saves', () => {

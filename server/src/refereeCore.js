@@ -622,6 +622,7 @@ function resolveCheckRoll({ pending, result, worldState, characterSheet }) {
 function resolveDeathSave({ result, worldState, characterSheet, rollDie }) {
   const current = worldState.player_stats?.death_saves || { successes: 0, failures: 0 };
   const natural = Number(result.natural || result.total || 0);
+  const rollDetail = formatDeathSaveRollDetail(result);
   let successes = Number(current.successes || 0);
   let failures = Number(current.failures || 0);
   let nextState = {
@@ -636,7 +637,7 @@ function resolveDeathSave({ result, worldState, characterSheet, rollDie }) {
       hp: 1,
       deathSaves: { successes: 0, failures: 0 },
     });
-    reply = '**Natural 20.** You regain 1 HP and consciousness. The grave will have to reschedule.';
+    reply = `**Natural 20${rollDetail}.** You regain 1 HP and consciousness. The grave will have to reschedule.`;
   } else {
     if (natural === 1) failures += 2;
     else if (result.total >= 10) successes += 1;
@@ -645,13 +646,13 @@ function resolveDeathSave({ result, worldState, characterSheet, rollDie }) {
     const deathSaves = { successes: Math.min(successes, 3), failures: Math.min(failures, 3) };
     nextState = updatePlayerHp({ worldState: nextState, hp: 0, deathSaves });
     if (deathSaves.failures >= 3) {
-      reply = `Death saving throw ${result.total}: **failure**. Death saves: ${deathSaves.successes} successes, ${deathSaves.failures} failures. **Your character dies.**`;
+      reply = `Death saving throw ${result.total}${rollDetail}: **failure**. Death saves: ${deathSaves.successes} successes, ${deathSaves.failures} failures. **Your character dies.**`;
     } else if (deathSaves.successes >= 3) {
-      reply = `Death saving throw ${result.total}: **success**. Death saves: 3 successes, ${deathSaves.failures} failures. You are stable at 0 HP.`;
+      reply = `Death saving throw ${result.total}${rollDetail}: **success**. Death saves: 3 successes, ${deathSaves.failures} failures. You are stable at 0 HP.`;
     } else {
       const outcome = result.total >= 10 ? '**success**' : '**failure**';
       const naturalText = natural === 1 ? ' Natural 1 counts as two failures.' : '';
-      reply = `Death saving throw ${result.total}: ${outcome}.${naturalText} Death saves: ${deathSaves.successes} successes, ${deathSaves.failures} failures.`;
+      reply = `Death saving throw ${result.total}${rollDetail}: ${outcome}.${naturalText} Death saves: ${deathSaves.successes} successes, ${deathSaves.failures} failures.`;
     }
   }
 
@@ -677,6 +678,11 @@ function resolveDeathSave({ result, worldState, characterSheet, rollDie }) {
     worldState: nextState,
     reply,
   };
+}
+
+function formatDeathSaveRollDetail(result = {}) {
+  if (!result.rollText || !Array.isArray(result.rerolls) || result.rerolls.length === 0) return '';
+  return ` (${result.rollText})`;
 }
 
 function resolveConcentrationSave({ pending, result, worldState, characterSheet }) {
@@ -1118,6 +1124,7 @@ function promptInitiative({ message, worldState, characterSheet, currentTurn = 0
     modifier_breakdown: conditionModifier
       ? `Initiative ${formatSigned(baseInitiative)} + ${formatConditionD20Sources(getPlayerConditionSubject(characterSheet, worldState)).join(' + ')} = ${formatSigned(initiative)}`
       : null,
+    reroll_rules: getAutoD20RerollRules(characterSheet),
     intent: message,
     created_turn: currentTurn,
     enemy: buildDefaultEnemy(enemyName),
@@ -1169,12 +1176,13 @@ function resolveInitiative({ pending, result, worldState, characterSheet, rollDi
   }
 
   const order = combatants.map((combatant) => `${combatant.name} (${combatant.initiative})`).join(', ');
+  const initiativeRollLine = `Your initiative roll: ${result.rollText}.`;
   if (playerIndex === 0) {
     return {
       handled: true,
       logType: 'referee_initiative_resolution',
       worldState: nextState,
-      reply: `Initiative order: ${order}. **Round 1 begins. It is your turn.**`,
+      reply: `${initiativeRollLine} Initiative order: ${order}. **Round 1 begins. It is your turn.**`,
     };
   }
 
@@ -1182,7 +1190,7 @@ function resolveInitiative({ pending, result, worldState, characterSheet, rollDi
     worldState: nextState,
     characterSheet,
     rollDie,
-    playerTurnNote: `Initiative order: ${order}. **Round 1 begins.** ${enemy.name} moves first.`,
+    playerTurnNote: `${initiativeRollLine} Initiative order: ${order}. **Round 1 begins.** ${enemy.name} moves first.`,
     playerDodging: false,
     advanceRound: false,
   });
