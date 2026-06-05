@@ -382,7 +382,7 @@ test('Exhaustion changes referee pending check and save modifiers', () => {
   assert.match(save.worldState.pending_roll.modifier_breakdown, /Exhaustion level 2 -4/);
 });
 
-test('Deafened only disadvantages hearing-dependent referee checks', () => {
+test('Deafened blocks hearing-dependent referee checks before rolling', () => {
   const listen = adjudicate({
     message: 'I listen for footsteps behind the door.',
     worldState: worldState({ player_stats: { hp: 12, max_hp: 12, armor_class: 16, conditions: ['deafened'] } }),
@@ -394,9 +394,21 @@ test('Deafened only disadvantages hearing-dependent referee checks', () => {
     characterSheet,
   });
 
-  assert.equal(listen.worldState.pending_roll.advantage_mode, 'disadvantage');
-  assert.match(listen.reply, /Deafened condition/);
+  assert.equal(listen.worldState.pending_roll, null);
+  assert.match(listen.reply, /Deafened condition makes that hearing-dependent Wisdom \(Perception\) automatically fail/);
   assert.notEqual(look.worldState.pending_roll.advantage_mode, 'disadvantage');
+});
+
+test('Blinded blocks sight-dependent referee checks before rolling', () => {
+  const read = adjudicate({
+    message: 'I inspect the writing on the wall.',
+    worldState: worldState({ player_stats: { hp: 12, max_hp: 12, armor_class: 16, conditions: ['blinded'] } }),
+    characterSheet,
+  });
+
+  assert.equal(read.handled, true);
+  assert.equal(read.worldState.pending_roll, null);
+  assert.match(read.reply, /Blinded condition makes that sight-dependent Intelligence \(Investigation\) automatically fail/);
 });
 
 test('prompts a social check for speeches meant to change minds', () => {

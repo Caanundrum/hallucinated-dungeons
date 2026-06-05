@@ -9,6 +9,7 @@ const {
   getAttackMode,
   getD20ConditionMode,
   getD20ConditionSources,
+  getSensoryCheckBlock,
   getExhaustionLevel,
   getConditionD20Modifier,
   getConditionSpeedPenalty,
@@ -51,7 +52,7 @@ test('conditions feed d20 check and save modes', () => {
   }), ['Restrained condition']);
 });
 
-test('Deafened only affects hearing-dependent checks', () => {
+test('Deafened blocks hearing-dependent checks without affecting other perception', () => {
   const hearingMode = getD20ConditionMode({
     subject: { conditions: ['deafened'] },
     testType: 'skill_check',
@@ -67,15 +68,48 @@ test('Deafened only affects hearing-dependent checks', () => {
     reason: 'I scan the road for tracks.',
   });
 
-  assert.equal(hearingMode, 'disadvantage');
+  assert.equal(hearingMode, null);
   assert.equal(sightMode, null);
+  assert.deepEqual(getSensoryCheckBlock({
+    subject: { conditions: ['deafened'] },
+    ability: 'wis',
+    skill: 'perception',
+    reason: 'I listen for voices.',
+  }), {
+    blocked: true,
+    condition: 'deafened',
+    source: 'Deafened condition',
+    sense: 'hearing',
+    reason: 'the task depends on hearing',
+  });
   assert.deepEqual(getD20ConditionSources({
     subject: { conditions: ['deafened'] },
     testType: 'skill_check',
     ability: 'wis',
     skill: 'perception',
     reason: 'I listen for voices.',
-  }), ['Deafened condition']);
+  }), []);
+});
+
+test('Blinded blocks sight-dependent checks but not touch-first checks', () => {
+  assert.deepEqual(getSensoryCheckBlock({
+    subject: { conditions: ['blinded'] },
+    ability: 'int',
+    skill: 'investigation',
+    reason: 'I inspect the writing on the wall.',
+  }), {
+    blocked: true,
+    condition: 'blinded',
+    source: 'Blinded condition',
+    sense: 'sight',
+    reason: 'the task depends on sight',
+  });
+  assert.equal(getSensoryCheckBlock({
+    subject: { conditions: ['blinded'] },
+    ability: 'int',
+    skill: 'investigation',
+    reason: 'I feel along the wall for a seam.',
+  }), null);
 });
 
 test('Exhaustion parses level and applies d20 and speed penalties', () => {

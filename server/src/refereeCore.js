@@ -47,6 +47,7 @@ const {
   formatConditionD20Sources,
   getD20ConditionMode,
   getD20ConditionSources,
+  getSensoryCheckBlock,
   getTurnBlockReason,
   resolveSavingThrow,
 } = require('./conditionEngine');
@@ -262,6 +263,22 @@ function parseRollRequest(message) {
 
 function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCombat }) {
   const check = intent.check;
+  const conditionSubject = getPlayerConditionSubject(characterSheet, worldState);
+  const sensoryBlock = getSensoryCheckBlock({
+    subject: conditionSubject,
+    ability: check.ability,
+    skill: check.skill,
+    reason: intent.raw,
+  });
+  if (sensoryBlock) {
+    return {
+      handled: true,
+      logType: 'referee_sensory_check_blocked',
+      worldState,
+      reply: `${sensoryBlock.source} makes that ${sensoryBlock.sense}-dependent ${check.label} automatically fail. ${failureTextFor(check)} No roll needed; the dice can stay dramatically unemployed for this one.`,
+    };
+  }
+
   let nextWorldState = worldState;
   if (inCombat) {
     const spent = spendTurnResource(worldState, 'action', `${check.label} check`, characterSheet);
@@ -280,7 +297,6 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
   const bonus = getActiveBonusDice(worldState, 'check', { skill: check.skill })[0] || null;
   const hideAction = isHideActionCheck({ rule_action: intent.ruleAction, skill: check.skill, intent: intent.raw });
   const dc = hideAction ? 15 : chooseDc(intent.raw, check, worldState, inCombat);
-  const conditionSubject = getPlayerConditionSubject(characterSheet, worldState);
   const conditionMode = getD20ConditionMode({
     subject: conditionSubject,
     testType: check.skill ? 'skill_check' : 'ability_check',

@@ -132,7 +132,6 @@ function getD20ConditionMode({ subject = {}, target = {}, testType = 'ability_ch
       if (conditions.has(condition)) disadvantage = true;
     }
     if (conditions.has('grappled') && normalizedAbility === 'str') disadvantage = true;
-    if (isHearingDependentCheck({ conditions, skill, ability, reason })) disadvantage = true;
   }
 
   if (testType === 'saving_throw' || testType === 'concentration_save') {
@@ -158,7 +157,6 @@ function getD20ConditionSources({ subject = {}, target = {}, testType = 'ability
       if (conditions.has(condition)) sources.push(`${formatCondition(condition)} condition`);
     }
     if (conditions.has('grappled') && normalizedAbility === 'str') sources.push('Grappled condition');
-    if (isHearingDependentCheck({ conditions, skill, ability, reason })) sources.push('Deafened condition');
   }
 
   if (testType === 'saving_throw' || testType === 'concentration_save') {
@@ -220,6 +218,29 @@ function resolveSavingThrow({ target = {}, ability, dc, rollDie, bonus = 0 } = {
   };
 }
 
+function getSensoryCheckBlock({ subject = {}, ability = null, skill = null, reason = '' } = {}) {
+  const conditions = new Set(getConditions(subject));
+  if (isHearingDependentCheck({ conditions, skill, ability, reason })) {
+    return {
+      blocked: true,
+      condition: 'deafened',
+      source: 'Deafened condition',
+      sense: 'hearing',
+      reason: 'the task depends on hearing',
+    };
+  }
+  if (isSightDependentCheck({ conditions, skill, ability, reason })) {
+    return {
+      blocked: true,
+      condition: 'blinded',
+      source: 'Blinded condition',
+      sense: 'sight',
+      reason: 'the task depends on sight',
+    };
+  }
+  return null;
+}
+
 function getExhaustionLevel(subject = {}) {
   const direct = subject.exhaustion_level ?? subject.exhaustionLevel ?? subject.exhaustion;
   const directLevel = Number(direct);
@@ -254,6 +275,22 @@ function isHearingDependentCheck({ conditions, skill, ability, reason = '' } = {
   const text = String(reason || '').toLowerCase();
   const perceptionLike = normalizeCondition(skill) === 'perception' || normalizeCondition(ability) === 'wis';
   return perceptionLike && /\b(?:hear|hearing|listen|sound|noise|voice|voices|footsteps?|whisper|whispers|echo|ringing|bell|bells)\b/.test(text);
+}
+
+function isSightDependentCheck({ conditions, skill, ability, reason = '' } = {}) {
+  if (!conditions?.has('blinded')) return false;
+  const text = String(reason || '').toLowerCase();
+  const normalizedSkill = normalizeCondition(skill);
+  const normalizedAbility = normalizeCondition(ability);
+  const sightLike = ['perception', 'investigation', 'insight'].includes(normalizedSkill)
+    || ['wis', 'int'].includes(normalizedAbility);
+  if (!sightLike) return false;
+
+  const obviousSightIntent = /\b(?:look|see|sight|watch|scan|spot|peer|gaze|stare|observe|visually|visible)\b/.test(text);
+  const readingIntent = /\b(?:read|reading|writing|written|inscription|runes?|glyphs?|symbol|symbols|text|sign|notice|map|note|letter|page|book|scroll|parchment)\b/.test(text);
+  const visualInspectionIntent = /\b(?:inspect|examine|study)\b/.test(text)
+    && /\b(?:face|expression|eyes|mark|marks|blood|color|colour|paint|symbol|symbols|writing|note|letter|map|runes?|glyphs?|tracks?)\b/.test(text);
+  return obviousSightIntent || readingIntent || visualInspectionIntent;
 }
 
 function clampExhaustionLevel(value) {
@@ -302,6 +339,7 @@ module.exports = {
   getAttackModeSources,
   getD20ConditionMode,
   getD20ConditionSources,
+  getSensoryCheckBlock,
   getExhaustionLevel,
   getConditionD20Modifier,
   formatConditionD20Sources,
