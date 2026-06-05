@@ -1,5 +1,5 @@
 {
-  "version": "4C.6-H25",
+  "version": "4C.6-H26",
   "status_definitions": {
     "implemented": "Exposed and mechanically enforced for the current supported level/scope.",
     "partial": "Exposed and partially enforced, but missing at least one meaningful rules interaction.",
@@ -165,7 +165,7 @@
   },
   "fighting_styles": {
     "archery": "implemented",
-    "blind_fighting": "deferred",
+    "blind_fighting": "partial",
     "defense": "implemented",
     "dueling": "implemented",
     "great_weapon_fighting": "implemented",

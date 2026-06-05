@@ -92,25 +92,33 @@ function getTurnBlockReason(subject = {}) {
   return null;
 }
 
-function getAttackMode({ attacker = {}, target = {}, defenderDodging = false } = {}) {
+function getAttackMode({
+  attacker = {},
+  target = {},
+  defenderDodging = false,
+  ignoreAttackerConditions = [],
+  ignoreTargetConditions = [],
+} = {}) {
   let advantage = false;
   let disadvantage = Boolean(defenderDodging);
   const attackerConditions = new Set(getConditions(attacker));
   const targetConditions = new Set(getConditions(target));
+  const ignoredAttacker = normalizeConditionSet(ignoreAttackerConditions);
+  const ignoredTarget = normalizeConditionSet(ignoreTargetConditions);
 
   for (const condition of ATTACKER_DISADVANTAGE_CONDITIONS) {
-    if (attackerConditions.has(condition)) disadvantage = true;
+    if (attackerConditions.has(condition) && !ignoredAttacker.has(condition)) disadvantage = true;
   }
-  if (attackerConditions.has('frightened')) disadvantage = true;
+  if (attackerConditions.has('frightened') && !ignoredAttacker.has('frightened')) disadvantage = true;
 
   for (const condition of ATTACKER_ADVANTAGE_CONDITIONS) {
-    if (attackerConditions.has(condition)) advantage = true;
+    if (attackerConditions.has(condition) && !ignoredAttacker.has(condition)) advantage = true;
   }
   for (const condition of TARGET_ADVANTAGE_CONDITIONS) {
-    if (targetConditions.has(condition)) advantage = true;
+    if (targetConditions.has(condition) && !ignoredTarget.has(condition)) advantage = true;
   }
   for (const condition of TARGET_DISADVANTAGE_CONDITIONS) {
-    if (targetConditions.has(condition)) disadvantage = true;
+    if (targetConditions.has(condition) && !ignoredTarget.has(condition)) disadvantage = true;
   }
 
   if (advantage && disadvantage) return null;
@@ -169,25 +177,33 @@ function getD20ConditionSources({ subject = {}, target = {}, testType = 'ability
   return sources;
 }
 
-function getAttackModeSources({ attacker = {}, target = {}, defenderDodging = false } = {}) {
+function getAttackModeSources({
+  attacker = {},
+  target = {},
+  defenderDodging = false,
+  ignoreAttackerConditions = [],
+  ignoreTargetConditions = [],
+} = {}) {
   const sources = [];
   const attackerConditions = new Set(getConditions(attacker));
   const targetConditions = new Set(getConditions(target));
+  const ignoredAttacker = normalizeConditionSet(ignoreAttackerConditions);
+  const ignoredTarget = normalizeConditionSet(ignoreTargetConditions);
 
   for (const condition of ATTACKER_DISADVANTAGE_CONDITIONS) {
-    if (attackerConditions.has(condition)) sources.push(`${formatCondition(condition)} on attacker`);
+    if (attackerConditions.has(condition) && !ignoredAttacker.has(condition)) sources.push(`${formatCondition(condition)} on attacker`);
   }
-  if (attackerConditions.has('frightened')) sources.push('Frightened attacker');
+  if (attackerConditions.has('frightened') && !ignoredAttacker.has('frightened')) sources.push('Frightened attacker');
   if (defenderDodging) sources.push('Dodge');
 
   for (const condition of ATTACKER_ADVANTAGE_CONDITIONS) {
-    if (attackerConditions.has(condition)) sources.push(`${formatCondition(condition)} attacker`);
+    if (attackerConditions.has(condition) && !ignoredAttacker.has(condition)) sources.push(`${formatCondition(condition)} attacker`);
   }
   for (const condition of TARGET_ADVANTAGE_CONDITIONS) {
-    if (targetConditions.has(condition)) sources.push(`${formatCondition(condition)} target`);
+    if (targetConditions.has(condition) && !ignoredTarget.has(condition)) sources.push(`${formatCondition(condition)} target`);
   }
   for (const condition of TARGET_DISADVANTAGE_CONDITIONS) {
-    if (targetConditions.has(condition)) sources.push(`${formatCondition(condition)} target`);
+    if (targetConditions.has(condition) && !ignoredTarget.has(condition)) sources.push(`${formatCondition(condition)} target`);
   }
 
   return sources;
@@ -329,6 +345,10 @@ function combineAdvantageMode({ advantage = false, disadvantage = false } = {}) 
   if (advantage) return 'advantage';
   if (disadvantage) return 'disadvantage';
   return null;
+}
+
+function normalizeConditionSet(values = []) {
+  return new Set((values || []).map(normalizeCondition));
 }
 
 module.exports = {

@@ -1,3 +1,5 @@
+const { getCombatantDistanceFeet } = require('./combatPositionEngine');
+
 function getFightingStyle(characterSheet = {}) {
   return normalizeId(characterSheet.class_choices?.fighting_style);
 }
@@ -33,6 +35,36 @@ function getFightingStyleDamageBonus({ characterSheet = {}, attack = {}, message
     return { total: 2, label: 'Thrown Weapon Fighting' };
   }
   return { total: 0, label: null };
+}
+
+function getFightingStyleSenses(characterSheet = {}) {
+  return getFightingStyle(characterSheet) === 'blind_fighting'
+    ? [{ type: 'blindsight', range_feet: 10, source: 'Blind Fighting' }]
+    : [];
+}
+
+function getBlindFightingAttackOptions({
+  characterSheet = {},
+  attack = {},
+  attacker = {},
+  target = {},
+  spatialMode = null,
+} = {}) {
+  if (getFightingStyle(characterSheet) !== 'blind_fighting') return emptyAttackOptions();
+  if (!isWithinBlindFightingRange({ attack, attacker, target, spatialMode })) return emptyAttackOptions();
+
+  const attackerConditions = normalizeConditionSet(attacker.conditions);
+  const targetConditions = normalizeConditionSet(target.conditions);
+  const ignoreAttackerConditions = attackerConditions.has('blinded') ? ['blinded'] : [];
+  const ignoreTargetConditions = ['hidden', 'invisible'].filter((condition) => targetConditions.has(condition));
+  if (!ignoreAttackerConditions.length && !ignoreTargetConditions.length) return emptyAttackOptions();
+
+  return {
+    ignoreAttackerConditions,
+    ignoreTargetConditions,
+    sources: ['Blind Fighting'],
+    note: 'Blind Fighting lets you treat that sight-blocking target within 10 feet as seen.',
+  };
 }
 
 function applyFightingStyleToAttack({ characterSheet = {}, attack = {}, message = '' } = {}) {
@@ -87,6 +119,26 @@ function wantsTwoHandedUse(message = '') {
   return /\b(?:two[- ]handed|with (?:my |both )?hands|in both hands|using both hands)\b/i.test(String(message || ''));
 }
 
+function isWithinBlindFightingRange({ attack = {}, attacker = {}, target = {}, spatialMode = null } = {}) {
+  const distance = getCombatantDistanceFeet(attacker, target);
+  if (Number.isFinite(distance)) return distance <= 10;
+  if (distance === Number.POSITIVE_INFINITY) return false;
+  return spatialMode === 'scene_zone_assumption' && attack.attackKind === 'melee';
+}
+
+function emptyAttackOptions() {
+  return {
+    ignoreAttackerConditions: [],
+    ignoreTargetConditions: [],
+    sources: [],
+    note: '',
+  };
+}
+
+function normalizeConditionSet(conditions = []) {
+  return new Set((conditions || []).map(normalizeId));
+}
+
 function normalizeId(value) {
   return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 }
@@ -94,10 +146,12 @@ function normalizeId(value) {
 module.exports = {
   applyFightingStyleToAttack,
   buildUnarmedFightingAttack,
+  getBlindFightingAttackOptions,
   getFightingStyle,
   getFightingStyleArmorBonus,
   getFightingStyleAttackBonus,
   getFightingStyleDamageBonus,
+  getFightingStyleSenses,
   getRuntimeArmorClass,
   isHeldWithTwoHands,
   isThrownAttack,

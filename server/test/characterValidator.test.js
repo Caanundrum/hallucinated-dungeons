@@ -710,6 +710,14 @@ test('Fighter Fighting Style choices update static character sheet math', () => 
   assert.equal(defense.derived_stats.armor_class_breakdown.some((entry) => entry.label === 'Defense Fighting Style'), true);
   assert.equal(archery.derived_stats.attack_breakdowns[0].attack_total, 5);
   assert.equal(archery.derived_stats.attack_breakdowns[0].fighting_style_attack_bonus, 2);
+
+  const blindFighting = validateCharacter(classDraftFor('fighter', {
+    classChoices: { fighting_style: 'blind_fighting' },
+  }), content);
+  assert.equal(blindFighting.derived_stats.senses.blindsight, 10);
+  assert.deepEqual(blindFighting.derived_stats.senses.special, [
+    { type: 'blindsight', range_feet: 10, source: 'Blind Fighting' },
+  ]);
 });
 
 test('equips and calculates a second Light weapon without filling a two-handed weapon user off hand', () => {

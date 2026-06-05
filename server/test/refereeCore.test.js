@@ -2070,6 +2070,40 @@ test('Archery Fighting Style updates older ranged sheets during referee attack r
   assert.match(result.reply, /Attack roll: 14 \(natural 8; 8\+6=14\) vs AC 14/);
 });
 
+test('Blind Fighting ignores nearby sight-based attack disadvantage', () => {
+  const result = adjudicate({
+    message: 'Attack the Cultist with my longsword.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', initiative: 18, hp: 12, max_hp: 12, ac: 16, is_player: true, conditions: ['blinded'], position: { map_id: 'crypt', q: 0, r: 0 } },
+          { name: 'Cultist', initiative: 8, hp: 20, max_hp: 20, ac: 14, is_player: false, conditions: ['invisible', 'hidden'], position: { map_id: 'crypt', q: 1, r: 0 }, attack: { name: 'dagger', attack_bonus: 2, damage_formula: '1d4+1' } },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      class_choices: { fighting_style: 'blind_fighting' },
+      derived_stats: {
+        ...characterSheet.derived_stats,
+        attack_breakdowns: [
+          { weapon_id: 'longsword', name: 'Longsword', ability: 'str', attack_total: 5, damage_formula: '1d8+3' },
+        ],
+      },
+    },
+    rollDie: sequenceRolls([9, 2, 4]),
+  });
+  const cultist = result.worldState.combat_state.combatants.find((entry) => entry.name === 'Cultist');
+
+  assert.equal(cultist.hp, 15);
+  assert.match(result.reply, /Blind Fighting lets you treat that sight-blocking target within 10 feet as seen/);
+  assert.doesNotMatch(result.reply, /Attack roll has disadvantage/);
+  assert.match(result.reply, /Attack roll: 14 \(natural 9; 9\+5=14\) vs AC 14/);
+});
+
 test('active weapon attack bonuses change referee attack rolls', () => {
   const result = adjudicate({
     message: 'Attack the Cultist with my longsword.',

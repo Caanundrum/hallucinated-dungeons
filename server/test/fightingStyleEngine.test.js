@@ -8,9 +8,11 @@ const assert = require('node:assert/strict');
 const {
   applyFightingStyleToAttack,
   buildUnarmedFightingAttack,
+  getBlindFightingAttackOptions,
   getFightingStyleArmorBonus,
   getFightingStyleAttackBonus,
   getFightingStyleDamageBonus,
+  getFightingStyleSenses,
   getRuntimeArmorClass,
 } = require('../src/fightingStyleEngine');
 
@@ -124,4 +126,33 @@ test('Unarmed Fighting builds the 2024 Strength-based unarmed strike', () => {
   });
   assert.equal(unarmed.attackBonus, 5);
   assert.equal(unarmed.damageFormula, '1d6+3');
+});
+
+test('Blind Fighting exposes 10-foot blindsight and ignores nearby sight penalties', () => {
+  assert.deepEqual(getFightingStyleSenses(sheet('blind_fighting')), [
+    { type: 'blindsight', range_feet: 10, source: 'Blind Fighting' },
+  ]);
+
+  const options = getBlindFightingAttackOptions({
+    characterSheet: sheet('blind_fighting'),
+    attack: attack(),
+    attacker: { conditions: ['blinded'], position: { map_id: 'road', q: 0, r: 0 } },
+    target: { conditions: ['invisible', 'hidden'], position: { map_id: 'road', q: 1, r: 0 } },
+  });
+
+  assert.deepEqual(options.ignoreAttackerConditions, ['blinded']);
+  assert.deepEqual(options.ignoreTargetConditions, ['hidden', 'invisible']);
+  assert.deepEqual(options.sources, ['Blind Fighting']);
+});
+
+test('Blind Fighting does not ignore sight penalties beyond 10 feet', () => {
+  const options = getBlindFightingAttackOptions({
+    characterSheet: sheet('blind_fighting'),
+    attack: attack({ attackKind: 'ranged' }),
+    attacker: { conditions: ['blinded'], position: { map_id: 'road', q: 0, r: 0 } },
+    target: { conditions: ['invisible'], position: { map_id: 'road', q: 3, r: 0 } },
+  });
+
+  assert.deepEqual(options.ignoreAttackerConditions, []);
+  assert.deepEqual(options.ignoreTargetConditions, []);
 });

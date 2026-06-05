@@ -7,6 +7,7 @@ const assert = require('node:assert/strict');
 
 const {
   getAttackMode,
+  getAttackModeSources,
   getD20ConditionMode,
   getD20ConditionSources,
   getSensoryCheckBlock,
@@ -21,6 +22,24 @@ test('conditions feed attack advantage and disadvantage', () => {
   assert.equal(getAttackMode({ attacker: { conditions: ['poisoned'] }, target: {} }), 'disadvantage');
   assert.equal(getAttackMode({ attacker: {}, target: { conditions: ['restrained'] } }), 'advantage');
   assert.equal(getAttackMode({ attacker: { conditions: ['poisoned'] }, target: { conditions: ['restrained'] } }), null);
+});
+
+test('attack condition modes can ignore sight penalties supplied by another rule', () => {
+  const mode = getAttackMode({
+    attacker: { conditions: ['blinded'] },
+    target: { conditions: ['invisible'] },
+    ignoreAttackerConditions: ['blinded'],
+    ignoreTargetConditions: ['invisible'],
+  });
+  const sources = getAttackModeSources({
+    attacker: { conditions: ['blinded'] },
+    target: { conditions: ['invisible'] },
+    ignoreAttackerConditions: ['blinded'],
+    ignoreTargetConditions: ['invisible'],
+  });
+
+  assert.equal(mode, null);
+  assert.deepEqual(sources, []);
 });
 
 test('conditions feed d20 check and save modes', () => {

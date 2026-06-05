@@ -2,6 +2,7 @@ const { byId } = require('./contentData');
 const {
   getFightingStyleArmorBonus,
   getFightingStyleAttackBonus,
+  getFightingStyleSenses,
 } = require('./fightingStyleEngine');
 const { buildStartingAmmunitionItems } = require('./ammunitionEngine');
 
@@ -102,6 +103,7 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
   const maxHp = Math.max(1, characterClass.hit_die + abilityModifiers.con + maxHpBonus);
   const armorBreakdown = calculateArmorClass(equipped, content, abilityModifiers, activeEffects, characterClass, classData);
   const initiativeBreakdown = calculateInitiative(abilityModifiers, pb, activeEffects);
+  const fightingStyleSenses = getFightingStyleSenses({ class_choices: { fighting_style: classData.choices?.fighting_style } });
   const derivedStats = {
     level,
     proficiency_bonus: pb,
@@ -117,6 +119,8 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
       darkvision: activeEffects
         .filter((effect) => effect.target === 'darkvision_override')
         .reduce((value, effect) => Math.max(value, Number(effect.value || 0)), species.darkvision || 0),
+      ...Object.fromEntries(fightingStyleSenses.map((sense) => [sense.type, sense.range_feet])),
+      special: fightingStyleSenses,
     },
     initiative: initiativeBreakdown.total,
     initiative_breakdown: initiativeBreakdown.parts,

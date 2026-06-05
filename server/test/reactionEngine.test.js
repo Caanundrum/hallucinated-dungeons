@@ -806,6 +806,42 @@ test('a creature leaving player reach opens an Opportunity Attack before movemen
   assert.match(resolved.reply, /Skeleton moves 30 feet to hex \(7, 0\)/);
 });
 
+test('Blind Fighting applies to player Opportunity Attacks against nearby unseen targets', () => {
+  const blindFighter = {
+    ...fighterSheet,
+    class_choices: { fighting_style: 'blind_fighting' },
+  };
+  const pending = advanceEnemyTurns({
+    worldState: fighterWorld({
+      combatants: [
+        { name: 'Bran', initiative: 18, hp: 12, max_hp: 12, ac: 16, is_player: true, conditions: ['blinded'], position: { map_id: 'road', q: 0, r: 0 } },
+        combatant('Skeleton', 8, {
+          hp: 8,
+          max_hp: 8,
+          behavior: 'fleeing',
+          speed: 30,
+          conditions: ['invisible', 'hidden'],
+          position: { map_id: 'road', q: 1, r: 0 },
+        }),
+      ],
+    }),
+    characterSheet: blindFighter,
+    playerTurnNote: 'You end your turn.',
+  });
+  const resolved = adjudicate({
+    message: 'Opportunity attack.',
+    worldState: pending.worldState,
+    characterSheet: blindFighter,
+    rollDie: sequenceRolls([9, 2, 2]),
+  });
+  const skeleton = resolved.worldState.combat_state.combatants.find((entry) => entry.name === 'Skeleton');
+
+  assert.equal(skeleton.hp, 3);
+  assert.match(resolved.reply, /Blind Fighting lets you treat that sight-blocking target within 10 feet as seen/);
+  assert.doesNotMatch(resolved.reply, /Opportunity Attack has disadvantage/);
+  assert.match(resolved.reply, /Attack roll: 14 \(natural 9; 9\+5=14\) vs AC 12/);
+});
+
 test('declining a creature movement Reaction lets the original movement continue without an attack', () => {
   const pending = advanceEnemyTurns({
     worldState: fighterWorld(),

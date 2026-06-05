@@ -70,7 +70,7 @@ test('adapts scene_presence into future-ready entity state', () => {
     characterSheet: characterSheet(),
   });
 
-  assert.equal(context.version, '4C.6-H25');
+  assert.equal(context.version, '4C.6-H26');
   assert.equal(context.position_state.mode, 'scene_zone');
   assert.equal(context.actor.entity_id, 'pc:char_ari');
   assert.ok(context.entity_state.some((entity) => entity.id === 'npc:older_gate_guard'));
@@ -199,7 +199,7 @@ test('summarizes rules context for DM prompts without handing rules authority to
   });
   const summary = summarizeRulesContextForPrompt(context);
 
-  assert.match(summary, /Rules context version: 4C\.6-H25/);
+  assert.match(summary, /Rules context version: 4C\.6-H26/);
   assert.match(summary, /Actor: pc:char_ari/);
   assert.match(summary, /object:wax_sealed_note=wet wax-sealed note|object:wax_sealed_note=wax-sealed note/);
   assert.match(summary, /presence, reachability, visibility, and interactions/);

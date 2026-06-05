@@ -99,6 +99,7 @@ const {
 } = require('./weaponRulesEngine');
 const {
   applyFightingStyleToAttack,
+  getBlindFightingAttackOptions,
   getFightingStyleDamageBonus,
   getRuntimeArmorClass,
 } = require('./fightingStyleEngine');
@@ -1522,13 +1523,20 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
   const lightExtra = getLightExtraAttack({ characterSheet, primaryAttack: attack, message });
   const propertyMode = getWeaponPropertyAttackMode({ attack, characterSheet, player, target, combat });
   const propertySources = getWeaponPropertyAttackSources({ attack, characterSheet, player, target, combat });
+  const visionOptions = getBlindFightingAttackOptions({
+    characterSheet,
+    attack,
+    attacker: player,
+    target,
+    spatialMode: preparedAttack.spatialMode,
+  });
   const helped = applyHelpToAttack({
     worldState: ammunitionSpent.worldState,
     combat,
     attacker: player,
     target,
-    advantageMode: combineAdvantageModes(getAttackAdvantageMode(player, target), propertyMode),
-    sources: [...getAttackAdvantageSources(player, target), ...propertySources],
+    advantageMode: combineAdvantageModes(getAttackAdvantageMode(player, target, visionOptions), propertyMode),
+    sources: [...getAttackAdvantageSources(player, target, visionOptions), ...propertySources],
   });
   combat = helped.combat;
   player = helped.attacker;
@@ -1564,6 +1572,7 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
     `You attack ${target.name} with ${attack.name}. Attack roll: ${attackRoll.rollText} vs AC ${target.ac}.`,
     ...ammunitionSpent.lines,
   ];
+  if (visionOptions.note) lines.push(visionOptions.note);
   if (advantageMode) lines.push(`Attack roll has ${advantageMode} from ${formatList(lucky.sources)}.`);
   if (activeAttackBonuses.length) lines.push(`Active attack bonus: ${activeAttackBonuses.map((bonus) => `${bonus.label} ${formatSigned(bonus.value)}`).join(', ')}.`);
   if (conditionAttackModifier) lines.push(`Condition modifier: ${formatConditionD20Sources(player).join(', ')}.`);
@@ -1815,8 +1824,15 @@ function resolveExtraWeaponAttackRoll({
   player = combat.combatants.find((combatant) => combatant.is_player);
   target = findCombatTarget(combat, target.name) || target;
   const propertyMode = getWeaponPropertyAttackMode({ attack, characterSheet, player, target, combat });
+  const visionOptions = getBlindFightingAttackOptions({
+    characterSheet,
+    attack,
+    attacker: player,
+    target,
+    spatialMode: preparedAttack.spatialMode,
+  });
   let sources = [
-    ...getAttackAdvantageSources(player, target),
+    ...getAttackAdvantageSources(player, target, visionOptions),
     ...getWeaponPropertyAttackSources({ attack, characterSheet, player, target, combat }),
   ];
   const helped = applyHelpToAttack({
@@ -1824,7 +1840,7 @@ function resolveExtraWeaponAttackRoll({
     combat,
     attacker: player,
     target,
-    advantageMode: combineAdvantageModes(getAttackAdvantageMode(player, target), propertyMode),
+    advantageMode: combineAdvantageModes(getAttackAdvantageMode(player, target, visionOptions), propertyMode),
     sources,
   });
   worldState = helped.worldState;
@@ -1853,6 +1869,7 @@ function resolveExtraWeaponAttackRoll({
     `You make the ${attackLabel} against ${target.name} with ${attack.name}. Attack roll: ${attackRoll.rollText} vs AC ${target.ac}.`,
     ...ammunitionSpent.lines,
   ];
+  if (visionOptions.note) lines.push(visionOptions.note);
   if (advantageMode) lines.push(`${resultLabel} has ${advantageMode} from ${formatList(sources)}.`);
   if (activeAttackBonuses.length) lines.push(`Active attack bonus: ${activeAttackBonuses.map((bonus) => `${bonus.label} ${formatSigned(bonus.value)}`).join(', ')}.`);
   if (conditionAttackModifier) lines.push(`Condition modifier: ${formatConditionD20Sources(player).join(', ')}.`);
@@ -2656,17 +2673,17 @@ function isSneakAttackWeapon(attack = {}) {
   return properties.includes('finesse') || properties.includes('ammunition') || attack.weaponCategory === 'ranged';
 }
 
-function getAttackAdvantageMode(attacker = {}, target = {}) {
-  const conditionMode = getAttackMode({ attacker, target });
+function getAttackAdvantageMode(attacker = {}, target = {}, options = {}) {
+  const conditionMode = getAttackMode({ attacker, target, ...options });
   const spellAdvantage = [...getSpellAttackAdvantageSources(target), ...getWeaponMasteryAdvantageSources(target)].length > 0;
   if (conditionMode === 'disadvantage' && spellAdvantage) return null;
   if (conditionMode) return conditionMode;
   return spellAdvantage ? 'advantage' : null;
 }
 
-function getAttackAdvantageSources(attacker = {}, target = {}) {
+function getAttackAdvantageSources(attacker = {}, target = {}, options = {}) {
   return [
-    ...getAttackModeSources({ attacker, target }),
+    ...getAttackModeSources({ attacker, target, ...options }),
     ...getSpellAttackAdvantageSources(target),
     ...getWeaponMasteryAdvantageSources(target),
   ];

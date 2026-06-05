@@ -15,6 +15,7 @@ const {
 } = require('./spellEffectEngine');
 const {
   applyFightingStyleToAttack,
+  getBlindFightingAttackOptions,
   getFightingStyleDamageBonus,
 } = require('./fightingStyleEngine');
 const {
@@ -128,8 +129,15 @@ function resolvePlayerOpportunityAttack({
     target: defender,
     combat: nextCombat,
   });
+  const visionOptions = getBlindFightingAttackOptions({
+    characterSheet,
+    attack: prepared.attack,
+    attacker,
+    target: defender,
+    spatialMode: prepared.spatialMode,
+  });
   let advantageSources = [
-    ...getAttackAdvantageSources(attacker, defender),
+    ...getAttackAdvantageSources(attacker, defender, visionOptions),
     ...getWeaponPropertyAttackSources({ attack: prepared.attack, characterSheet, player: attacker, target: defender, combat: nextCombat }),
   ];
   const helped = applyHelpToAttack({
@@ -137,7 +145,7 @@ function resolvePlayerOpportunityAttack({
     combat: nextCombat,
     attacker,
     target: defender,
-    advantageMode: combineAdvantageModes(getAttackAdvantageMode(attacker, defender), propertyMode),
+    advantageMode: combineAdvantageModes(getAttackAdvantageMode(attacker, defender, visionOptions), propertyMode),
     sources: advantageSources,
   });
   nextWorldState = helped.worldState;
@@ -163,6 +171,7 @@ function resolvePlayerOpportunityAttack({
   const hit = !criticalMiss && (criticalHit || attackRoll.total >= Number(defender.ac || 10));
   const consumeEffectIds = [...(attackRoll.bonusDice?.expireEffectIds || [])];
   lines.push(`**Opportunity Attack:** you strike ${defender.name} with ${prepared.attack.name}. Attack roll: ${attackRoll.rollText} vs AC ${defender.ac}.`);
+  if (visionOptions.note) lines.push(visionOptions.note);
   if (advantageMode) lines.push(`Opportunity Attack has ${advantageMode} from ${formatList(advantageSources)}.`);
   if (conditionAttackModifier) lines.push(`Condition modifier: ${formatConditionD20Sources(attacker).join(', ')}.`);
   const reveal = clearPlayerHidden({ worldState: nextWorldState, reason: 'attack' });
@@ -266,15 +275,15 @@ function buildAttackFromBreakdown(attack = {}) {
   };
 }
 
-function getAttackAdvantageMode(attacker = {}, target = {}) {
-  const conditionMode = getAttackMode({ attacker, target });
+function getAttackAdvantageMode(attacker = {}, target = {}, options = {}) {
+  const conditionMode = getAttackMode({ attacker, target, ...options });
   const masteryAdvantage = getWeaponMasteryAdvantageSources(target).length ? 'advantage' : null;
   return combineAdvantageModes(conditionMode, masteryAdvantage);
 }
 
-function getAttackAdvantageSources(attacker = {}, target = {}) {
+function getAttackAdvantageSources(attacker = {}, target = {}, options = {}) {
   return [
-    ...getAttackModeSources({ attacker, target }),
+    ...getAttackModeSources({ attacker, target, ...options }),
     ...getWeaponMasteryAdvantageSources(target),
   ];
 }
