@@ -201,29 +201,25 @@ async function extract(sessionId, playerMessage, dm1Reply) {
 function mergeWorldState(current, patch) {
   const merged = { ...current };
 
+  const hasLocationPatch = patch.current_location !== undefined && patch.current_location !== null;
+  const locationChanged = hasLocationPatch && patch.current_location !== current.current_location;
+
   // current_location — replace
-  if (patch.current_location !== undefined && patch.current_location !== null) {
+  if (hasLocationPatch) {
     merged.current_location = patch.current_location;
   }
 
   // scene_presence - full replace when provided.
   if (patch.scene_presence && typeof patch.scene_presence === 'object' && !Array.isArray(patch.scene_presence)) {
-    const currentScene = merged.scene_presence || db.DEFAULT_WORLD_STATE.scene_presence;
     merged.scene_presence = normalizeScenePresence({
-      ...currentScene,
       ...patch.scene_presence,
-      exact_location: patch.scene_presence.exact_location || patch.current_location || currentScene.exact_location || merged.current_location || '',
+      exact_location: patch.scene_presence.exact_location || patch.current_location || merged.current_location || '',
     });
     if (!merged.current_location && merged.scene_presence.exact_location) {
       merged.current_location = merged.scene_presence.exact_location;
     }
-  } else if (
-    patch.current_location !== undefined
-    && patch.current_location !== null
-    && (!merged.scene_presence || !merged.scene_presence.exact_location)
-  ) {
+  } else if (hasLocationPatch && (locationChanged || !merged.scene_presence?.exact_location)) {
     merged.scene_presence = normalizeScenePresence({
-      ...(merged.scene_presence || db.DEFAULT_WORLD_STATE.scene_presence),
       exact_location: patch.current_location,
     });
   }

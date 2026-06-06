@@ -150,7 +150,7 @@ test('older sessions with null discovery state are normalized before writes', ()
     message: `[ROLL REQUEST: ${prompt.worldState.pending_roll.id}]`,
     worldState: prompt.worldState,
     characterSheet,
-    rollDie: sequenceRolls([15]),
+    rollDie: sequenceRolls([20]),
   });
 
   assert.equal(resolved.worldState.discovery_state.searches.morrowgate_town_gate.discovered, true);

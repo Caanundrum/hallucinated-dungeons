@@ -233,6 +233,56 @@ test('merges scene presence as a full normalized scene snapshot', () => {
   assert.deepEqual(merged.scene_presence.present_objects, ['gate']);
 });
 
+test('scene presence replacement clears stale visible NPCs and objects', () => {
+  const merged = mergeWorldState({
+    ...db.DEFAULT_WORLD_STATE,
+    current_location: 'Bracken Hollow town gate',
+    scene_presence: {
+      exact_location: 'Bracken Hollow town gate',
+      location_type: 'gate',
+      present_npcs: ['messenger boy', 'gate guard'],
+      present_objects: ['wax-sealed note', 'torn satchel'],
+      available_exits: ['town square'],
+      nearby_locations: ['chapel'],
+    },
+  }, {
+    current_location: 'Bracken Hollow chapel steps',
+    scene_presence: {
+      location_type: 'chapel',
+      present_npcs: ['worried acolyte'],
+      present_objects: ['chapel door'],
+      available_exits: ['town square', 'chapel nave'],
+      nearby_locations: ['town gate'],
+    },
+  });
+
+  assert.equal(merged.scene_presence.exact_location, 'Bracken Hollow chapel steps');
+  assert.deepEqual(merged.scene_presence.present_npcs, ['worried acolyte']);
+  assert.deepEqual(merged.scene_presence.present_objects, ['chapel door']);
+});
+
+test('location-only movement clears prior scene presence instead of preserving stale targets', () => {
+  const merged = mergeWorldState({
+    ...db.DEFAULT_WORLD_STATE,
+    current_location: 'Bracken Hollow town gate',
+    scene_presence: {
+      exact_location: 'Bracken Hollow town gate',
+      location_type: 'gate',
+      present_npcs: ['messenger boy', 'gate guard'],
+      present_objects: ['wax-sealed note', 'torn satchel'],
+      available_exits: ['town square'],
+      nearby_locations: ['chapel'],
+    },
+  }, {
+    current_location: 'Bracken Hollow chapel steps',
+  });
+
+  assert.equal(merged.scene_presence.exact_location, 'Bracken Hollow chapel steps');
+  assert.deepEqual(merged.scene_presence.present_npcs, []);
+  assert.deepEqual(merged.scene_presence.present_objects, []);
+  assert.equal(checkSpatialAction('Read the note.', merged)?.message.includes('note is not here'), true);
+});
+
 test('merges time state and replaces active effects without wiping other state', () => {
   const merged = mergeWorldState({
     ...db.DEFAULT_WORLD_STATE,

@@ -146,12 +146,13 @@ const ABILITY_LABELS = {
   cha: 'Charisma',
 };
 
-function resolveIntent(message) {
+function resolveIntent(message, options = {}) {
   const text = String(message || '').trim();
   const lower = text.toLowerCase();
   const ruleAction = lower.match(ACTION_PATTERN)?.[1] || null;
   const check = parseExplicitCheck(text)
     || CHECK_RULES.find((rule) => rule.pattern.test(text))
+    || inferContextualCheck(text, options.worldState)
     || checkForRuleAction(ruleAction);
   const save = parseExplicitSave(text) || SAVE_RULES.find((rule) => rule.pattern.test(text)) || null;
   const isRollResult = ROLL_RESULT.test(text);
@@ -195,6 +196,40 @@ function checkForRuleAction(ruleAction) {
   return skill ? CHECK_RULES.find((rule) => rule.skill === skill) : null;
 }
 
+function inferContextualCheck(text, worldState = {}) {
+  const npcs = normalizeList(worldState?.scene_presence?.present_npcs);
+  const objects = normalizeList(worldState?.scene_presence?.present_objects);
+  const lower = String(text || '').toLowerCase();
+
+  if (isContextualPersuasion(lower, npcs)) return skillRule('persuasion');
+  if (isContextualInsight(lower, npcs, objects)) return skillRule('insight');
+  if (isContextualInvestigation(lower, objects, npcs)) return skillRule('investigation');
+  return null;
+}
+
+function isContextualPersuasion(text, npcs) {
+  if (!/\b(?:introduce myself|be nice|friendly|polite|politely|warmly|gently|reassure|calm|appeal|disarm|befriend|win .* over|put .* at ease|set .* at ease|convince|persuade|negotiate)\b/i.test(text)) {
+    return false;
+  }
+  return referencesAnyEntity(text, npcs) || npcs.length === 1;
+}
+
+function isContextualInsight(text, npcs, objects) {
+  if (!/\b(?:study|watch|observe|read|size up|assess|gauge|scrutinize|look over)\b/i.test(text)) return false;
+  if (referencesAnyEntity(text, objects)) return false;
+  return referencesAnyEntity(text, npcs) || (npcs.length === 1 && !referencesObjectishNoun(text));
+}
+
+function isContextualInvestigation(text, objects, npcs) {
+  if (!/\b(?:investigate|examine|inspect|study|search|check|read|look over|look at)\b/i.test(text)) return false;
+  if (referencesAnyEntity(text, npcs) && !referencesAnyEntity(text, objects)) return false;
+  return referencesAnyEntity(text, objects) || referencesObjectishNoun(text);
+}
+
+function skillRule(skill) {
+  return CHECK_RULES.find((rule) => rule.skill === skill) || null;
+}
+
 function abilityCheck(ability) {
   return {
     id: `${ability}_check`,
@@ -229,6 +264,47 @@ function parseAbility(value) {
 
 function normalizeId(value) {
   return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+function normalizeList(value) {
+  return Array.isArray(value) ? value.map((item) => String(item || '')).filter(Boolean) : [];
+}
+
+function compact(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function referencesAnyEntity(text, entities = []) {
+  const compactText = compact(text);
+  if (!compactText || entities.length === 0) return false;
+  return entities.some((entity) => referencesEntity(compactText, entity));
+}
+
+function referencesEntity(compactText, entity) {
+  const compactEntity = compact(entity);
+  if (!compactEntity) return false;
+  if (compactText.includes(compactEntity)) return true;
+
+  const entityTokens = compactEntity.split(' ').filter(isMeaningfulToken);
+  return entityTokens.some((token) => compactText.includes(token));
+}
+
+function isMeaningfulToken(token) {
+  return token.length >= 4 && ![
+    'with',
+    'that',
+    'this',
+    'from',
+    'near',
+    'door',
+    'room',
+    'road',
+    'gate',
+  ].includes(token);
+}
+
+function referencesObjectishNoun(text) {
+  return /\b(?:note|letter|book|ledger|door|lock|chest|trap|room|writing|symbol|rune|clue|mechanism|drawer|desk|satchel|token|ash|mark|tracks?|footprints?|contents?)\b/i.test(text);
 }
 
 module.exports = {

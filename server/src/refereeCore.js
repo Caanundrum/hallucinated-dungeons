@@ -136,8 +136,8 @@ function adjudicate({ message, worldState = {}, characterSheet = null, currentTu
   const text = String(message || '').trim();
   if (!text) return null;
 
-  const intent = resolveIntent(text);
   const state = normalizeWorldState(worldState);
+  const intent = resolveIntent(text, { worldState: state });
   const sheet = characterSheet || {};
 
   if (state.pending_reaction) {
@@ -300,7 +300,8 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
   const modifier = getCheckModifier(characterSheet, check, worldState);
   const bonus = getActiveBonusDice(worldState, 'check', { skill: check.skill })[0] || null;
   const hideAction = isHideActionCheck({ rule_action: intent.ruleAction, skill: check.skill, intent: intent.raw });
-  const dc = hideAction ? 15 : chooseDc(intent.raw, check, worldState, inCombat);
+  const dcAssessment = assessDc(intent.raw, check, worldState, inCombat, { hideAction });
+  const dc = dcAssessment.dc;
   const conditionMode = getD20ConditionMode({
     subject: conditionSubject,
     testType: check.skill ? 'skill_check' : 'ability_check',
@@ -338,7 +339,7 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
     advantage_mode: advantageMode,
     advantage_sources: advantageSources,
     dc,
-    dc_source: buildDcSource(dc, intent.raw, inCombat, { hideAction }),
+    dc_source: dcAssessment.source,
     intent: intent.raw,
     rule_action: hideAction ? 'hide' : intent.ruleAction || null,
     ...buildDiscoveryPendingMetadata({ intent, worldState }),
@@ -368,7 +369,8 @@ function promptSavingThrow({ intent, worldState, characterSheet, currentTurn = 0
   const save = intent.save;
   const modifier = getSavingThrowModifier(characterSheet, save.ability, worldState);
   const bonus = getActiveBonusDice(worldState, 'save')[0] || null;
-  const dc = chooseDc(intent.raw, save, worldState, inCombat);
+  const dcAssessment = assessDc(intent.raw, save, worldState, inCombat);
+  const dc = dcAssessment.dc;
   const conditionSubject = getPlayerConditionSubject(characterSheet, worldState);
   const conditionMode = getD20ConditionMode({
     subject: conditionSubject,
@@ -407,7 +409,7 @@ function promptSavingThrow({ intent, worldState, characterSheet, currentTurn = 0
     advantage_mode: advantageMode,
     advantage_sources: advantageSources,
     dc,
-    dc_source: buildDcSource(dc, intent.raw, inCombat),
+    dc_source: dcAssessment.source,
     intent: intent.raw,
     consumes: 'forced_save',
     combat: Boolean(inCombat),
@@ -2514,7 +2516,11 @@ function getSavingThrowModifier(characterSheet, ability, worldState = {}) {
   };
 }
 
-function chooseDc(_text, check, worldState, inCombat) {
+function assessDc(text, check = {}, worldState = {}, inCombat, options = {}) {
+  if (options.hideAction) {
+    return { dc: 15, source: 'Hide action fixed DC 15' };
+  }
+
   const sceneText = JSON.stringify({
     location_type: worldState?.scene_presence?.location_type,
     present_npcs: worldState?.scene_presence?.present_npcs,
@@ -2522,18 +2528,76 @@ function chooseDc(_text, check, worldState, inCombat) {
     npc_states: worldState?.npc_states,
     current_location: worldState?.current_location,
   }).toLowerCase();
-  let dc = DEFAULT_CHECK_DC;
-  if (/\b(?:alert|hostile|hidden|careful|guarded|suspicious|locked|obscured)\b/.test(sceneText)) dc += 5;
-  if (inCombat && ['stealth', 'sleight_of_hand', 'persuasion', 'deception', 'intimidation'].includes(check.skill)) dc += 2;
-  return Math.max(5, Math.min(30, dc));
-}
-
-function buildDcSource(dc, _text, inCombat, options = {}) {
-  if (options.hideAction) return 'Hide action fixed DC 15';
+  const messageText = String(text || '').toLowerCase();
+  const combinedText = `${messageText} ${sceneText}`;
   const parts = [`base adventuring DC ${DEFAULT_CHECK_DC}`];
-  if (dc > DEFAULT_CHECK_DC) parts.push('increased for scene pressure, opposition, or difficult circumstances');
-  if (inCombat) parts.push('combat pressure applies');
-  return parts.join('; ');
+  let adjustment = 0;
+
+  const addAdjustment = (amount, reason) => {
+    adjustment += amount;
+    parts.push(`${amount > 0 ? '+' : ''}${amount} ${reason}`);
+  };
+
+  if (check.skill === 'persuasion' || check.skill === 'deception' || check.skill === 'intimidation' || check.skill === 'performance') {
+    if (/\b(?:cooperative|friendly|helpful|trusting|grateful|receptive)\b/.test(sceneText)) {
+      addAdjustment(-5, 'target already favorable');
+    }
+    if (/\b(?:hostile|suspicious|guarded|angry|frightened|afraid|panicked|unfriendly)\b/.test(combinedText)) {
+      addAdjustment(5, 'target resistance or fear');
+    }
+  }
+
+  if (check.skill === 'insight') {
+    if (/\b(?:guarded|careful|trained|suspicious|professional|poker face|stone-faced)\b/.test(combinedText)) {
+      addAdjustment(5, 'hard-to-read target');
+    }
+    if (/\b(?:open|obvious|transparent|nervous|shaking|trembling)\b/.test(combinedText)) {
+      addAdjustment(-5, 'visible emotional tell');
+    }
+  }
+
+  if (check.skill === 'investigation') {
+    if (/\b(?:locked|trap|trapped|mechanism|cipher|coded|hidden|complex|ancient|scratched out|obscured)\b/.test(combinedText)) {
+      addAdjustment(5, 'complex or concealed evidence');
+    }
+    if (/\b(?:obvious|simple|plain|open|fresh|clear)\b/.test(combinedText)) {
+      addAdjustment(-5, 'straightforward evidence');
+    }
+  }
+
+  if (check.skill === 'perception' || check.skill === 'survival') {
+    if (/\b(?:faint|hidden|obscured|dark|fog|rain|mud|crowded|distant|overgrown|old trail)\b/.test(combinedText)) {
+      addAdjustment(5, 'poor visibility or degraded signs');
+    }
+    if (/\b(?:fresh|clear|obvious|loud|bright|plain|open trail)\b/.test(combinedText)) {
+      addAdjustment(-5, 'clear sensory evidence');
+    }
+  }
+
+  if (check.skill === 'stealth') {
+    if (/\b(?:bright|open|watched|guarded|no cover|bare room|empty room)\b/.test(combinedText)) {
+      addAdjustment(5, 'poor hiding conditions');
+    }
+    if (/\b(?:dark|shadow|dim|cover|crowd|fog|rain|noise)\b/.test(combinedText)) {
+      addAdjustment(-5, 'favorable concealment');
+    }
+  }
+
+  if (check.skill === 'sleight_of_hand') {
+    if (/\b(?:watched|guarded|alert|crowded|worn|held|clutched)\b/.test(combinedText)) {
+      addAdjustment(5, 'watched or secured target');
+    }
+    if (/\b(?:distracted|unguarded|loose|unattended)\b/.test(combinedText)) {
+      addAdjustment(-5, 'distracted or unsecured target');
+    }
+  }
+
+  if (inCombat && ['stealth', 'sleight_of_hand', 'persuasion', 'deception', 'intimidation', 'performance'].includes(check.skill)) {
+    addAdjustment(2, 'combat pressure');
+  }
+
+  const dc = Math.max(5, Math.min(30, DEFAULT_CHECK_DC + adjustment));
+  return { dc, source: parts.join('; ') };
 }
 
 function successTextFor(check) {

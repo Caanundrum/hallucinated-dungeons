@@ -146,6 +146,7 @@ function listIncludesTerm(list = [], term) {
   if (!normalizedTerm) return false;
   return list.some((item) => {
     const normalizedItem = singularize(compact(item));
+    if (!normalizedItem) return false;
     return normalizedItem === normalizedTerm
       || normalizedItem.includes(normalizedTerm)
       || normalizedTerm.includes(normalizedItem)
@@ -299,6 +300,14 @@ function findGenericSpatialIssue(input, worldState, options = {}) {
     };
   }
 
+  const portableTarget = extractPortableObjectMention(input);
+  if (portableTarget && !isKnownPresentOrReachable(worldState, portableTarget, options)) {
+    return {
+      target: portableTarget,
+      message: `You are currently at ${currentLocation(worldState)}, and ${portableTarget} is not here. ${missingTargetPrompt(portableTarget)}`,
+    };
+  }
+
   return null;
 }
 
@@ -332,4 +341,13 @@ function missingTargetPrompt(target = '') {
 
 function targetLooksAnimate(target = '') {
   return /\b(?:acolyte|bandit|blacksmith|boy|clerk|creature|cultist|dragon|enemy|figure|girl|goblin|guard|hostile|innkeeper|keeper|man|merchant|monster|orc|person|priest|reeve|shadow|shopkeeper|stranger|thug|watchman|watchwoman|wolf|woman)\b/i.test(String(target));
+}
+
+function extractPortableObjectMention(input = '') {
+  if (!/\b(?:read|open|inspect|examine|take|grab|pick|touch|use)\b/i.test(input)) return '';
+  for (const hint of PORTABLE_OBJECT_HINTS) {
+    const pattern = new RegExp(`\\b${escapeRegExp(hint)}\\b`, 'i');
+    if (pattern.test(input)) return hint;
+  }
+  return '';
 }

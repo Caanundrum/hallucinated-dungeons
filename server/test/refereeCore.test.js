@@ -78,6 +78,38 @@ test('creates a server-owned pending skill check with a DC', () => {
   assert.match(result.reply, /\[CHECK: id=.*skill=insight ability=wis/);
 });
 
+test('contextual phrasing maps present targets to referee checks', () => {
+  const npcStudy = adjudicate({
+    message: 'I study the clerk.',
+    worldState: worldState(),
+    characterSheet,
+  });
+  const objectStudy = adjudicate({
+    message: 'I look over the wax-sealed note.',
+    worldState: worldState({
+      scene_presence: {
+        exact_location: 'town hall steps',
+        present_npcs: ['clerk'],
+        present_objects: ['wax-sealed note'],
+        available_exits: ['square'],
+      },
+    }),
+    characterSheet,
+  });
+  const socialApproach = adjudicate({
+    message: 'I introduce myself warmly to the clerk and ask for the reeve.',
+    worldState: worldState(),
+    characterSheet,
+  });
+
+  assert.equal(npcStudy.worldState.pending_roll.skill, 'insight');
+  assert.match(npcStudy.reply, /Wisdom \(Insight\)/);
+  assert.equal(objectStudy.worldState.pending_roll.skill, 'investigation');
+  assert.match(objectStudy.reply, /Intelligence \(Investigation\)/);
+  assert.equal(socialApproach.worldState.pending_roll.skill, 'persuasion');
+  assert.match(socialApproach.reply, /Charisma \(Persuasion\)/);
+});
+
 test('condition modes are stored on pending checks and saves for the server roller', () => {
   const poisonedCheck = adjudicate({
     message: "I study the clerk's face.",
@@ -155,6 +187,35 @@ test('ignores player-authored difficulty and DC claims', () => {
   assert.equal(result.worldState.pending_roll.dc, 15);
   assert.doesNotMatch(result.worldState.pending_roll.dc_source, /explicit DC/);
   assert.match(result.reply, /DC 15 Wisdom \(Insight\)/);
+});
+
+test('DC assessment reacts to scene pressure and favorable evidence', () => {
+  const guardedSocial = adjudicate({
+    message: 'I politely convince the suspicious clerk to let me inside.',
+    worldState: worldState({
+      npc_states: {
+        clerk: { attitude: 'suspicious' },
+      },
+    }),
+    characterSheet,
+  });
+  const obviousEvidence = adjudicate({
+    message: 'I inspect the obvious clue on the open ledger.',
+    worldState: worldState({
+      scene_presence: {
+        exact_location: 'town hall steps',
+        present_npcs: ['clerk'],
+        present_objects: ['open ledger', 'obvious clue'],
+        available_exits: ['square'],
+      },
+    }),
+    characterSheet,
+  });
+
+  assert.equal(guardedSocial.worldState.pending_roll.dc, 20);
+  assert.match(guardedSocial.worldState.pending_roll.dc_source, /target resistance or fear/);
+  assert.equal(obviousEvidence.worldState.pending_roll.dc, 10);
+  assert.match(obviousEvidence.worldState.pending_roll.dc_source, /straightforward evidence/);
 });
 
 test('resolves an authenticated skill roll against the stored DC', () => {
