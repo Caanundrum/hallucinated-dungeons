@@ -3,6 +3,7 @@ const {
   spendMovement,
   spendTurnResource,
 } = require('./actionEconomy');
+const { rollDie } = require('./dice');
 const {
   getCombatantDistanceFeet,
   getFeetPerHex,
@@ -565,7 +566,7 @@ function normalizeId(value) {
 }
 
 function defaultRollDie(sides) {
-  return Math.ceil(Math.random() * Number(sides || 20));
+  return rollDie(sides);
 }
 
 module.exports = {

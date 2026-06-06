@@ -1,4 +1,5 @@
 const { spendTurnResource } = require('./actionEconomy');
+const { rollDie } = require('./dice');
 const {
   applyHealing,
   rollDamageFormula,
@@ -276,7 +277,7 @@ function combineAdvantageModes(left = null, right = null) {
 }
 
 function defaultRollDie(sides) {
-  return Math.ceil(Math.random() * Number(sides || 20));
+  return rollDie(sides);
 }
 
 module.exports = {

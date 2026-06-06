@@ -1,3 +1,5 @@
+const { rollDie } = require('./dice');
+
 function rollDamageFormula(formula = '1d6', rollDie = defaultRollDie, { crit = false, spellMod = 0, rerollOnes = false, minimumDieRoll = null } = {}) {
   const normalized = String(formula || '1')
     .replace(/\s+/g, '')
@@ -130,7 +132,7 @@ function normalizeDamageType(value) {
 }
 
 function defaultRollDie(sides) {
-  return Math.ceil(Math.random() * Number(sides || 20));
+  return rollDie(sides);
 }
 
 module.exports = {

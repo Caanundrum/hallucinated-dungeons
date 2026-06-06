@@ -4,6 +4,7 @@ const {
   getWeaponReach,
   pushCombatantAway,
 } = require('./combatPositionEngine');
+const { rollDie } = require('./dice');
 
 const LARGE_OR_SMALLER = new Set(['tiny', 'small', 'medium', 'large']);
 const INCAPACITATING_CONDITIONS = new Set(['incapacitated', 'paralyzed', 'petrified', 'stunned', 'unconscious', 'sleep']);
@@ -326,7 +327,7 @@ function normalizeId(value) {
 }
 
 function defaultRollDie(sides) {
-  return Math.ceil(Math.random() * Number(sides || 20));
+  return rollDie(sides);
 }
 
 module.exports = {

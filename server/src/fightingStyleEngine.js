@@ -1,4 +1,5 @@
 const { getCombatantDistanceFeet } = require('./combatPositionEngine');
+const { rollDie } = require('./dice');
 const {
   applyDamage,
   formatDamageAdjustment,
@@ -195,6 +196,10 @@ function isGrappledByPlayer(combatant = {}, combat = {}, characterSheet = {}, wo
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value || {}));
+}
+
+function defaultRollDie(sides) {
+  return rollDie(sides);
 }
 
 function normalizeId(value) {

@@ -1,5 +1,6 @@
 const { spendTurnResource } = require('./actionEconomy');
 const { getCombatantDistanceFeet, getFeetPerHex, getHexPosition, hexDistance, sameMap } = require('./combatPositionEngine');
+const { rollDie } = require('./dice');
 const { applyDamage, formatDamageAdjustment, rollDamageFormula } = require('./damageHealingEngine');
 const { buildResourceState, spendResource } = require('./resourceEngine');
 
@@ -428,7 +429,7 @@ function clone(value) {
 }
 
 function defaultRollDie(sides) {
-  return Math.ceil(Math.random() * Number(sides || 20));
+  return rollDie(sides);
 }
 
 module.exports = {

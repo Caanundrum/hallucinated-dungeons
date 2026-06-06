@@ -7,6 +7,7 @@ const {
   sameMap,
   setHexPosition,
 } = require('./combatPositionEngine');
+const { rollDie } = require('./dice');
 const { buildCreatureLeavesReachReaction } = require('./reactionEngine');
 const {
   getPlayerOpportunityReach,
@@ -393,7 +394,7 @@ function normalizeText(value) {
 }
 
 function defaultRollDie(sides) {
-  return Math.ceil(Math.random() * Number(sides || 20));
+  return rollDie(sides);
 }
 
 module.exports = {

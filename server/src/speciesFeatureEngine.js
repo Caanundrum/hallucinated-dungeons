@@ -1,5 +1,6 @@
 const { grantMovement, spendTurnResource } = require('./actionEconomy');
 const { getContentBundle } = require('./contentData');
+const { rollDie } = require('./dice');
 const {
   applyDamage,
   applyHealing,
@@ -316,7 +317,7 @@ function normalizeId(value) {
 }
 
 function defaultRollDie(sides) {
-  return Math.ceil(Math.random() * Number(sides || 20));
+  return rollDie(sides);
 }
 
 module.exports = {

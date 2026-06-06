@@ -1,4 +1,4 @@
-const crypto = require('crypto');
+const { rollDie } = require('./dice');
 const { rollD20WithMode } = require('./d20RollEngine');
 const {
   formatDamageAdjustment,
@@ -699,7 +699,7 @@ function getArmorClass(characterSheet, worldState) {
 }
 
 function defaultRollDie(sides) {
-  return crypto.randomInt(1, Number(sides) + 1);
+  return rollDie(sides);
 }
 
 function formatSigned(value) {

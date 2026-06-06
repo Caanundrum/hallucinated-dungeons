@@ -6,6 +6,7 @@ const {
   getTurnBlockReason,
 } = require('./conditionEngine');
 const { getContentBundle } = require('./contentData');
+const { rollDie } = require('./dice');
 const { resolveD20Test } = require('./d20RollEngine');
 const {
   consumeActiveEffects,
@@ -345,7 +346,7 @@ function normalizeText(value) {
 }
 
 function defaultRollDie(sides) {
-  return Math.ceil(Math.random() * Number(sides || 20));
+  return rollDie(sides);
 }
 
 module.exports = {

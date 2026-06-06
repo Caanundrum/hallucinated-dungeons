@@ -1,3 +1,5 @@
+const { rollDie } = require('./dice');
+
 function resolveD20Test({
   kind = 'd20_test',
   modifier = 0,
@@ -159,7 +161,7 @@ function rollDiceExpression(expression, rollDie = defaultRollDie) {
 }
 
 function defaultRollDie(sides) {
-  return Math.ceil(Math.random() * Number(sides || 20));
+  return rollDie(sides);
 }
 
 function formatSigned(value) {

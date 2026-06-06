@@ -1,4 +1,4 @@
-const crypto = require('crypto');
+const { rollDie } = require('./dice');
 const { resolveIntent } = require('./intentResolver');
 const { getContentBundle } = require('./contentData');
 const {
@@ -246,7 +246,7 @@ function clearResolvedCombat(combatState) {
 }
 
 function defaultRollDie(sides) {
-  return crypto.randomInt(1, Number(sides) + 1);
+  return rollDie(sides);
 }
 
 function parseRollResult(message) {
