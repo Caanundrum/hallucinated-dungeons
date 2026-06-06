@@ -123,6 +123,8 @@ Fatal player damage safeguards are centralized in `playerDamageEngine` before de
 
 Unarmed Fighting is resolved as a Fighting Style, not a special phrasing trick. Its Unarmed Strike die is d8 when neither hand holds a weapon or shield, d6 otherwise, and a player-grappled creature takes the style's start-of-turn bludgeoning damage during the player turn transition.
 
+Thrown Weapon Fighting is resolved through the same attack path as other weapon attacks. A carried thrown weapon named by the player can be drawn as part of the thrown attack when a hand is free, the ranged thrown attack receives the style's damage bonus on a hit, and tracked thrown weapons move into battlefield recovery state until searched for after combat.
+
 ## Extension Rule
 
 When adding a mechanic:

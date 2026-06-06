@@ -12,7 +12,7 @@ test('builds a machine-readable coverage matrix for all exposed content catalogs
   const content = getContentBundle();
   const matrix = buildRulesCoverageMatrix({ content });
 
-  assert.equal(matrix.version, '4C.6-H29');
+  assert.equal(matrix.version, '4C.6-H30');
   assert.equal(matrix.sections.classes.entries.length, content.classes.length);
   assert.equal(matrix.sections.species.entries.length, content.species.length);
   assert.equal(matrix.sections.origin_feats.entries.length, content.feats.length);
@@ -61,6 +61,7 @@ test('matrix flags the foundation gaps that block leveling work', () => {
   assert.equal(resourceful.status, STATUS.IMPLEMENTED);
   assert.equal(halflingLuck.status, STATUS.IMPLEMENTED);
   assert.equal(relentlessEndurance.status, STATUS.IMPLEMENTED);
+  assert.equal(fightingStyles.get('thrown_weapon_fighting').status, STATUS.IMPLEMENTED);
   assert.equal(fightingStyles.get('unarmed_fighting').status, STATUS.IMPLEMENTED);
   assert.equal(classes.get('paladin').status, STATUS.PARTIAL);
   assert.equal(classes.get('wizard').status, STATUS.PARTIAL);

@@ -114,7 +114,9 @@ const {
 const {
   checkAmmunitionAttack,
   recoverSpentAmmunition,
+  recoverSpentThrownWeapons,
   spendAmmunitionForAttack,
+  spendThrownWeaponForAttack,
 } = require('./ammunitionEngine');
 const {
   applyGiantAncestryOnHit,
@@ -850,7 +852,7 @@ function getTimePassageIntent(text) {
 }
 
 function wantsAmmunitionRecovery(text) {
-  return /\b(?:recover|retrieve|collect|gather|search(?:ing)?(?: the battlefield)? for|pick up)\b.*\b(?:ammunition|arrows?|bolts?|needles?|sling bullets?)\b/i
+  return /\b(?:recover|retrieve|collect|gather|search(?:ing)?(?: the battlefield)? for|pick up)\b.*\b(?:ammunition|arrows?|bolts?|needles?|sling bullets?|thrown weapons?|daggers?|handaxes?|javelins?|light hammers?|spears?|darts?|tridents?)\b/i
     .test(String(text || ''));
 }
 
@@ -864,14 +866,25 @@ function resolveAmmunitionRecovery({ worldState }) {
       reply: recovered.reply,
     };
   }
+  const recoveredThrown = recoverSpentThrownWeapons(recovered.worldState);
+  if (!recoveredThrown.ok) {
+    return {
+      handled: true,
+      logType: 'referee_ammunition_recovery_blocked',
+      worldState,
+      reply: recoveredThrown.reply,
+    };
+  }
   const timed = resolveTimePassage({
     timeIntent: { minutes: 1, label: '1 minute' },
-    worldState: recovered.worldState,
+    worldState: recoveredThrown.worldState,
   });
   const timeNote = timed.reply.replace(/^You let \*\*1 minute\*\* pass\. /, '');
-  const summary = recovered.recoveries.length
-    ? recovered.recoveries.map((entry) => `${entry.quantity} ${formatRecoveredAmmunition(entry.id, entry.quantity)}`).join(', ')
-    : 'no usable ammunition';
+  const recoveredItems = [
+    ...recovered.recoveries.map((entry) => `${entry.quantity} ${formatRecoveredAmmunition(entry.id, entry.quantity)}`),
+    ...recoveredThrown.recoveries.map((entry) => `${entry.quantity} ${formatRecoveredAmmunition(entry.id, entry.quantity)}`),
+  ];
+  const summary = recoveredItems.length ? recoveredItems.join(', ') : 'no usable ammunition or thrown weapons';
   return {
     handled: true,
     logType: 'referee_ammunition_recovery',
@@ -1291,7 +1304,7 @@ function resolveCombatAction({ message, intent, worldState, characterSheet, curr
     return { handled: true, logType: 'referee_combat_end_turn', ...result };
   }
 
-  if (isCombatStarter(message) || /\battack\b/i.test(message) || isUnarmedAttackIntent(message)) {
+  if (isCombatStarter(message) || /\battack\b/i.test(message) || isUnarmedAttackIntent(message) || isThrownWeaponAttackIntent(message, characterSheet)) {
     return resolvePlayerAttack({ message, worldState, characterSheet, rollDie });
   }
 
@@ -1521,7 +1534,20 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
     characterSheet,
     actionResource: 'action',
   });
-  combat = cloneCombatState(ammunitionSpent.worldState.combat_state);
+  const thrownWeaponSpent = spendThrownWeaponForAttack({
+    attack: preparedAttack.attack,
+    worldState: ammunitionSpent.worldState,
+    characterSheet,
+  });
+  if (!thrownWeaponSpent.ok) {
+    return {
+      handled: true,
+      logType: 'referee_weapon_attack_unavailable',
+      worldState,
+      reply: thrownWeaponSpent.reply,
+    };
+  }
+  combat = cloneCombatState(thrownWeaponSpent.worldState.combat_state);
   player = combat.combatants.find((combatant) => combatant.is_player);
   target = findCombatTarget(combat, message) || getLivingEnemy(combat);
   const attack = applyFightingStyleToAttack({
@@ -1540,7 +1566,7 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
     spatialMode: preparedAttack.spatialMode,
   });
   const helped = applyHelpToAttack({
-    worldState: ammunitionSpent.worldState,
+    worldState: thrownWeaponSpent.worldState,
     combat,
     attacker: player,
     target,
@@ -1580,7 +1606,9 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
   const lines = [
     `You attack ${target.name} with ${attack.name}. Attack roll: ${attackRoll.rollText} vs AC ${target.ac}.`,
     ...ammunitionSpent.lines,
+    ...thrownWeaponSpent.lines,
   ];
+  if (attack.drawnByThrownWeaponFighting) lines.push(`**Thrown Weapon Fighting:** you draw ${attack.name} as part of the thrown attack.`);
   if (visionOptions.note) lines.push(visionOptions.note);
   if (advantageMode) lines.push(`Attack roll has ${advantageMode} from ${formatList(lucky.sources)}.`);
   if (activeAttackBonuses.length) lines.push(`Active attack bonus: ${activeAttackBonuses.map((bonus) => `${bonus.label} ${formatSigned(bonus.value)}`).join(', ')}.`);
@@ -1827,8 +1855,21 @@ function resolveExtraWeaponAttackRoll({
       worldState,
     };
   }
+  const thrownWeaponSpent = spendThrownWeaponForAttack({
+    attack: preparedAttack.attack,
+    worldState: ammunitionSpent.worldState,
+    characterSheet,
+  });
+  if (!thrownWeaponSpent.ok) {
+    return {
+      lines: [`**${resultLabel}:** ${thrownWeaponSpent.reply}`],
+      consumeEffectIds: [],
+      combat,
+      worldState,
+    };
+  }
   attack = preparedAttack.attack;
-  worldState = ammunitionSpent.worldState;
+  worldState = thrownWeaponSpent.worldState;
   combat = cloneCombatState(worldState.combat_state);
   player = combat.combatants.find((combatant) => combatant.is_player);
   target = findCombatTarget(combat, target.name) || target;
@@ -1877,7 +1918,9 @@ function resolveExtraWeaponAttackRoll({
   const lines = [
     `You make the ${attackLabel} against ${target.name} with ${attack.name}. Attack roll: ${attackRoll.rollText} vs AC ${target.ac}.`,
     ...ammunitionSpent.lines,
+    ...thrownWeaponSpent.lines,
   ];
+  if (attack.drawnByThrownWeaponFighting) lines.push(`**Thrown Weapon Fighting:** you draw ${attack.name} as part of the thrown attack.`);
   if (visionOptions.note) lines.push(visionOptions.note);
   if (advantageMode) lines.push(`${resultLabel} has ${advantageMode} from ${formatList(sources)}.`);
   if (activeAttackBonuses.length) lines.push(`Active attack bonus: ${activeAttackBonuses.map((bonus) => `${bonus.label} ${formatSigned(bonus.value)}`).join(', ')}.`);
@@ -2626,6 +2669,10 @@ function titleCase(value) {
   return String(value || '').replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+function normalizeId(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
 function normalizeTargetPhrase(value) {
   return String(value || '')
     .toLowerCase()
@@ -2639,9 +2686,29 @@ function getPrimaryAttack(characterSheet, message = '') {
   const unarmed = buildUnarmedAttack({ characterSheet, message });
   if (unarmed) return unarmed;
   const attackBreakdowns = characterSheet?.derived_stats?.attack_breakdowns || [];
-  const attack = attackBreakdowns.find((entry) => attackNameAppearsInMessage(entry, message))
+  const explicitAttack = attackBreakdowns.find((entry) => attackNameAppearsInMessage(entry, message));
+  const attack = explicitAttack
+    || getThrownWeaponFightingCarriedAttack(characterSheet, message, attackBreakdowns)
     || attackBreakdowns[0];
+  if (attack?.isWeapon && attack.attackBonus !== undefined) return attack;
   return buildAttackFromBreakdown(attack);
+}
+
+function getThrownWeaponFightingCarriedAttack(characterSheet = {}, message = '', attackBreakdowns = []) {
+  if (normalizeId(characterSheet.class_choices?.fighting_style) !== 'thrown_weapon_fighting') return null;
+  if (!wantsThrownWeaponUse(message)) return null;
+  const equippedIds = new Set(attackBreakdowns.map((entry) => normalizeId(entry.weapon_id || entry.weaponId)).filter(Boolean));
+  const carriedThrownWeapons = (characterSheet.inventory || [])
+    .filter((item) => item.type === 'weapon' && !equippedIds.has(normalizeId(item.id)))
+    .map((item) => getContentBundle().equipment.find((weapon) => weapon.id === item.id) || item)
+    .filter((weapon) => (weapon.properties || []).map(normalizeId).includes('thrown'));
+  const named = carriedThrownWeapons.find((weapon) => attackNameAppearsInMessage({
+    weapon_id: weapon.id,
+    name: weapon.name,
+  }, message));
+  const weapon = named || (carriedThrownWeapons.length === 1 ? carriedThrownWeapons[0] : null);
+  if (!weapon) return null;
+  return buildAttackFromWeapon(weapon, characterSheet, { drawnByThrownWeaponFighting: true });
 }
 
 function buildAttackFromBreakdown(attack = {}) {
@@ -2669,11 +2736,69 @@ function buildAttackFromBreakdown(attack = {}) {
   };
 }
 
+function buildAttackFromWeapon(weapon = {}, characterSheet = {}, options = {}) {
+  const ability = getWeaponAttackAbility(weapon, characterSheet);
+  const modifier = Number(characterSheet.abilities?.modifiers?.[ability] || 0);
+  const proficiency = Number(characterSheet.derived_stats?.proficiency_bonus || proficiencyBonus(characterSheet.identity?.level || characterSheet.derived_stats?.level || 1));
+  return {
+    name: weapon.name || 'weapon',
+    weaponId: weapon.id || null,
+    ability,
+    properties: weapon.properties || [],
+    weaponCategory: weapon.weapon_category || null,
+    attackKind: weapon.attack_kind || 'melee',
+    attackBonus: modifier + proficiency,
+    fightingStyleAttackBonus: 0,
+    damageFormula: buildDamageFormula(weapon.damage || '1d4', modifier),
+    damageType: weapon.damage_type || null,
+    mastery: weapon.mastery || null,
+    versatileDamage: weapon.versatile_damage || null,
+    ammunitionType: weapon.ammunition_type || null,
+    ammunitionBundleQuantity: getContentBundle().equipment.find((item) => item.id === weapon.ammunition_type)?.bundle_quantity || null,
+    range: weapon.range || null,
+    isWeapon: true,
+    ...options,
+  };
+}
+
 function attackNameAppearsInMessage(attack = {}, message = '') {
   const text = normalizeTargetPhrase(message);
   return [attack.weapon_id, attack.weaponId, attack.name]
     .filter(Boolean)
     .some((value) => text.includes(normalizeTargetPhrase(value)));
+}
+
+function getWeaponAttackAbility(weapon = {}, characterSheet = {}) {
+  if ((weapon.properties || []).map(normalizeId).includes('finesse')) {
+    const dex = Number(characterSheet.abilities?.modifiers?.dex || 0);
+    const str = Number(characterSheet.abilities?.modifiers?.str || 0);
+    return dex > str ? 'dex' : 'str';
+  }
+  return weapon.ability || 'str';
+}
+
+function buildDamageFormula(dice, modifier) {
+  const value = Number(modifier || 0);
+  if (value < 0) return `${dice} - ${Math.abs(value)}`;
+  return `${dice} + ${value}`;
+}
+
+function wantsThrownWeaponUse(message = '') {
+  return /\b(?:throw(?:s|ing)?|thrown|hurl(?:s|ing)?|toss(?:es|ing)?|fling(?:s|ing)?)\b/i.test(String(message || ''));
+}
+
+function isThrownWeaponAttackIntent(message = '', characterSheet = {}) {
+  if (!wantsThrownWeaponUse(message)) return false;
+  const sheetWeapons = [
+    ...(characterSheet.derived_stats?.attack_breakdowns || []).map((entry) => ({
+      weapon_id: entry.weapon_id || entry.weaponId,
+      name: entry.name,
+    })),
+    ...(characterSheet.inventory || [])
+      .filter((item) => item.type === 'weapon')
+      .map((item) => ({ weapon_id: item.id, name: item.name })),
+  ];
+  return sheetWeapons.some((weapon) => attackNameAppearsInMessage(weapon, message));
 }
 
 function getSneakAttackDamage({ characterSheet = {}, attack = {}, advantageMode = null, rollDie = defaultRollDie, crit = false } = {}) {

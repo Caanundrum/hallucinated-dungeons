@@ -103,6 +103,63 @@ function spendAmmunitionForAttack({
   };
 }
 
+function checkThrownWeaponAttack({
+  attack = {},
+  worldState = {},
+  characterSheet = {},
+} = {}) {
+  if (!isThrownWeaponAttack(attack)) return { ok: true };
+  if (attack.drawnByThrownWeaponFighting && !hasFreeHandToDraw({ attack, characterSheet })) {
+    return blocked(`${attack.name} can be drawn as part of Thrown Weapon Fighting, but you still need a free hand to throw it. Free a hand first; the weapon will wait, pointedly.`);
+  }
+  const thrownWeapon = getThrownWeaponEntry({ attack, worldState, characterSheet });
+  if (!thrownWeapon.tracked) return { ok: true };
+  if (thrownWeapon.remaining <= 0) {
+    return blocked(`You have no ${thrownWeapon.name} ready to throw. Recover one first or choose another attack.`);
+  }
+  return { ok: true, thrownWeapon };
+}
+
+function spendThrownWeaponForAttack({
+  attack = {},
+  worldState = {},
+  characterSheet = {},
+} = {}) {
+  const checked = checkThrownWeaponAttack({ attack, worldState, characterSheet });
+  if (!checked.ok || !isThrownWeaponAttack(attack) || !checked.thrownWeapon?.tracked) {
+    return {
+      ...checked,
+      worldState,
+      lines: [],
+    };
+  }
+
+  const thrownWeapon = checked.thrownWeapon;
+  const remaining = Math.max(0, thrownWeapon.remaining - 1);
+  return {
+    ok: true,
+    worldState: {
+      ...worldState,
+      player_stats: {
+        ...(worldState.player_stats || {}),
+        thrown_weapons: {
+          ...(worldState.player_stats?.thrown_weapons || {}),
+          [thrownWeapon.id]: {
+            id: thrownWeapon.id,
+            name: thrownWeapon.name,
+            remaining,
+          },
+        },
+        thrown_weapons_spent_since_recovery: {
+          ...(worldState.player_stats?.thrown_weapons_spent_since_recovery || {}),
+          [thrownWeapon.id]: Number(worldState.player_stats?.thrown_weapons_spent_since_recovery?.[thrownWeapon.id] || 0) + 1,
+        },
+      },
+    },
+    lines: [`**Thrown weapon:** ${remaining} ${thrownWeaponLabel(thrownWeapon.name, remaining)} ready to throw remain.`],
+  };
+}
+
 function recoverSpentAmmunition(worldState = {}) {
   if (worldState.combat_state?.active) {
     return blocked('Combat is active. You cannot search the battlefield for ammunition while the battlefield is still arguing back.');
@@ -134,6 +191,37 @@ function recoverSpentAmmunition(worldState = {}) {
   };
 }
 
+function recoverSpentThrownWeapons(worldState = {}) {
+  if (worldState.combat_state?.active) {
+    return blocked('Combat is active. You cannot search the battlefield for thrown weapons while the battlefield is still offering fresh opinions.');
+  }
+  const spent = worldState.player_stats?.thrown_weapons_spent_since_recovery || {};
+  const recoveries = Object.entries(spent)
+    .map(([id, quantity]) => ({ id, quantity: Number(quantity || 0) }))
+    .filter((entry) => entry.quantity > 0);
+  const current = worldState.player_stats?.thrown_weapons || {};
+  const thrownWeapons = { ...current };
+  for (const recovery of recoveries) {
+    const existing = current[recovery.id] || { id: recovery.id, name: titleCase(recovery.id), remaining: 0 };
+    thrownWeapons[recovery.id] = {
+      ...existing,
+      remaining: Number(existing.remaining || 0) + recovery.quantity,
+    };
+  }
+  return {
+    ok: true,
+    worldState: {
+      ...worldState,
+      player_stats: {
+        ...(worldState.player_stats || {}),
+        thrown_weapons: thrownWeapons,
+        thrown_weapons_spent_since_recovery: {},
+      },
+    },
+    recoveries,
+  };
+}
+
 function getAmmunitionEntry({ attack = {}, worldState = {}, characterSheet = {} } = {}) {
   const id = attack.ammunitionType;
   const worldEntry = worldState.player_stats?.ammunition?.[id];
@@ -152,12 +240,52 @@ function getAmmunitionEntry({ attack = {}, worldState = {}, characterSheet = {} 
   };
 }
 
+function getThrownWeaponEntry({ attack = {}, worldState = {}, characterSheet = {} } = {}) {
+  const id = normalizeId(attack.weaponId);
+  const worldEntry = worldState.player_stats?.thrown_weapons?.[id];
+  if (worldEntry) {
+    return {
+      id,
+      name: worldEntry.name || attack.name || titleCase(id),
+      remaining: Number(worldEntry.remaining || 0),
+      tracked: true,
+    };
+  }
+  const inventoryEntry = (characterSheet.inventory || []).find((item) => normalizeId(item.id) === id && item.type === 'weapon');
+  if (!inventoryEntry) {
+    return {
+      id,
+      name: attack.name || titleCase(id),
+      remaining: Number.POSITIVE_INFINITY,
+      tracked: false,
+    };
+  }
+  return {
+    id,
+    name: inventoryEntry.name || attack.name || titleCase(id),
+    remaining: Number(inventoryEntry.quantity ?? 1),
+    tracked: true,
+  };
+}
+
 function hasFreeHandToLoad({ attack = {}, characterSheet = {} } = {}) {
   if (hasProperty(attack, 'two-handed')) return true;
   const weaponId = normalizeId(attack.weaponId);
   return [characterSheet.equipped?.main_hand, characterSheet.equipped?.off_hand]
     .filter(Boolean)
     .every((itemId) => normalizeId(itemId) === weaponId);
+}
+
+function hasFreeHandToDraw({ attack = {}, characterSheet = {} } = {}) {
+  const weaponId = normalizeId(attack.weaponId);
+  const hands = [characterSheet.equipped?.main_hand, characterSheet.equipped?.off_hand]
+    .filter(Boolean)
+    .map(normalizeId);
+  return hands.length < 2 || hands.includes(weaponId);
+}
+
+function isThrownWeaponAttack(attack = {}) {
+  return Boolean(attack.isThrownAttack || (hasProperty(attack, 'thrown') && attack.attackKind === 'ranged'));
 }
 
 function hasLoadingReceipt({ attack = {}, worldState = {}, actionResource = 'action' } = {}) {
@@ -167,6 +295,11 @@ function hasLoadingReceipt({ attack = {}, worldState = {}, actionResource = 'act
 
 function ammunitionLabel(value, quantity) {
   const name = String(value || 'ammunition');
+  return Number(quantity) === 1 && name.endsWith('s') ? name.slice(0, -1) : name;
+}
+
+function thrownWeaponLabel(value, quantity) {
+  const name = String(value || 'thrown weapon');
   return Number(quantity) === 1 && name.endsWith('s') ? name.slice(0, -1) : name;
 }
 
@@ -193,6 +326,9 @@ function titleCase(value) {
 module.exports = {
   buildStartingAmmunitionItems,
   checkAmmunitionAttack,
+  checkThrownWeaponAttack,
   recoverSpentAmmunition,
+  recoverSpentThrownWeapons,
   spendAmmunitionForAttack,
+  spendThrownWeaponForAttack,
 };

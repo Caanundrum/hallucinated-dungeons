@@ -621,6 +621,26 @@ test('drawing a weapon alone does not conjure combat', () => {
   assert.equal(result, null);
 });
 
+test('throw verbs without a known weapon do not become weapon attacks', () => {
+  const result = adjudicate({
+    message: 'I throw the cultist over the table.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', initiative: 18, hp: 14, max_hp: 14, ac: 16, is_player: true },
+          { name: 'Cultist', initiative: 8, hp: 20, max_hp: 20, ac: 10, is_player: false },
+        ],
+      },
+    }),
+    characterSheet,
+  });
+
+  assert.equal(result.logType, 'referee_combat_action_needed');
+});
+
 test('keeps round 1 when enemies beat player initiative and act first', () => {
   const result = adjudicate({
     message: '[ROLL REQUEST: roll_init]',
@@ -2631,6 +2651,129 @@ test('referee routes a declared javelin throw through ranged long-range disadvan
   assert.match(result.reply, /Attack roll: 9 \(natural 4; 18\/4 with disadvantage, using 4\+5=9\)/);
 });
 
+test('Thrown Weapon Fighting can draw and throw a carried weapon from inventory', () => {
+  const result = adjudicate({
+    message: 'I throw my handaxe at the Cultist.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', initiative: 18, hp: 14, max_hp: 14, ac: 16, is_player: true },
+          { name: 'Cultist', initiative: 8, hp: 20, max_hp: 20, ac: 10, is_player: false, attack: { name: 'dagger', attack_bonus: 2, damage_formula: '1d4+1' } },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      identity: { name: 'Ari', class: 'fighter', class_name: 'Fighter', level: 1 },
+      abilities: { modifiers: { str: 3, dex: 1 } },
+      class_choices: { fighting_style: 'thrown_weapon_fighting' },
+      equipped: { main_hand: 'longsword', off_hand: null },
+      inventory: [
+        { id: 'longsword', name: 'Longsword', type: 'weapon', quantity: 1 },
+        { id: 'handaxe', name: 'Handaxe', type: 'weapon', quantity: 1 },
+      ],
+      derived_stats: {
+        ...characterSheet.derived_stats,
+        proficiency_bonus: 2,
+        attack_breakdowns: [
+          { weapon_id: 'longsword', name: 'Longsword', ability: 'str', attack_total: 5, damage_formula: '1d8 + 3' },
+        ],
+      },
+    },
+    rollDie: sequenceRolls([10, 4]),
+  });
+  const cultist = result.worldState.combat_state.combatants.find((entry) => entry.name === 'Cultist');
+
+  assert.equal(cultist.hp, 11);
+  assert.equal(result.worldState.player_stats.thrown_weapons.handaxe.remaining, 0);
+  assert.equal(result.worldState.player_stats.thrown_weapons_spent_since_recovery.handaxe, 1);
+  assert.match(result.reply, /Thrown Weapon Fighting.*draw Handaxe/);
+  assert.match(result.reply, /Thrown Weapon Fighting \+2/);
+});
+
+test('tracked thrown weapons cannot be thrown again until recovered', () => {
+  const result = adjudicate({
+    message: 'I throw my handaxe at the Cultist.',
+    worldState: worldState({
+      player_stats: {
+        hp: 12,
+        max_hp: 12,
+        armor_class: 16,
+        thrown_weapons: { handaxe: { id: 'handaxe', name: 'Handaxe', remaining: 0 } },
+        thrown_weapons_spent_since_recovery: { handaxe: 1 },
+      },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', initiative: 18, hp: 14, max_hp: 14, ac: 16, is_player: true },
+          { name: 'Cultist', initiative: 8, hp: 20, max_hp: 20, ac: 10, is_player: false },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      class_choices: { fighting_style: 'thrown_weapon_fighting' },
+      equipped: { main_hand: 'longsword', off_hand: null },
+      inventory: [
+        { id: 'longsword', name: 'Longsword', type: 'weapon', quantity: 1 },
+        { id: 'handaxe', name: 'Handaxe', type: 'weapon', quantity: 1 },
+      ],
+      derived_stats: {
+        ...characterSheet.derived_stats,
+        proficiency_bonus: 2,
+        attack_breakdowns: [
+          { weapon_id: 'longsword', name: 'Longsword', ability: 'str', attack_total: 5, damage_formula: '1d8 + 3' },
+        ],
+      },
+    },
+  });
+
+  assert.equal(result.logType, 'referee_weapon_attack_unavailable');
+  assert.equal(result.worldState.combat_state.turn_resources, undefined);
+  assert.match(result.reply, /no Handaxe ready to throw/);
+});
+
+test('Thrown Weapon Fighting cannot draw a carried weapon when both hands are occupied', () => {
+  const result = adjudicate({
+    message: 'I throw my handaxe at the Cultist.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', initiative: 18, hp: 14, max_hp: 14, ac: 18, is_player: true },
+          { name: 'Cultist', initiative: 8, hp: 20, max_hp: 20, ac: 10, is_player: false },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      class_choices: { fighting_style: 'thrown_weapon_fighting' },
+      equipped: { main_hand: 'longsword', off_hand: 'shield' },
+      inventory: [
+        { id: 'longsword', name: 'Longsword', type: 'weapon', quantity: 1 },
+        { id: 'shield', name: 'Shield', type: 'shield', quantity: 1 },
+        { id: 'handaxe', name: 'Handaxe', type: 'weapon', quantity: 1 },
+      ],
+      derived_stats: {
+        ...characterSheet.derived_stats,
+        attack_breakdowns: [
+          { weapon_id: 'longsword', name: 'Longsword', ability: 'str', attack_total: 5, damage_formula: '1d8 + 3' },
+        ],
+      },
+    },
+  });
+
+  assert.equal(result.logType, 'referee_weapon_attack_unavailable');
+  assert.match(result.reply, /free hand/);
+});
+
 test('referee spends ammunition when a ranged weapon attack misses', () => {
   const result = adjudicate({
     message: 'Attack the Cultist with my longbow.',
@@ -2727,6 +2870,26 @@ test('referee recovers half of spent ammunition after a one-minute battlefield s
   assert.deepEqual(result.worldState.active_effects, []);
   assert.match(result.reply, /recover 3 arrows/);
   assert.match(result.reply, /Expired effects: Guidance/);
+});
+
+test('referee recovers tracked thrown weapons after a one-minute battlefield search', () => {
+  const result = adjudicate({
+    message: 'I spend 1 minute searching the battlefield for my handaxe.',
+    worldState: worldState({
+      player_stats: {
+        hp: 12,
+        max_hp: 12,
+        armor_class: 16,
+        thrown_weapons: { handaxe: { id: 'handaxe', name: 'Handaxe', remaining: 0 } },
+        thrown_weapons_spent_since_recovery: { handaxe: 1 },
+      },
+    }),
+    characterSheet,
+  });
+
+  assert.equal(result.worldState.player_stats.thrown_weapons.handaxe.remaining, 1);
+  assert.equal(result.worldState.time_state.elapsed_minutes, 1);
+  assert.match(result.reply, /recover 1 handaxe/);
 });
 
 test('blocked Light ammunition follow-up leaves the Bonus Action available', () => {

@@ -8,8 +8,11 @@ const assert = require('node:assert/strict');
 const {
   buildStartingAmmunitionItems,
   checkAmmunitionAttack,
+  checkThrownWeaponAttack,
   recoverSpentAmmunition,
+  recoverSpentThrownWeapons,
   spendAmmunitionForAttack,
+  spendThrownWeaponForAttack,
 } = require('../src/ammunitionEngine');
 const { getContentBundle } = require('../src/contentData');
 
@@ -31,6 +34,17 @@ function handCrossbow(overrides = {}) {
     properties: ['ammunition', 'light', 'loading'],
     ammunitionType: 'bolts',
     ammunitionBundleQuantity: 20,
+    ...overrides,
+  };
+}
+
+function javelin(overrides = {}) {
+  return {
+    name: 'Javelin',
+    weaponId: 'javelin',
+    attackKind: 'ranged',
+    properties: ['thrown'],
+    isThrownAttack: true,
     ...overrides,
   };
 }
@@ -100,4 +114,32 @@ test('battlefield search recovers half of expended ammunition rounded down', () 
   assert.equal(recovered.ok, true);
   assert.equal(recovered.worldState.player_stats.ammunition.arrows.remaining, 16);
   assert.deepEqual(recovered.worldState.player_stats.ammunition_spent_since_recovery, {});
+});
+
+test('tracked thrown weapons are spent and recovered after battlefield search', () => {
+  const spent = spendThrownWeaponForAttack({
+    attack: javelin(),
+    worldState: { player_stats: {} },
+    characterSheet: { inventory: [{ id: 'javelin', name: 'Javelin', type: 'weapon', quantity: 2 }] },
+  });
+  const recovered = recoverSpentThrownWeapons(spent.worldState);
+
+  assert.equal(spent.ok, true);
+  assert.equal(spent.worldState.player_stats.thrown_weapons.javelin.remaining, 1);
+  assert.equal(spent.worldState.player_stats.thrown_weapons_spent_since_recovery.javelin, 1);
+  assert.equal(recovered.worldState.player_stats.thrown_weapons.javelin.remaining, 2);
+  assert.deepEqual(recovered.worldState.player_stats.thrown_weapons_spent_since_recovery, {});
+});
+
+test('drawn thrown weapons still require a free hand', () => {
+  const result = checkThrownWeaponAttack({
+    attack: javelin({ drawnByThrownWeaponFighting: true }),
+    characterSheet: {
+      equipped: { main_hand: 'longsword', off_hand: 'shield' },
+      inventory: [{ id: 'javelin', name: 'Javelin', type: 'weapon', quantity: 1 }],
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.reply, /free hand/);
 });

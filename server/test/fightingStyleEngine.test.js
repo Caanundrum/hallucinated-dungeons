@@ -116,7 +116,19 @@ test('Thrown Weapon Fighting adds damage to a declared thrown attack', () => {
     attack: attack({ weaponId: 'javelin', properties: ['thrown'] }),
     message: 'Throw my javelin.',
   });
+  const melee = getFightingStyleDamageBonus({
+    characterSheet: sheet('thrown_weapon_fighting'),
+    attack: attack({ weaponId: 'javelin', properties: ['thrown'] }),
+    message: 'Stab with my javelin.',
+  });
+  const ranged = getFightingStyleDamageBonus({
+    characterSheet: sheet('thrown_weapon_fighting'),
+    attack: attack({ weaponId: 'dart', attackKind: 'ranged', properties: ['thrown'] }),
+  });
+
   assert.equal(thrown.total, 2);
+  assert.equal(melee.total, 0);
+  assert.equal(ranged.total, 2);
 });
 
 test('Unarmed Fighting builds the 2024 Strength-based unarmed strike', () => {
