@@ -4,16 +4,14 @@ const { resolveObjectInteraction } = require('./objectInteractionEngine');
 function resolvePreNarration({ message, worldState }) {
   const intent = resolveIntent(message, { worldState });
   if (intent.isRollResult) {
-    const rollFrame = [
-      '[MECHANICS: This is a fallback/manual dice result from the client. Server-owned pending rolls use [ROLL REQUEST] and are resolved before narration. If no deterministic pending roll exists, you may use this fallback result for the roll the Game Master just requested; preserve natural 1/20 text when present. Apply 2024 RAW: natural 20/1 automatically matters for attack rolls, and death saves have their special natural 20/1 rules; ordinary ability checks and saving throws use the total against the DC unless a specific rule says otherwise.]',
-      buildCombatFrame(intent, worldState, { resolvingRoll: true }),
-    ].filter(Boolean).join('\n');
-
     return {
       intent,
-      handled: false,
+      handled: true,
+      response: 'There is no server-owned pending roll to resolve. Declare an action first, then use the Roll button when the referee asks for dice. Typed roll results do not count; the dice are dramatic, not gullible.',
+      logType: 'manual_roll_rejected',
+      worldState,
       skipSpatialGuard: true,
-      narrativeFrame: rollFrame,
+      narrativeFrame: '',
     };
   }
 

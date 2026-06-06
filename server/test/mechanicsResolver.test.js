@@ -26,32 +26,32 @@ test('leaves skill-check gating to referee core', () => {
   assert.equal(result.narrativeFrame, '');
 });
 
-test('passes fallback zero roll totals through with a manual roll frame', () => {
+test('rejects manual roll totals when no server roll is pending', () => {
   const result = resolvePreNarration({
     message: '[ROLL RESULT: 0] I rolled a 0 (Persuasion Check: natural 1; 1d20 - 1 = 0; CHA only = -1)',
     worldState: {},
   });
 
-  assert.equal(result.handled, false);
+  assert.equal(result.handled, true);
+  assert.equal(result.logType, 'manual_roll_rejected');
+  assert.equal(result.worldState.current_location, undefined);
   assert.equal(result.skipSpatialGuard, true);
-  assert.match(result.narrativeFrame, /fallback\/manual dice result/);
-  assert.match(result.narrativeFrame, /Server-owned pending rolls use \[ROLL REQUEST\]/);
-  assert.match(result.narrativeFrame, /natural 20\/1 automatically matters for attack rolls/);
-  assert.match(result.narrativeFrame, /ordinary ability checks and saving throws use the total/);
+  assert.equal(result.narrativeFrame, '');
+  assert.match(result.response, /server-owned pending roll/);
+  assert.match(result.response, /Typed roll results do not count/);
 });
 
-test('keeps combat frame attached to fallback roll results during combat', () => {
+test('rejects manual roll totals during combat when no server roll is pending', () => {
   const result = resolvePreNarration({
     message: '[ROLL RESULT: 14] I rolled a 14 (Insight Check: 1d20 + 2 = 14)',
     worldState: { combat_state: { active: true, round: 1 } },
   });
 
-  assert.equal(result.handled, false);
+  assert.equal(result.handled, true);
+  assert.equal(result.logType, 'manual_roll_rejected');
   assert.equal(result.skipSpatialGuard, true);
-  assert.match(result.narrativeFrame, /fallback\/manual dice result/);
-  assert.match(result.narrativeFrame, /Combat is active/);
-  assert.match(result.narrativeFrame, /continue initiative instead of switching to free exploration/);
-  assert.match(result.narrativeFrame, /end only at the start of the next player character turn/);
+  assert.deepEqual(result.worldState.combat_state, { active: true, round: 1 });
+  assert.match(result.response, /Declare an action first/);
 });
 
 test('passes combat actions through with a mechanics frame', () => {
