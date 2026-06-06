@@ -120,12 +120,18 @@ test('Thrown Weapon Fighting adds damage to a declared thrown attack', () => {
 });
 
 test('Unarmed Fighting builds the 2024 Strength-based unarmed strike', () => {
-  const unarmed = buildUnarmedFightingAttack({
+  const occupiedHands = buildUnarmedFightingAttack({
     characterSheet: sheet('unarmed_fighting'),
     proficiency: 2,
   });
-  assert.equal(unarmed.attackBonus, 5);
-  assert.equal(unarmed.damageFormula, '1d6+3');
+  const freeHands = buildUnarmedFightingAttack({
+    characterSheet: sheet('unarmed_fighting', { equipped: { main_hand: null, off_hand: null } }),
+    proficiency: 2,
+  });
+
+  assert.equal(occupiedHands.attackBonus, 5);
+  assert.equal(occupiedHands.damageFormula, '1d6+3');
+  assert.equal(freeHands.damageFormula, '1d8+3');
 });
 
 test('Blind Fighting exposes 10-foot blindsight and ignores nearby sight penalties', () => {

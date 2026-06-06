@@ -126,6 +126,7 @@ test('Unarmed Fighting style routes declared punches through its d6 strike', () 
   const unarmed = buildUnarmedAttack({
     characterSheet: sheet(null, {
       class_choices: { fighting_style: 'unarmed_fighting' },
+      equipped: { off_hand: 'shield' },
     }),
     message: 'Punch the cultist.',
   });

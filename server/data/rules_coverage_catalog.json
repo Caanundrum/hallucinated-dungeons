@@ -1,5 +1,5 @@
 {
-  "version": "4C.6-H28",
+  "version": "4C.6-H29",
   "status_definitions": {
     "implemented": "Exposed and mechanically enforced for the current supported level/scope.",
     "partial": "Exposed and partially enforced, but missing at least one meaningful rules interaction.",
@@ -173,7 +173,7 @@
     "protection": "deferred",
     "thrown_weapon_fighting": "partial",
     "two_weapon_fighting": "implemented",
-    "unarmed_fighting": "partial"
+    "unarmed_fighting": "implemented"
   },
   "equipment_rules": {
     "armor_formula": "implemented",

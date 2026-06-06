@@ -1,4 +1,9 @@
 const { getCombatantDistanceFeet } = require('./combatPositionEngine');
+const {
+  applyDamage,
+  formatDamageAdjustment,
+  rollDamageFormula,
+} = require('./damageHealingEngine');
 
 function getFightingStyle(characterSheet = {}) {
   return normalizeId(characterSheet.class_choices?.fighting_style);
@@ -84,15 +89,46 @@ function applyFightingStyleToAttack({ characterSheet = {}, attack = {}, message 
 function buildUnarmedFightingAttack({ characterSheet = {}, proficiency = 0 } = {}) {
   if (getFightingStyle(characterSheet) !== 'unarmed_fighting') return null;
   const modifier = Number(characterSheet.abilities?.modifiers?.str || 0);
+  const die = hasHeldWeaponOrShield(characterSheet) ? '1d6' : '1d8';
   return {
     name: 'Unarmed Strike',
     ability: 'str',
     attackBonus: modifier + Number(proficiency || 0),
-    damageFormula: `1d6+${modifier}`,
+    damageFormula: `${die}+${modifier}`,
     isWeapon: false,
     isUnarmed: true,
     properties: [],
     weaponCategory: null,
+  };
+}
+
+function applyUnarmedFightingStartTurnDamage({ worldState = {}, characterSheet = {}, rollDie = defaultRollDie } = {}) {
+  if (getFightingStyle(characterSheet) !== 'unarmed_fighting' || !worldState.combat_state?.active) {
+    return { worldState, lines: [] };
+  }
+
+  const combat = clone(worldState.combat_state);
+  const target = (combat.combatants || []).find((combatant) => (
+    !combatant.is_player
+    && Number(combatant.hp || 0) > 0
+    && hasCondition(combatant, 'grappled')
+    && isGrappledByPlayer(combatant, combat, characterSheet, worldState)
+  ));
+  if (!target) return { worldState, lines: [] };
+
+  const damage = rollDamageFormula('1d4', rollDie);
+  const applied = applyDamage({ target, amount: damage.total, damageType: 'bludgeoning', source: 'Unarmed Fighting' });
+  Object.assign(target, applied.target);
+
+  return {
+    worldState: {
+      ...worldState,
+      combat_state: combat,
+    },
+    lines: [
+      `**Unarmed Fighting:** ${target.name} takes ${applied.amount} bludgeoning damage${formatDamageAdjustment(applied.adjustment)} at the start of your turn because you have them grappled. ${target.name}: (${applied.beforeHp} -> ${applied.afterHp} HP).`,
+      Number(target.hp || 0) <= 0 ? `${target.name} falls.` : '',
+    ].filter(Boolean),
   };
 }
 
@@ -105,6 +141,11 @@ function isDuelingAttack({ characterSheet = {}, attack = {}, message = '' } = {}
 function isThrownAttack(attack = {}, message = '') {
   if (!(attack.properties || []).includes('thrown')) return false;
   return attack.attackKind === 'ranged' || /\b(?:throw(?:s|ing)?|thrown|hurl(?:s|ing)?|toss(?:es|ing)?|fling(?:s|ing)?)\b/i.test(String(message || ''));
+}
+
+function hasHeldWeaponOrShield(characterSheet = {}) {
+  const equipped = characterSheet.equipped || {};
+  return Boolean(equipped.main_hand || equipped.off_hand);
 }
 
 function isHeldWithTwoHands(attack = {}, message = '', characterSheet = {}) {
@@ -139,11 +180,29 @@ function normalizeConditionSet(conditions = []) {
   return new Set((conditions || []).map(normalizeId));
 }
 
+function hasCondition(combatant = {}, condition) {
+  return normalizeConditionSet(combatant.conditions).has(normalizeId(condition));
+}
+
+function isGrappledByPlayer(combatant = {}, combat = {}, characterSheet = {}, worldState = {}) {
+  const explicit = normalizeId(combatant.grappled_by);
+  if (explicit === 'player' || explicit === 'pc') return true;
+  const player = (combat.combatants || []).find((entry) => entry.is_player) || {};
+  const playerId = worldState.player_stats?.character_id || characterSheet.derived_stats?.character_id || player.character_id;
+  if (playerId && combatant.grappled_by_character_id === playerId) return true;
+  return !explicit && !combatant.grappled_by_character_id;
+}
+
+function clone(value) {
+  return JSON.parse(JSON.stringify(value || {}));
+}
+
 function normalizeId(value) {
   return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 }
 
 module.exports = {
+  applyUnarmedFightingStartTurnDamage,
   applyFightingStyleToAttack,
   buildUnarmedFightingAttack,
   getBlindFightingAttackOptions,

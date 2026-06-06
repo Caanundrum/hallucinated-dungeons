@@ -121,6 +121,8 @@ Automatic d20 rerolls are attached to every server-owned player d20 test through
 
 Fatal player damage safeguards are centralized in `playerDamageEngine` before death-save state is entered. Orc Relentless Endurance now applies to deterministic player damage through that shared path, spends its Long Rest resource, and does not fire when massive damage would kill the character outright.
 
+Unarmed Fighting is resolved as a Fighting Style, not a special phrasing trick. Its Unarmed Strike die is d8 when neither hand holds a weapon or shield, d6 otherwise, and a player-grappled creature takes the style's start-of-turn bludgeoning damage during the player turn transition.
+
 ## Extension Rule
 
 When adding a mechanic:

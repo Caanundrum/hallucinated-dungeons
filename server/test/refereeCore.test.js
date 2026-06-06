@@ -1374,8 +1374,49 @@ test('grapple is handled as an Attack action option and tracks escape DC', () =>
   assert.equal(result.handled, true);
   assert.equal(cultist.conditions.includes('grappled'), true);
   assert.equal(cultist.grapple_escape_dc, 13);
+  assert.equal(cultist.grappled_by, 'player');
   assert.match(result.reply, /Grapple/);
   assert.match(result.reply, /DEX save: 4\+1 = 5 vs DC 13/);
+});
+
+test('Unarmed Fighting damages one player-grappled creature at the start of the next player turn', () => {
+  const fighter = {
+    ...characterSheet,
+    identity: { name: 'Ari', class: 'fighter', level: 1 },
+    class_choices: { fighting_style: 'unarmed_fighting' },
+    abilities: { modifiers: { str: 3, dex: 1 } },
+    derived_stats: {
+      ...characterSheet.derived_stats,
+      proficiency_bonus: 2,
+    },
+  };
+  const grappled = adjudicate({
+    message: 'I grapple the cultist.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', hp: 12, max_hp: 12, ac: 20, is_player: true },
+          { name: 'Cultist', hp: 3, max_hp: 3, ac: 12, is_player: false, saves: { str: 0, dex: 0 }, attack: { name: 'dagger', attack_bonus: 0, damage_formula: '1d4' } },
+        ],
+      },
+    }),
+    characterSheet: fighter,
+    rollDie: sequenceRolls([4]),
+  });
+  const result = adjudicate({
+    message: 'End my turn.',
+    worldState: grappled.worldState,
+    characterSheet: fighter,
+    rollDie: sequenceRolls([1, 3]),
+  });
+
+  assert.equal(result.worldState.combat_state, null);
+  assert.match(result.reply, /Unarmed Fighting/);
+  assert.match(result.reply, /Cultist: \(3 -> 0 HP\)/);
+  assert.match(result.reply, /Combat ends/);
 });
 
 test('prompts death saves at 0 HP and applies natural 1 as two failures', () => {

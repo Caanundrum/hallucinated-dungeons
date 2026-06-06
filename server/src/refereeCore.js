@@ -99,6 +99,7 @@ const {
 } = require('./weaponRulesEngine');
 const {
   applyFightingStyleToAttack,
+  applyUnarmedFightingStartTurnDamage,
   getBlindFightingAttackOptions,
   getFightingStyleDamageBonus,
   getRuntimeArmorClass,
@@ -2008,6 +2009,9 @@ function resolveCombatManeuver({ maneuver, message, worldState, characterSheet, 
   } else if (maneuver.type === 'grapple') {
     target.conditions = addCondition(target.conditions, 'grappled');
     target.grapple_escape_dc = dc;
+    target.grappled_by = 'player';
+    target.grappled_by_name = player.name || characterSheet.identity?.name || 'You';
+    target.grappled_by_character_id = player.character_id || worldState.player_stats?.character_id || characterSheet.derived_stats?.character_id || null;
     lines.push(`${target.name} is **grappled**. Escape DC ${dc}.`);
   } else if (maneuver.mode === 'prone') {
     target.conditions = addCondition(target.conditions, 'prone');
@@ -2097,6 +2101,7 @@ function advanceEnemyTurns({ worldState, characterSheet, rollDie = defaultRollDi
     creatureTurns,
     worldState: playerTurnEnded,
     characterSheet,
+    rollDie,
     playerTurnNote,
   });
 }
@@ -2133,6 +2138,7 @@ function resolvePendingReaction({ message, worldState, characterSheet, rollDie =
     creatureTurns,
     worldState: reaction.worldState,
     characterSheet,
+    rollDie,
     playerTurnNote: reaction.reply,
   });
   return {
@@ -2151,7 +2157,7 @@ function failedReactionResume({ worldState }) {
   };
 }
 
-function finishCreatureTurns({ creatureTurns, worldState, characterSheet, playerTurnNote }) {
+function finishCreatureTurns({ creatureTurns, worldState, characterSheet, rollDie = defaultRollDie, playerTurnNote }) {
   const player = creatureTurns.player;
   const lines = [playerTurnNote, ...creatureTurns.lines].filter(Boolean);
   if (creatureTurns.paused) {
@@ -2197,6 +2203,12 @@ function finishCreatureTurns({ creatureTurns, worldState, characterSheet, player
   const ticked = tickActiveEffects(nextState, { rounds: creatureTurns.roundsElapsed });
   nextState = applyStartOfTurnEffects(beginPlayerTurn(ticked.worldState, characterSheet), characterSheet);
 
+  if (player.hp > 0) {
+    const unarmedStart = applyUnarmedFightingStartTurnDamage({ worldState: nextState, characterSheet, rollDie });
+    nextState = unarmedStart.worldState;
+    lines.push(...unarmedStart.lines);
+  }
+
   if (player.hp <= 0) {
     const ended = endConcentration(nextState, characterSheet);
     nextState = ended.worldState;
@@ -2218,7 +2230,7 @@ function finishCreatureTurns({ creatureTurns, worldState, characterSheet, player
     }
   }
 
-  const combatEnded = !hasLivingEnemies(combat);
+  const combatEnded = !hasLivingEnemies(nextState.combat_state);
   if (combatEnded) {
     nextState = {
       ...nextState,
@@ -2233,7 +2245,7 @@ function finishCreatureTurns({ creatureTurns, worldState, characterSheet, player
       ? '**Resolve the concentration save before taking your turn.**'
       : combatEnded
         ? ''
-        : `**Round ${combat.round} begins. It is your turn.**`;
+        : `**Round ${nextState.combat_state.round} begins. It is your turn.**`;
   if (ticked.expiredEffects.length > 0) {
     lines.push(`Expired effects: ${ticked.expiredEffects.map((effect) => effect.name || effect.id).join(', ')}.`);
   }
