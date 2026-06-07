@@ -80,6 +80,7 @@ const {
 const {
   applyDiscoveryCheckOutcome,
   buildDiscoveryPendingMetadata,
+  resolveKnownDiscoveryFollowup,
 } = require('./discoveryStateEngine');
 const {
   applyObjectChallengeOutcome,
@@ -216,6 +217,9 @@ function adjudicate({ message, worldState = {}, characterSheet = null, currentTu
   if (state.combat_state?.active) {
     return resolveCombatAction({ message: text, intent, worldState: state, characterSheet: sheet, currentTurn, rollDie });
   }
+
+  const knownDiscoveryFollowup = resolveKnownDiscoveryFollowup({ message: text, worldState: state });
+  if (knownDiscoveryFollowup) return knownDiscoveryFollowup;
 
   if (intent.check) {
     return promptCheck({ intent, worldState: state, characterSheet: sheet, currentTurn, inCombat: false });

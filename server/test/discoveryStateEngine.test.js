@@ -139,6 +139,37 @@ test('successful Investigation preserves explicit notice-board target and subjec
   assert.match(resolved.lines.join('\n'), /notice board now has a successful study result about missing road-workers/);
 });
 
+test('known discovery follow-up reuses success without prompting another roll', () => {
+  const state = worldState({
+    discovery_state: {
+      searches: {},
+      studies: {
+        notice_board: {
+          target: 'notice board',
+          target_type: 'object',
+          subject: 'missing road-workers',
+          best_outcome: 'success',
+          discovered: true,
+          attempts: 1,
+        },
+      },
+    },
+  });
+  const result = adjudicate({
+    message: 'Read notice details.',
+    worldState: state,
+    characterSheet,
+    currentTurn: 14,
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.logType, 'discovery_followup');
+  assert.equal(result.worldState.pending_roll, null);
+  assert.equal(result.worldState.discovery_state.studies.notice_details, undefined);
+  assert.match(result.reply, /notice board already has a successful study result about missing road-workers/);
+  assert.match(result.reply, /No new roll is needed/);
+});
+
 test('Insight study records the targeted NPC state after the roll resolves', () => {
   const prompt = adjudicate({
     message: "I study the older gate guard's face for a hidden motive.",

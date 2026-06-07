@@ -32,6 +32,11 @@ const {
   isEquipmentEffect,
 } = require('./equipmentEffectEngine');
 const {
+  formatRulesActiveEffects,
+  formatRulesEquipmentEffects,
+  summarizeCharacterSheetForRules,
+} = require('./rulesSheetSummary');
+const {
   spendTurnResource,
   getSpellActionResource,
 } = require('./actionEconomy');
@@ -314,121 +319,6 @@ function buildCharacterFlavorCue(className, details = {}) {
   const base = cues[classKey] || 'consistent with their class, appearance, personality, and backstory';
   const detailsText = [details.appearance, details.personality, details.backstory].filter(Boolean).join(' ');
   return detailsText ? `${base}. Character details: ${detailsText}` : base;
-}
-
-function summarizeCharacterSheetForRules(characterSheet) {
-  if (!characterSheet) return '';
-  const identity = characterSheet.identity || {};
-  const abilities = characterSheet.abilities || {};
-  const derived = characterSheet.derived_stats || {};
-  const details = characterSheet.character_details || {};
-  const spellcasting = characterSheet.spellcasting || {};
-  const attacks = derived.attack_breakdowns || [];
-  const skills = derived.skill_modifiers || {};
-  const saves = derived.saving_throw_modifiers || {};
-  const features = characterSheet.features || [];
-  const inventory = characterSheet.inventory || [];
-  const tools = characterSheet.proficiencies?.tools || [];
-  const lines = [];
-
-  lines.push(`Name: ${identity.name || 'Unnamed'}`);
-  lines.push(`Build: ${identity.species_name || identity.species || 'Unknown species'} ${identity.class_name || identity.class || 'Unknown class'} level ${identity.level || derived.level || 1}`);
-  lines.push(`Core stats: HP ${derived.hp ?? '--'}/${derived.max_hp ?? '--'}, AC ${derived.armor_class ?? '--'}, Speed ${derived.speed ?? '--'} ft, Initiative ${fmtSigned(derived.initiative)}, Proficiency ${fmtSigned(derived.proficiency_bonus)}`);
-  if (abilities.final_scores) {
-    lines.push(`Ability scores: ${Object.entries(abilities.final_scores).map(([key, score]) => `${key.toUpperCase()} ${score} (${fmtSigned(abilities.modifiers?.[key])})`).join(', ')}`);
-  }
-  if (Object.keys(saves).length) {
-    lines.push(`Saving throws: ${Object.entries(saves).map(([key, save]) => `${key.toUpperCase()} ${fmtSigned(save.total)}${save.proficient ? ' proficient' : ''}`).join(', ')}`);
-  }
-  if (Object.keys(skills).length) {
-    lines.push(`Skills: ${Object.entries(skills).map(([key, skill]) => `${key.replaceAll('_', ' ')} ${fmtSigned(skill.total)}${skill.proficient ? ' proficient' : ''}`).join(', ')}`);
-  }
-  if (attacks.length) {
-    lines.push(`Attacks: ${attacks.map((attack) => `${attack.name} hit ${fmtSigned(attack.attack_total)}, damage ${attack.damage_formula}`).join('; ')}`);
-  }
-  if (Array.isArray(derived.active_spell_effects) && derived.active_spell_effects.length) {
-    lines.push(`Active effects: ${formatRulesActiveEffects(derived.active_spell_effects)}`);
-  }
-  if (Array.isArray(characterSheet.active_effects) && characterSheet.active_effects.length) {
-    lines.push(`Equipped/passive defenses: ${formatRulesEquipmentEffects(characterSheet.active_effects)}`);
-  }
-  if (features.length) {
-    lines.push(`Features: ${features.map((feature) => `${feature.name} (${feature.source || 'feature'})`).join('; ')}`);
-  }
-  if (inventory.length) {
-    lines.push(`Equipment: ${inventory.map((item) => Number(item.quantity || 0) > 1 ? `${item.name} x${item.quantity}` : item.name).join(', ')}`);
-  }
-  if (spellcasting.ability) {
-    const cantrips = spellcasting.cantrips_known || [];
-    const spells = spellcasting.spells_prepared || [];
-    lines.push(`Spellcasting: ${spellcasting.ability.toUpperCase()}, attack ${fmtSigned(derived.spell_attack_bonus)}, DC ${derived.spell_save_dc ?? '--'}, slots ${formatSpellSlots(spellcasting.slots)}, cantrips ${formatList(cantrips)}, level 1 ${formatList(spells)}`);
-    if ((spellcasting.class_choice_spells || characterSheet.class_choice_spells || []).length) {
-      lines.push(`Class choice spells: ${(spellcasting.class_choice_spells || characterSheet.class_choice_spells).map((entry) => `${entry.id} from ${entry.source || 'class choice'}`).join(', ')}`);
-    }
-  }
-  const languages = characterSheet.languages || characterSheet.proficiencies?.languages || [];
-  if (languages.length) lines.push(`Languages: ${languages.join(', ')}`);
-  if (tools.length) lines.push(`Tool proficiencies: ${tools.join(', ')}`);
-  if (details.alignment || details.personality || details.backstory) {
-    lines.push(`Character details: ${[details.alignment, details.personality, details.backstory].filter(Boolean).join(' ')}`);
-  }
-  return lines.join('\n');
-}
-
-function formatRulesActiveEffects(effects = []) {
-  if (!Array.isArray(effects) || effects.length === 0) return 'none';
-  return effects.map((effect) => {
-    if (isEquipmentEffect(effect)) return formatRulesEquipmentEffect(effect);
-    const remaining = effect.remaining_rounds != null
-      ? `${effect.remaining_rounds} rounds left`
-      : effect.remaining_minutes != null
-        ? `${effect.remaining_minutes} minutes left`
-        : effect.duration || 'duration unknown';
-    const rules = (effect.rules_effects || [])
-      .map((rule) => `${rule.label || rule.target}: ${rule.value != null ? formatRuleValue(rule.value) : rule.die || rule.target}`)
-      .join(', ');
-    return [
-      effect.name || effect.id || 'effect',
-      `target ${effect.target || 'self/scene'}`,
-      effect.mechanical_effect || null,
-      rules || null,
-      remaining,
-      effect.concentration ? 'concentration' : null,
-    ].filter(Boolean).join(' | ');
-  }).join('; ');
-}
-
-function formatRulesEquipmentEffects(effects = []) {
-  const equipmentEffects = (effects || []).filter((effect) => isEquipmentEffect(effect) || effect.source_item_name || effect.source_item_id);
-  if (!equipmentEffects.length) return 'none';
-  return equipmentEffects.map(formatRulesEquipmentEffect).join('; ');
-}
-
-function formatRulesEquipmentEffect(effect = {}) {
-  const rules = (effect.rules_effects || [effect])
-    .map((rule) => `${rule.label || rule.source_item_name || rule.target}: ${rule.value != null ? formatRuleValue(rule.value) : rule.die || rule.mechanical_effect || rule.target}`)
-    .join(', ');
-  return [
-    effect.name || effect.source_item_name || effect.id || 'equipment',
-    'equipped/passive, not a temporary spell effect',
-    effect.mechanical_effect || null,
-    rules || null,
-  ].filter(Boolean).join(' | ');
-}
-
-function formatRuleValue(value) {
-  return typeof value === 'number' && value >= 0 ? `+${value}` : String(value);
-}
-
-function fmtSigned(value) {
-  const number = Number(value || 0);
-  return number >= 0 ? `+${number}` : String(number);
-}
-
-function formatSpellSlots(slots = {}) {
-  const entries = Object.entries(slots || {});
-  if (entries.length === 0) return 'none';
-  return entries.map(([level, count]) => `L${level}:${count}`).join(', ');
 }
 
 async function handleDeterministicSpellAction(socket, sessionId, message) {
