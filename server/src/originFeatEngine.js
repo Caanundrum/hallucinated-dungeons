@@ -5,7 +5,6 @@ const {
   rollDamageFormula,
 } = require('./damageHealingEngine');
 const {
-  buildResourceState,
   spendResource,
 } = require('./resourceEngine');
 const { buildUnarmedFightingAttack } = require('./fightingStyleEngine');

@@ -1,5 +1,3 @@
-const { getContentBundle } = require('./contentData');
-
 const RESOURCE_DEFINITIONS = {
   heroic_inspiration: {
     name: 'Heroic Inspiration',
