@@ -2,6 +2,7 @@ const PORTABLE_HINTS = /\b(note|letter|coin|key|token|ring|vial|book|paper|parch
 const OPENABLE_HINTS = /\b(door|chest|box|gate|satchel|bag|drawer|container|envelope|note|letter|book|scroll|packet|pouch)\b/i;
 const READABLE_HINTS = /\b(note|letter|book|paper|parchment|scroll|sign|notice|writing|symbol|rune|map|journal|ledger|posting)\b/i;
 const LOCKABLE_HINTS = /\b(door|chest|box|gate|drawer|lock|container|coffer|case)\b/i;
+const CONSUMABLE_HINTS = /\b(ration|rations|food|bread|water|waterskin|drink|oil flask|oil|candle|torch)\b/i;
 
 function resolveObjectInteraction({ message = '', worldState = {} } = {}) {
   const intent = parseObjectInteraction(message);
@@ -68,6 +69,10 @@ function parseObjectInteraction(message = '') {
     { action: 'open', pattern: /\b(?:open|unseal|unfold|unwrap)\s+(?:the\s+|that\s+|a\s+|an\s+)?([a-z][a-z' -]{1,60}?)(?:\s+(?:from|off|out of|with|carefully|closely|quietly)\b|[,.!?]|$)/i },
     { action: 'close', pattern: /\b(?:close|shut|seal|fold|wrap)\s+(?:the\s+|that\s+|a\s+|an\s+)?([a-z][a-z' -]{1,60}?)(?:\s+(?:with|carefully|closely|quietly)\b|[,.!?]|$)/i },
     { action: 'read', pattern: /\b(?:read|consult)\s+(?:the\s+|that\s+|a\s+|an\s+)?([a-z][a-z' -]{1,60}?)(?:\s+(?:from|on|about|carefully|closely|again|aloud|quietly)\b|[,.!?]|$)/i },
+    { action: 'consume', pattern: /\b(?:eat|consume|chew|snack on)\s+(?:one\s+|the\s+|that\s+|a\s+|an\s+|my\s+)?([a-z][a-z' -]{1,60}?)(?:\s+(?:from|out of|in|with|carefully|quietly)\b|[,.!?]|$)/i },
+    { action: 'consume', pattern: /\b(?:drink|sip)\s+(?:from\s+)?(?:the\s+|that\s+|a\s+|an\s+|my\s+)?([a-z][a-z' -]{1,60}?)(?:\s+(?:from|out of|in|with|carefully|quietly)\b|[,.!?]|$)/i },
+    { action: 'use', pattern: /\b(?:tie|secure|fasten|anchor|attach|loop)\s+(?:the\s+|that\s+|a\s+|an\s+|my\s+)?([a-z][a-z' -]{1,60}?)(?:\s+(?:from|to|around|onto|on|with|before|after)\b|[,.!?]|$)/i },
+    { action: 'use', pattern: /\b(?:light|ignite)\s+(?:the\s+|that\s+|a\s+|an\s+|my\s+)?([a-z][a-z' -]{1,60}?)(?:\s+(?:from|with|carefully|quietly)\b|[,.!?]|$)/i },
     { action: 'use', pattern: /\b(?:use|touch|press|pull|turn)\s+(?:the\s+|that\s+|a\s+|an\s+)?([a-z][a-z' -]{1,60}?)(?:\s+(?:with|on|for|carefully|closely|quietly)\b|[,.!?]|$)/i },
   ];
 
@@ -109,6 +114,10 @@ function applyObjectInteraction({ intent, target, worldState = {} } = {}) {
   if (intent.action === 'close') entry.is_open = false;
   if (intent.action === 'read') entry.is_read = true;
   if (intent.action === 'use') entry.used = true;
+  if (intent.action === 'consume') {
+    entry.used = true;
+    entry.consumed_count = Number(currentEntry.consumed_count || 0) + 1;
+  }
 
   const nextState = {
     ...worldState,
@@ -124,6 +133,9 @@ function applyObjectInteraction({ intent, target, worldState = {} } = {}) {
       source_location: worldState.scene_presence?.exact_location || worldState.current_location || '',
     });
     nextState.scene_presence = removePresentObject(worldState.scene_presence, target.name);
+  }
+  if (intent.action === 'consume') {
+    nextState.inventory_state = consumeCarriedObject(worldState.inventory_state, target.name, 1);
   }
 
   return nextState;
@@ -144,6 +156,9 @@ function findObjectTarget({ targetText = '', message = '', worldState = {} } = {
   const direct = uniqueCandidates.find((candidate) => namesMatch(candidate.name, targetText));
   if (direct) return direct;
 
+  const fuzzy = uniqueCandidates.find((candidate) => targetTokensOverlap(candidate.name, targetText));
+  if (fuzzy) return fuzzy;
+
   const normalizedMessage = normalizeName(message);
   return uniqueCandidates.find((candidate) => mentionsName(normalizedMessage, candidate.name)) || null;
 }
@@ -160,6 +175,9 @@ function checkSupportedInteraction(action, targetName) {
   }
   if (action === 'unlock' && !LOCKABLE_HINTS.test(targetName)) {
     return { ok: false, reply: `${targetName} is present, but the object rules do not treat it as lockable. Describe a different interaction.` };
+  }
+  if (action === 'consume' && !CONSUMABLE_HINTS.test(targetName)) {
+    return { ok: false, reply: `${targetName} is carried or present, but the object rules do not treat it as a consumable item. Describe a different use instead.` };
   }
   return { ok: true };
 }
@@ -334,6 +352,8 @@ function buildObjectInteractionFrame({ intent, target }) {
     lines.push('[OBJECT INTERACTION: Narrate the object opening and only reveal contents or access that are plausible from the established scene. If it is locked, trapped, sealed by magic, or requires a check, say so and ask for the needed approach.]');
   } else if (intent.action === 'use') {
     lines.push('[OBJECT INTERACTION: Narrate the mundane use only. Do not grant new magic, flight, telepathy, damage, healing, or a bypass unless the object state, character sheet, or scene already establishes that capability.]');
+  } else if (intent.action === 'consume') {
+    lines.push('[OBJECT INTERACTION: Narrate the character consuming one unit of the item. Inventory quantity has already been reduced by the rules engine; do not restore or ignore the spent unit.]');
   }
   return lines.join('\n');
 }
@@ -348,7 +368,8 @@ function getCarriedObjects(worldState = {}) {
   const byKey = new Map();
   for (const item of [...listed, ...objectStateCarried]) {
     if (!item?.name) continue;
-    byKey.set(objectKey(item.name), { name: item.name, source_location: item.source_location || '' });
+    if (Number(item.quantity ?? 1) <= 0) continue;
+    byKey.set(objectKey(item.name), { ...item, name: item.name, source_location: item.source_location || '' });
   }
   return [...byKey.values()];
 }
@@ -394,6 +415,28 @@ function addCarriedObject(inventoryState = {}, item = {}) {
   return {
     ...(inventoryState && typeof inventoryState === 'object' && !Array.isArray(inventoryState) ? inventoryState : {}),
     carried_objects: [...byKey.values()],
+  };
+}
+
+function consumeCarriedObject(inventoryState = {}, targetName = '', amount = 1) {
+  const state = inventoryState && typeof inventoryState === 'object' && !Array.isArray(inventoryState) ? inventoryState : {};
+  const existing = Array.isArray(state.carried_objects) ? state.carried_objects : [];
+  const spent = Number(amount || 1);
+  const carriedObjects = existing.map((entry) => {
+    if (!entry?.name || !namesMatch(entry.name, targetName)) return entry;
+    const currentQuantity = Number(entry.quantity ?? 1);
+    const nextQuantity = Math.max(0, currentQuantity - spent);
+    return {
+      ...entry,
+      quantity: nextQuantity,
+      consumed_quantity: Number(entry.consumed_quantity || 0) + Math.min(spent, currentQuantity),
+      depleted: nextQuantity <= 0,
+      last_interaction: 'consume',
+    };
+  });
+  return {
+    ...state,
+    carried_objects: carriedObjects,
   };
 }
 
@@ -469,6 +512,16 @@ function singularize(value = '') {
 function hasWholePhrase(normalizedMessage = '', normalizedPhrase = '') {
   if (!normalizedMessage || !normalizedPhrase) return false;
   return new RegExp(`(?:^| )${escapeRegExp(normalizedPhrase)}(?: |$)`).test(normalizedMessage);
+}
+
+function targetTokensOverlap(left = '', right = '') {
+  const leftTokens = new Set(normalizeName(left).split(' ').filter(isTargetToken));
+  const rightTokens = normalizeName(right).split(' ').filter(isTargetToken);
+  return rightTokens.some((token) => leftTokens.has(token));
+}
+
+function isTargetToken(token = '') {
+  return token.length >= 4 && !['from', 'with', 'pack', 'backpack', 'that', 'this'].includes(token);
 }
 
 function escapeRegExp(value = '') {

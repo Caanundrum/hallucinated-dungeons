@@ -558,17 +558,18 @@ function remindPendingRoll({ worldState }) {
 function resolveCheckRoll({ pending, result, worldState, characterSheet }) {
   const margin = result.total - Number(pending.dc || DEFAULT_CHECK_DC);
   const outcome = getRollOutcome({ pending, margin });
+  const resolvedPending = withConcreteCheckResult({ pending, outcome, worldState });
   let nextState = {
     ...worldState,
     pending_roll: null,
   };
-  if (pending.bonus_effect_ids?.length) {
-    nextState = consumeActiveEffects(nextState, pending.bonus_effect_ids, characterSheet);
+  if (resolvedPending.bonus_effect_ids?.length) {
+    nextState = consumeActiveEffects(nextState, resolvedPending.bonus_effect_ids, characterSheet);
   }
 
-  let reply = buildCheckResolutionReply(pending, result, outcome);
+  let reply = buildCheckResolutionReply(resolvedPending, result, outcome);
   const hiddenOutcome = applyHideCheckOutcome({
-    pending,
+    pending: resolvedPending,
     result,
     outcome,
     worldState: nextState,
@@ -577,7 +578,7 @@ function resolveCheckRoll({ pending, result, worldState, characterSheet }) {
   nextState = hiddenOutcome.worldState;
   if (hiddenOutcome.lines.length) reply += `\n\n${hiddenOutcome.lines.join('\n\n')}`;
   const socialOutcome = applySocialCheckOutcome({
-    pending,
+    pending: resolvedPending,
     result,
     outcome,
     worldState: nextState,
@@ -585,7 +586,7 @@ function resolveCheckRoll({ pending, result, worldState, characterSheet }) {
   nextState = socialOutcome.worldState;
   if (socialOutcome.lines.length) reply += `\n\n${socialOutcome.lines.join('\n\n')}`;
   const discoveryOutcome = applyDiscoveryCheckOutcome({
-    pending,
+    pending: resolvedPending,
     result,
     outcome,
     worldState: nextState,
@@ -593,16 +594,24 @@ function resolveCheckRoll({ pending, result, worldState, characterSheet }) {
   nextState = discoveryOutcome.worldState;
   if (discoveryOutcome.lines.length) reply += `\n\n${discoveryOutcome.lines.join('\n\n')}`;
   const objectOutcome = applyObjectChallengeOutcome({
-    pending,
+    pending: resolvedPending,
     result,
     outcome,
     worldState: nextState,
   });
   nextState = objectOutcome.worldState;
   if (objectOutcome.lines.length) reply += `\n\n${objectOutcome.lines.join('\n\n')}`;
+  const hazardOutcome = applyAthleticsHazardOutcome({
+    pending: resolvedPending,
+    result,
+    outcome,
+    worldState: nextState,
+  });
+  nextState = hazardOutcome.worldState;
+  if (hazardOutcome.lines.length) reply += `\n\n${hazardOutcome.lines.join('\n\n')}`;
   if (!pending.combat) {
     const advanced = advanceNarrativeTime({
-      message: pending.intent || '',
+      message: resolvedPending.intent || '',
       worldState: nextState,
       characterSheet,
       defaultElapsed: { minutes: 1 },
@@ -748,6 +757,166 @@ function buildCheckResolutionReply(pending, result, outcome) {
     return `${rollLine}\n\nYou do not get the clean result you wanted, but you catch enough to keep moving: ${pending.failure_result || 'the attempt does not fully work.'}`;
   }
   return `${rollLine}\n\n${pending.failure_result || 'The attempt fails, and the world refuses to politely pretend otherwise.'}`;
+}
+
+function withConcreteCheckResult({ pending = {}, outcome, worldState = {} } = {}) {
+  if (!isHazardousAthleticsPending(pending, worldState)) return pending;
+  return {
+    ...pending,
+    success_result: athleticsHazardSuccessResult(pending, worldState),
+    failure_result: athleticsHazardFailureResult(pending, outcome, worldState),
+  };
+}
+
+function isHazardousAthleticsPending(pending = {}, worldState = {}) {
+  if (pending.skill !== 'athletics') return false;
+  const text = `${pending.intent || ''} ${pending.dc_source || ''} ${currentSceneLocation(worldState)} ${JSON.stringify(worldState.scene_presence || {})}`.toLowerCase();
+  return /\b(?:water|river|stream|current|bridge|support|ledge|cliff|pit|drop|slick|mud|rain|dark)\b/.test(text)
+    && /\b(?:swim|climb|scramble|jump|leap|dive|pull|haul|hold|grab|athletics)\b/.test(text);
+}
+
+function athleticsHazardSuccessResult(pending = {}, worldState = {}) {
+  const intent = String(pending.intent || '').toLowerCase();
+  if (/\b(?:climb|scramble|pull|haul)\b/.test(intent)) {
+    return 'You get a secure grip and pull yourself through the hazard without losing position or gear.';
+  }
+  if (/\b(?:swim|dive|jump|leap)\b/.test(intent) && /\bwater\b/.test(`${intent} ${currentSceneLocation(worldState)}`.toLowerCase())) {
+    return 'You enter or move through the water under control, keeping your head, gear, and route together.';
+  }
+  return 'You keep control through the hazardous movement and end where your approach reasonably allows.';
+}
+
+function athleticsHazardFailureResult(pending = {}, outcome, worldState = {}) {
+  const intent = String(pending.intent || '').toLowerCase();
+  const location = cleanHazardLocation(currentSceneLocation(worldState));
+  const waterish = /\b(?:water|river|stream|current)\b/.test(`${intent} ${location}`.toLowerCase());
+  const climbish = /\b(?:climb|scramble|pull|haul)\b/.test(intent);
+  const jumpish = /\b(?:jump|leap|dive|swim)\b/.test(intent);
+
+  if (waterish && climbish) {
+    return outcome === 'near_miss'
+      ? `You catch the bridge support, but not cleanly. You are hanging low over the dark water at ${location}, off-balance and committed until you secure yourself or drop.`
+      : `Your grip slips. Armor, shield, and pack drag against the motion, and you drop back into the dark water below ${location}. You are struggling near the support instead of standing safely on the bridge.`;
+  }
+  if (waterish && jumpish) {
+    return outcome === 'near_miss'
+      ? `You hit the dark water awkwardly but keep enough control to stay near ${location}. You are in the water and need a solid swim, rope, or climb plan to get clear.`
+      : `You hit the dark water badly. The weight of armor, shield, and pack pulls you under for a breath, and you come up struggling below ${location}. You are not safely on the bridge anymore.`;
+  }
+  if (climbish) {
+    return outcome === 'near_miss'
+      ? `You keep one handhold, but your footing goes. You are dangling or braced in a bad position and need a safer follow-up before moving on.`
+      : `You lose your grip and slide down from the climb, ending in a worse position than where you started.`;
+  }
+  return `The hazardous movement goes wrong in a concrete way: you lose secure position and must deal with the immediate terrain before continuing.`;
+}
+
+function applyAthleticsHazardOutcome({ pending = {}, result = {}, outcome, worldState = {} } = {}) {
+  if (!isHazardousAthleticsPending(pending, worldState)) return { worldState, lines: [] };
+  if (outcome === 'success') return applySuccessfulAthleticsHazardOutcome({ pending, result, worldState });
+
+  const intent = String(pending.intent || '').toLowerCase();
+  const location = cleanHazardLocation(currentSceneLocation(worldState));
+  const waterish = /\b(?:water|river|stream|current)\b/.test(`${intent} ${location}`.toLowerCase());
+  const climbish = /\b(?:climb|scramble|pull|haul)\b/.test(intent);
+  const scene = worldState.scene_presence || {};
+  const hazardLocation = waterish
+    ? `dark water below ${location}`
+    : `hazard near ${location}`;
+  const hazardStatus = outcome === 'near_miss' && climbish
+    ? 'hanging_in_bad_position'
+    : waterish
+      ? 'struggling_in_water'
+      : 'bad_position';
+  const presentObjects = new Set([...(scene.present_objects || [])]);
+  if (waterish) {
+    presentObjects.add('dark water');
+    presentObjects.add('bridge support');
+    presentObjects.add('bridge rail above');
+  }
+
+  return {
+    worldState: {
+      ...worldState,
+      current_location: hazardLocation,
+      scene_presence: {
+        ...scene,
+        exact_location: hazardLocation,
+        location_type: waterish ? 'dangerous water hazard' : scene.location_type || 'hazardous terrain',
+        present_objects: [...presentObjects],
+      },
+      hazard_state: {
+        active: true,
+        type: waterish ? 'dangerous_water' : 'hazardous_terrain',
+        status: hazardStatus,
+        source_intent: pending.intent || '',
+        roll_total: result.total,
+        dc: pending.dc,
+        escape_hint: waterish
+          ? 'Use a concrete plan such as swimming to a support, grabbing a rope, or climbing out. The referee should call for checks when the plan remains risky.'
+          : 'Use a concrete plan to regain secure footing, grip, or position before continuing.',
+      },
+    },
+    lines: [],
+  };
+}
+
+function applySuccessfulAthleticsHazardOutcome({ pending = {}, result = {}, worldState = {} } = {}) {
+  const cleared = clearResolvedAthleticsHazard({ pending, worldState });
+  const intent = String(pending.intent || '').toLowerCase();
+  const location = cleanHazardLocation(currentSceneLocation(cleared.worldState));
+  const waterish = /\b(?:water|river|stream|current)\b/.test(`${intent} ${location}`.toLowerCase());
+  const enteringOrSwimming = /\b(?:swim|dive|jump|leap)\b/.test(intent);
+  if (!waterish || !enteringOrSwimming || /\b(?:out of|back up|get out|climb)\b/.test(intent)) return cleared;
+
+  const scene = cleared.worldState.scene_presence || {};
+  const presentObjects = new Set([...(scene.present_objects || []), 'dark water', 'bridge support', 'bridge rail above']);
+  return {
+    worldState: {
+      ...cleared.worldState,
+      current_location: `dark water below ${location}`,
+      scene_presence: {
+        ...scene,
+        exact_location: `dark water below ${location}`,
+        location_type: 'dangerous water hazard',
+        present_objects: [...presentObjects],
+      },
+      hazard_state: {
+        active: true,
+        type: 'dangerous_water',
+        status: 'in_water_under_control',
+        source_intent: pending.intent || '',
+        roll_total: result.total,
+        dc: pending.dc,
+        escape_hint: 'You are in the water under control, but climbing, swimming farther, or handling gear can still require checks if risky.',
+      },
+    },
+    lines: cleared.lines,
+  };
+}
+
+function clearResolvedAthleticsHazard({ pending = {}, worldState = {} } = {}) {
+  if (!worldState.hazard_state?.active) return { worldState, lines: [] };
+  const intent = String(pending.intent || '').toLowerCase();
+  if (!/\b(?:climb|scramble|pull|haul|swim|get out|back up|out of)\b/.test(intent)) return { worldState, lines: [] };
+  return {
+    worldState: {
+      ...worldState,
+      hazard_state: {
+        ...worldState.hazard_state,
+        active: false,
+        resolved_by: pending.intent || '',
+      },
+    },
+    lines: ['You regain a secure position and are no longer caught in the immediate hazard.'],
+  };
+}
+
+function cleanHazardLocation(value = '') {
+  return String(value || 'the hazard')
+    .replace(/\s+over dark water\b/i, '')
+    .replace(/^dark water below\s+/i, '')
+    .trim() || 'the hazard';
 }
 
 function isCombatStarter(text) {

@@ -80,6 +80,56 @@ test('reading a present object still targets it when the player names its source
   assert.equal(result.target.name, 'wax-sealed note');
 });
 
+test('consuming carried pack food decrements inventory quantity before narration', () => {
+  const state = worldState({
+    inventory_state: {
+      carried_objects: [
+        { name: "Dungeoneer's Pack", source: 'character_sheet' },
+        { name: 'Rations', quantity: 10, source: 'pack_contents', source_container: "Dungeoneer's Pack" },
+      ],
+    },
+  });
+  const result = resolveObjectInteraction({
+    message: 'I eat a ration from my pack.',
+    worldState: state,
+  });
+  const ration = result.worldState.inventory_state.carried_objects.find((item) => item.name === 'Rations');
+
+  assert.equal(result.handled, false);
+  assert.equal(result.target.name, 'Rations');
+  assert.equal(ration.quantity, 9);
+  assert.equal(ration.consumed_quantity, 1);
+  assert.match(result.narrativeFrame, /Inventory quantity has already been reduced/);
+});
+
+test('using rope from a pack resolves to carried Hempen Rope', () => {
+  const state = worldState({
+    scene_presence: {
+      exact_location: 'Lantern Bridge',
+      location_type: 'bridge',
+      present_npcs: [],
+      present_objects: ['bridge rail', 'dark water'],
+      available_exits: ['far bank'],
+      nearby_locations: [],
+    },
+    inventory_state: {
+      carried_objects: [
+        { name: "Dungeoneer's Pack", source: 'character_sheet' },
+        { name: 'Hempen Rope (50 feet)', quantity: 1, source: 'pack_contents', source_container: "Dungeoneer's Pack" },
+      ],
+    },
+  });
+  const result = resolveObjectInteraction({
+    message: 'I tie rope from my pack to the bridge rail before leaning over.',
+    worldState: state,
+  });
+
+  assert.equal(result.handled, false);
+  assert.equal(result.target.name, 'Hempen Rope (50 feet)');
+  assert.equal(result.worldState.object_states.hempen_rope_50_feet.used, true);
+  assert.match(result.narrativeFrame, /mundane use/);
+});
+
 test('opening a visible container records open state', () => {
   const result = resolveObjectInteraction({
     message: 'Open the torn satchel.',

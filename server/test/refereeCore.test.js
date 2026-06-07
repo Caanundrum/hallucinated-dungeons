@@ -158,6 +158,96 @@ test('hazardous swimming and climbing in heavy armor prompt Athletics instead of
   assert.match(climb.worldState.pending_roll.dc_source, /shield and carried gear/);
 });
 
+test('failed hazardous Athletics roll applies concrete water consequence state', () => {
+  const armoredSheet = {
+    ...characterSheet,
+    equipped: { armor: 'chain_mail', off_hand: 'shield' },
+    inventory: [
+      { id: 'chain_mail', name: 'Chain Mail', type: 'armor', armor_category: 'heavy' },
+      { id: 'shield', name: 'Shield', type: 'shield' },
+      { id: 'dungeoneer_pack', name: "Dungeoneer's Pack", type: 'pack' },
+    ],
+    derived_stats: {
+      ...characterSheet.derived_stats,
+      skill_modifiers: {
+        ...characterSheet.derived_stats.skill_modifiers,
+        athletics: { total: 5, ability: 'str', proficient: true },
+      },
+    },
+  };
+  const prompt = adjudicate({
+    message: 'I jump into the dark water.',
+    worldState: worldState({
+      current_location: 'Lantern Bridge',
+      scene_presence: {
+        exact_location: 'Lantern Bridge over dark water',
+        location_type: 'slick bridge',
+        present_npcs: [],
+        present_objects: ['dark water', 'bridge support', 'bridge rail'],
+        available_exits: ['far bank'],
+      },
+    }),
+    characterSheet: armoredSheet,
+  });
+  const resolved = adjudicate({
+    message: `[ROLL REQUEST: ${prompt.worldState.pending_roll.id}]`,
+    worldState: prompt.worldState,
+    characterSheet: armoredSheet,
+    rollDie: sequenceRolls([1]),
+  });
+
+  assert.equal(resolved.handled, true);
+  assert.equal(resolved.worldState.pending_roll, null);
+  assert.equal(resolved.worldState.hazard_state.active, true);
+  assert.equal(resolved.worldState.hazard_state.status, 'struggling_in_water');
+  assert.match(resolved.worldState.scene_presence.exact_location, /dark water below Lantern Bridge/);
+  assert.match(resolved.reply, /struggling below Lantern Bridge/);
+  assert.doesNotMatch(resolved.reply, /another consequence that fits the scene/);
+});
+
+test('successful hazardous water entry updates location without failure consequence', () => {
+  const armoredSheet = {
+    ...characterSheet,
+    equipped: { armor: 'chain_mail', off_hand: 'shield' },
+    inventory: [
+      { id: 'chain_mail', name: 'Chain Mail', type: 'armor', armor_category: 'heavy' },
+      { id: 'shield', name: 'Shield', type: 'shield' },
+      { id: 'dungeoneer_pack', name: "Dungeoneer's Pack", type: 'pack' },
+    ],
+    derived_stats: {
+      ...characterSheet.derived_stats,
+      skill_modifiers: {
+        ...characterSheet.derived_stats.skill_modifiers,
+        athletics: { total: 12, ability: 'str', proficient: true },
+      },
+    },
+  };
+  const prompt = adjudicate({
+    message: 'I jump into the dark water.',
+    worldState: worldState({
+      current_location: 'Lantern Bridge',
+      scene_presence: {
+        exact_location: 'Lantern Bridge over dark water',
+        location_type: 'slick bridge',
+        present_npcs: [],
+        present_objects: ['dark water', 'bridge support', 'bridge rail'],
+        available_exits: ['far bank'],
+      },
+    }),
+    characterSheet: armoredSheet,
+  });
+  const resolved = adjudicate({
+    message: `[ROLL REQUEST: ${prompt.worldState.pending_roll.id}]`,
+    worldState: prompt.worldState,
+    characterSheet: armoredSheet,
+    rollDie: sequenceRolls([20]),
+  });
+
+  assert.match(resolved.reply, /under control/);
+  assert.equal(resolved.worldState.hazard_state.status, 'in_water_under_control');
+  assert.match(resolved.worldState.scene_presence.exact_location, /dark water below Lantern Bridge/);
+});
+
 test('condition modes are stored on pending checks and saves for the server roller', () => {
   const poisonedCheck = adjudicate({
     message: "I study the clerk's face.",
