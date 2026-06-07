@@ -346,7 +346,7 @@ test("Ranger casts Hunter's Mark from Favored Enemy before spending slots", () =
       },
     },
     worldState: worldState({
-      scene_presence: { npcs_present: ['wolf'] },
+      scene_presence: { present_npcs: ['wolf'] },
       player_stats: { armor_class: 14, base_armor_class: 14, spell_slots: { 1: 2 } },
     }),
   });
@@ -354,6 +354,79 @@ test("Ranger casts Hunter's Mark from Favored Enemy before spending slots", () =
   assert.equal(result.blocked, false);
   assert.equal(result.characterSheet.resources.spell_uses['class_feature:favored_enemy:hunter_mark'].remaining, 1);
   assert.equal(result.characterSheet.spellcasting.slots[1], 2);
+});
+
+test('target-bound scene spells require an established target before spending resources', () => {
+  const sheet = {
+    identity: { name: 'Bryn', level: 1, class: 'ranger', class_name: 'Ranger' },
+    abilities: { modifiers: { wis: 2 } },
+    derived_stats: { armor_class: 14, armor_class_breakdown: [], active_spell_effects: [] },
+    spellcasting: {
+      ability: 'wis',
+      cantrips_known: [],
+      prepared_from_choices: ['cure_wounds', 'speak_with_animals'],
+      always_prepared_spells: ['hunter_mark'],
+      spells_prepared: ['cure_wounds', 'speak_with_animals', 'hunter_mark'],
+      slots: { 1: 2 },
+    },
+    resources: {
+      spell_uses: {
+        'class_feature:favored_enemy:hunter_mark': {
+          name: "Hunter's Mark",
+          spell_id: 'hunter_mark',
+          source: 'favored_enemy',
+          source_name: 'Favored Enemy',
+          remaining: 2,
+          max: 2,
+          reset: 'long_rest',
+        },
+      },
+    },
+  };
+
+  const result = resolveSpellCast({
+    message: 'I cast Hunter\'s Mark on the dragon.',
+    content,
+    characterSheet: sheet,
+    worldState: worldState({
+      scene_presence: { present_npcs: ['clerk'], present_objects: [] },
+      player_stats: { armor_class: 14, base_armor_class: 14, spell_slots: { 1: 2 } },
+    }),
+  });
+
+  assert.equal(result.blocked, true);
+  assert.match(result.reply, /valid target in the current scene/);
+  assert.equal(result.characterSheet.resources.spell_uses['class_feature:favored_enemy:hunter_mark'].remaining, 2);
+  assert.equal(result.characterSheet.spellcasting.slots[1], 2);
+});
+
+test('non-combat save spells require a present scene target before spending slots', () => {
+  const sheet = casterSheet({
+    spellcasting: {
+      ability: 'int',
+      cantrips_known: [],
+      spells_prepared: ['charm_person'],
+      slots: { 1: 1 },
+    },
+  });
+  const result = resolveSpellCast({
+    message: 'I cast Charm Person on the dragon.',
+    content,
+    characterSheet: sheet,
+    worldState: worldState({
+      scene_presence: {
+        exact_location: 'town hall door',
+        present_npcs: ['clerk'],
+        present_objects: [],
+        available_exits: ['square'],
+      },
+      player_stats: { spell_slots: { 1: 1 } },
+    }),
+  });
+
+  assert.equal(result.blocked, true);
+  assert.match(result.reply, /valid target in the current scene/);
+  assert.equal(result.characterSheet.spellcasting.slots[1], 1);
 });
 
 test('ticking active effects expires Shield of Faith and restores base AC', () => {

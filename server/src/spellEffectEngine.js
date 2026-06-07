@@ -85,6 +85,24 @@ function resolveSpellCast({ message, content, characterSheet, worldState = {} })
       : nextSheet.derived_stats?.active_spell_effects || [],
   );
   const spellEffect = buildSpellEffect(nextSheet, spell, known, message, castWorldState);
+  const targetBlock = validateRequiredSpellTarget({
+    spell,
+    spellEffect,
+    message,
+    worldState: castWorldState,
+    characterSheet,
+  });
+  if (targetBlock) {
+    return {
+      matched: true,
+      blocked: true,
+      spell,
+      known,
+      characterSheet,
+      reply: targetBlock.reply,
+    };
+  }
+
   if (spellEffect) {
     const retainedEffects = spellEffect.concentration
       ? currentEffects.filter((effect) => !effect.concentration)
@@ -488,6 +506,22 @@ function addCondition(conditions = [], condition) {
   return [...new Set([...(conditions || []), condition].filter(Boolean))];
 }
 
+function validateRequiredSpellTarget({ spell, spellEffect, message = '', worldState = {}, characterSheet = {} } = {}) {
+  const rule = SPELL_OUTCOMES[spell.id];
+  const ruleRequiresTarget = ['spell_attack', 'automatic_damage', 'saving_throw', 'save_effect', 'sleep_pool'].includes(rule?.type);
+  const effectRequiresTarget = (spellEffect?.rules_effects || []).some((effect) => effect.target_bound);
+  if (!ruleRequiresTarget && !effectRequiresTarget) return null;
+
+  const context = getSpellTargetContext({
+    spell,
+    spellCastMessage: message,
+    worldState,
+    characterSheet,
+    allowMultiple: rule?.type === 'sleep_pool',
+  });
+  return context?.target ? null : noSpellTarget(worldState, spell);
+}
+
 function getSpellTargetContext({ spell, spellCastMessage = '', worldState = {}, characterSheet = {}, allowMultiple = false } = {}) {
   if (worldState.combat_state?.active) {
     const combat = cloneCombatState(worldState.combat_state);
@@ -529,7 +563,6 @@ function getSceneSpellTargets({ explicitTarget, worldState = {}, allowMultiple =
   if (explicitTarget) {
     const matched = candidates.find((candidate) => targetNamesMatch(candidate, explicitTarget));
     if (matched) return [matched];
-    if (presentNpcs.length === 0 && trackedTargets.length === 0) return [explicitTarget];
     return [];
   }
 
