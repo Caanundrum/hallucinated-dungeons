@@ -17,6 +17,8 @@ test('DM2 sheet summary lists exact AC sources including Defense style', () => {
       species_name: 'Human',
       class_name: 'Fighter',
       level: 1,
+      experience_points: 125,
+      next_level_xp: 300,
     },
     derived_stats: {
       hp: 12,
@@ -35,6 +37,7 @@ test('DM2 sheet summary lists exact AC sources including Defense style', () => {
   });
 
   assert.match(summary, /AC sources: Chain Mail: 16/);
+  assert.match(summary, /Progression: XP 125\/300/);
   assert.match(summary, /Shield: \+2/);
   assert.match(summary, /Fighting Style: Defense \+1 while wearing armor/);
   assert.match(summary, /Total AC 19/);

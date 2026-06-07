@@ -136,6 +136,7 @@ function parseBonusDice(value, source) {
 function summarizeCharacterOption(characterId, character) {
   const identity = character?.identity || {};
   const derived = character?.derived_stats || {};
+  const progression = character?.progression || {};
   return {
     id: characterId,
     name: identity.name || 'Unnamed Character',
@@ -148,6 +149,9 @@ function summarizeCharacterOption(characterId, character) {
       hp: derived.hp ?? null,
       maxHp: derived.max_hp ?? null,
       armorClass: derived.armor_class ?? null,
+      experiencePoints: identity.experience_points ?? progression.experience_points ?? 0,
+      nextLevelXp: identity.next_level_xp ?? progression.next_level_xp ?? null,
+      levelUpAvailable: Boolean(identity.level_up_available || progression.level_up_available?.ready),
     },
     character,
   };
@@ -208,6 +212,7 @@ function App() {
     socket.off('character_required');
     socket.off('character_roll');
     socket.off('character_left');
+    socket.off('level_up_available');
 
     socket.connect();
 
@@ -317,6 +322,16 @@ function App() {
       setCharacterStatus('select');
     });
 
+    socket.on('level_up_available', ({ character, characterId } = {}) => {
+      if (character) {
+        setCurrentCharacter(character);
+        if (characterId) {
+          const option = summarizeCharacterOption(characterId, character);
+          setAvailableCharacters((prev) => [option, ...prev.filter((item) => item.id !== characterId)]);
+        }
+      }
+    });
+
     socket.on('dm1_typing', (val) => setDm1Typing(val));
     socket.on('dm2_typing', (val) => setDm2Typing(val));
 
@@ -385,6 +400,7 @@ function App() {
       socket.off('character_required');
       socket.off('character_roll');
       socket.off('character_left');
+      socket.off('level_up_available');
       socket.disconnect();
     };
   }, []);
@@ -741,6 +757,7 @@ function App() {
 
 function CharacterSheetModal({ character, content, onClose }) {
   const identity = character.identity || {};
+  const progression = character.progression || {};
   const abilities = character.abilities || {};
   const derived = character.derived_stats || {};
   const equippedDefenses = character.active_effects || [];
@@ -763,6 +780,9 @@ function CharacterSheetModal({ character, content, onClose }) {
   const resources = character.resources || {};
   const spellcasting = character.spellcasting || null;
   const magicInitiate = character.origin?.magic_initiate || {};
+  const experiencePoints = Number(identity.experience_points ?? progression.experience_points ?? 0);
+  const nextLevelXp = identity.next_level_xp ?? progression.next_level_xp ?? null;
+  const levelUpReady = Boolean(identity.level_up_available || progression.level_up_available?.ready);
   const spellById = (spellId) => content?.spells?.find((spell) => spell.id === spellId);
   const spellName = (spellId) => spellById(spellId)?.name || String(spellId || '').replaceAll('_', ' ');
   const spellSummary = (spellId) => {
@@ -785,6 +805,7 @@ function CharacterSheetModal({ character, content, onClose }) {
             <p className="eyebrow">Character Sheet</p>
             <h2>{identity.name}</h2>
             <p>{identity.species_name} {identity.class_name} - Level {identity.level || derived.level || 1}</p>
+            {levelUpReady && <span className="level-up-badge">Level Up Available</span>}
           </div>
           <button type="button" className="secondary-btn" onClick={onClose}>Close</button>
         </div>
@@ -795,6 +816,7 @@ function CharacterSheetModal({ character, content, onClose }) {
           <SheetStat label="Speed" value={`${derived.speed ?? '--'} ft`} />
           <SheetStat label="Init" value={fmtMod(derived.initiative)} />
           <SheetStat label="PB" value={fmtMod(derived.proficiency_bonus)} />
+          <SheetStat label="XP" value={nextLevelXp ? `${experiencePoints}/${nextLevelXp}` : experiencePoints} />
         </div>
 
         <div className="sheet-grid">

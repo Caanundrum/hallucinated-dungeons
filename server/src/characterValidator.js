@@ -1,4 +1,5 @@
 const { byId } = require('./contentData');
+const XP_THRESHOLDS = require('../data/xp_thresholds.json');
 const {
   getFightingStyleArmorBonus,
   getFightingStyleAttackBonus,
@@ -150,6 +151,8 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
       background_name: background.name,
       level,
       experience_points: 0,
+      next_level_xp: XP_THRESHOLDS[String(level + 1)] || null,
+      level_up_available: false,
       status: 'active',
     },
     abilities: {
@@ -219,6 +222,12 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
     },
     spellcasting,
     resources,
+    progression: {
+      experience_points: 0,
+      next_level_xp: XP_THRESHOLDS[String(level + 1)] || null,
+      xp_awards: [],
+      level_up_available: null,
+    },
     derived_stats: derivedStats,
     notes: {
       item_math_rule: 'Inventory does not alter math unless an item is equipped, attuned, or otherwise active.',

@@ -47,6 +47,10 @@ const {
   formatCarriedInventoryForRules,
 } = require('./rulesInventoryAnswers');
 const { shouldAllowModerationFalsePositive } = require('./safetyFalsePositive');
+const {
+  applyProgressionAwards,
+  formatProgressionAwardSummary,
+} = require('./progressionEngine');
 
 // ── Setup ──────────────────────────────────────────────────────────────────
 const app    = express();
@@ -162,6 +166,57 @@ async function runPostResponsePipeline(sessionId, playerMessage, dm1Reply, newTu
   }
 }
 
+async function applyProgressionAfterReferee({
+  socket,
+  sessionId,
+  character,
+  beforeWorldState,
+  afterWorldState,
+  reply,
+  currentTurn,
+} = {}) {
+  if (!character?.character_sheet || !afterWorldState) {
+    return { worldState: afterWorldState, characterSheet: character?.character_sheet || null, reply };
+  }
+
+  const progression = applyProgressionAwards({
+    beforeWorldState,
+    afterWorldState,
+    characterSheet: character.character_sheet,
+    currentTurn,
+  });
+  if (!progression.awards.length) {
+    return { worldState: afterWorldState, characterSheet: character.character_sheet, reply };
+  }
+
+  const saved = await db.updateCharacterSheet(character.id, progression.characterSheet);
+  const xpLine = formatProgressionAwardSummary({
+    awards: progression.awards,
+    characterSheet: saved.character_sheet,
+  });
+  const finalReply = [reply, xpLine].filter(Boolean).join('\n\n');
+  socket.emit('character_ready', {
+    characterId: saved.id,
+    character: saved.character_sheet,
+    shouldStartSession: false,
+  });
+  if (progression.levelUpAvailable?.ready) {
+    socket.emit('level_up_available', {
+      characterId: saved.id,
+      character: saved.character_sheet,
+      progression: progression.levelUpAvailable,
+    });
+  }
+
+  return {
+    worldState: progression.worldState,
+    characterSheet: saved.character_sheet,
+    reply: finalReply,
+    awards: progression.awards,
+    levelUpAvailable: progression.levelUpAvailable,
+  };
+}
+
 function recentNarrationForSpatialGuard(history = []) {
   return (history || [])
     .filter((row) => row.role === 'dm1')
@@ -244,6 +299,9 @@ function characterSheetToWorldStats(characterSheet, characterId = null) {
     class_spells: characterSheet.spellcasting?.spells_prepared || [],
     class_choice_spells: characterSheet.class_choice_spells || characterSheet.spellcasting?.class_choice_spells || [],
     origin_magic: characterSheet.origin?.magic_initiate || {},
+    experience_points: identity.experience_points ?? characterSheet.progression?.experience_points ?? 0,
+    next_level_xp: identity.next_level_xp ?? characterSheet.progression?.next_level_xp ?? null,
+    level_up_available: characterSheet.progression?.level_up_available || null,
     conditions: stats.conditions || [],
     exhaustion_level: stats.exhaustion_level ?? null,
     spell_slots: characterSheet.spellcasting?.slots || {},
@@ -271,6 +329,9 @@ function summarizeCharacterForClient(row) {
       hp: derived.hp ?? null,
       maxHp: derived.max_hp ?? null,
       armorClass: derived.armor_class ?? null,
+      experiencePoints: identity.experience_points ?? sheet.progression?.experience_points ?? 0,
+      nextLevelXp: identity.next_level_xp ?? sheet.progression?.next_level_xp ?? null,
+      levelUpAvailable: Boolean(identity.level_up_available || sheet.progression?.level_up_available?.ready),
     },
     character: sheet,
     updatedAt: row.updated_at,
@@ -418,6 +479,17 @@ async function handleDeterministicSpellAction(socket, sessionId, message) {
     }
 
     const currentTurn = currentWorldState.session_turn ?? 0;
+    const progressed = await applyProgressionAfterReferee({
+      socket,
+      sessionId,
+      character: saved,
+      beforeWorldState: currentWorldState,
+      afterWorldState: finalWorldState,
+      reply,
+      currentTurn,
+    });
+    finalWorldState = progressed.worldState;
+    reply = progressed.reply;
     await db.updateWorldState(sessionId, finalWorldState);
     await db.saveMessage(sessionId, 'player_dm1', message, currentTurn);
     await db.saveMessage(sessionId, 'dm1', reply, currentTurn);
@@ -1229,23 +1301,33 @@ io.on('connection', (socket) => {
       let refereeNarrativeFrame = '';
       let refereeSkipSpatialGuard = false;
       if (referee?.handled) {
-        await db.updateWorldState(sessionId, referee.worldState);
+        const progressed = await applyProgressionAfterReferee({
+          socket,
+          sessionId,
+          character: activeCharacter,
+          beforeWorldState: activeWorldState,
+          afterWorldState: referee.worldState,
+          reply: referee.reply,
+          currentTurn,
+        });
+        await db.updateWorldState(sessionId, progressed.worldState);
         await db.saveMessage(sessionId, 'player_dm1', message, currentTurn);
-        await db.saveMessage(sessionId, 'dm1', referee.reply, currentTurn);
+        await db.saveMessage(sessionId, 'dm1', progressed.reply, currentTurn);
         const newTurn = await db.incrementSessionTurn(sessionId);
-        socket.emit('dm1_response', { message: referee.reply });
+        socket.emit('dm1_response', { message: progressed.reply });
         await db.logDmCall({
           sessionId,
           dm:           referee.logType || 'referee_core',
           model:        'deterministic',
           playerInput:  message,
           fullPrompt:   JSON.stringify({
-            pending_roll: referee.worldState?.pending_roll || null,
-            pending_reaction: referee.worldState?.pending_reaction || null,
-            combat_state: referee.worldState?.combat_state || null,
+            pending_roll: progressed.worldState?.pending_roll || null,
+            pending_reaction: progressed.worldState?.pending_reaction || null,
+            combat_state: progressed.worldState?.combat_state || null,
+            progression: progressed.worldState?.progression || null,
             turn: currentTurn,
           }),
-          dmResponse:   referee.reply,
+          dmResponse:   progressed.reply,
           inputTokens:  null,
           outputTokens: null,
         }).catch(console.error);

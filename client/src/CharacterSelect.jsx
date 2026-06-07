@@ -46,6 +46,11 @@ function CharacterSelect({
               <small>
                 HP {character.summary?.hp ?? '--'}/{character.summary?.maxHp ?? '--'} / AC {character.summary?.armorClass ?? '--'}
               </small>
+              <small>
+                XP {character.summary?.experiencePoints ?? 0}
+                {character.summary?.nextLevelXp ? `/${character.summary.nextLevelXp}` : ''}
+                {character.summary?.levelUpAvailable ? ' - level up ready' : ''}
+              </small>
             </button>
           ))}
         </div>

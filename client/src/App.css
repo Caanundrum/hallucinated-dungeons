@@ -492,6 +492,19 @@ textarea:disabled { opacity: 0.4; cursor: not-allowed; }
   font-family: var(--font-ui);
 }
 
+.level-up-badge {
+  display: inline-block;
+  margin-top: 0.35rem;
+  padding: 0.18rem 0.5rem;
+  border: 1px solid #c8973a66;
+  border-radius: 999px;
+  background: #c8973a18;
+  color: #f1d08a;
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
 .sheet-stat-strip,
 .mini-grid {
   display: grid;
