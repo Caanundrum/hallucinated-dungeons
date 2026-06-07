@@ -8,7 +8,6 @@ const {
 } = require('./damageHealingEngine');
 const {
   resolveSpellCastLegality,
-  getCastSpellFromMessage,
   inferGuidanceSkill,
   formatGuidanceLabel,
   getSpellActionResource,
@@ -1283,7 +1282,6 @@ function combineAdvantageModes(left = null, right = null) {
 module.exports = {
   resolveSpellCast,
   resolveSpellOutcome,
-  getCastSpellFromMessage,
   tickActiveEffects,
   applyActiveEffectsToCharacterSheet,
   applyActiveEffectsToWorldState,

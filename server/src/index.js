@@ -25,7 +25,6 @@ const { filterActivePartyPresenceRows } = require('./partyPresence');
 const {
   resolveSpellCast,
   resolveSpellOutcome,
-  getCastSpellFromMessage,
   applyActiveEffectsToCharacterSheet,
 } = require('./spellEffectEngine');
 const {
@@ -418,27 +417,12 @@ async function handleDeterministicSpellAction(socket, sessionId, message) {
 
   const worldStateRow = await db.getWorldState(sessionId);
   const currentWorldState = normalizeActiveCharacterWorldState(worldStateRow?.state || db.DEFAULT_WORLD_STATE, sheet, character.id);
-  const spellForEconomy = getCastSpellFromMessage(message, content);
-  let actionWorldState = currentWorldState;
-  if (spellForEconomy && currentWorldState.combat_state?.active) {
-    const actionResource = getSpellActionResource(spellForEconomy);
-    const spent = spendTurnResource(currentWorldState, actionResource, spellForEconomy.name, sheet);
-    if (!spent.ok) {
-      const currentTurn = currentWorldState.session_turn ?? 0;
-      await db.saveMessage(sessionId, 'player_dm1', message, currentTurn);
-      await db.saveMessage(sessionId, 'dm1', spent.reply, currentTurn);
-      await db.incrementSessionTurn(sessionId);
-      socket.emit('dm1_response', { message: spent.reply });
-      return { matched: true, handled: true };
-    }
-    actionWorldState = spent.worldState;
-  }
 
-  const result = resolveSpellCast({
+  let result = resolveSpellCast({
     message,
     content,
     characterSheet: sheet,
-    worldState: actionWorldState,
+    worldState: currentWorldState,
   });
   if (!result?.matched) return { matched: false };
 
@@ -449,6 +433,23 @@ async function handleDeterministicSpellAction(socket, sessionId, message) {
     await db.incrementSessionTurn(sessionId);
     socket.emit('dm1_response', { message: result.reply });
     return { matched: true, handled: true };
+  }
+
+  if (currentWorldState.combat_state?.active) {
+    const actionResource = getSpellActionResource(result.spell);
+    const spent = spendTurnResource(result.worldState, actionResource, result.spell.name, result.characterSheet);
+    if (!spent.ok) {
+      const currentTurn = currentWorldState.session_turn ?? 0;
+      await db.saveMessage(sessionId, 'player_dm1', message, currentTurn);
+      await db.saveMessage(sessionId, 'dm1', spent.reply, currentTurn);
+      await db.incrementSessionTurn(sessionId);
+      socket.emit('dm1_response', { message: spent.reply });
+      return { matched: true, handled: true };
+    }
+    result = {
+      ...result,
+      worldState: spent.worldState,
+    };
   }
 
   const spellOutcome = resolveSpellOutcome({

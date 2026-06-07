@@ -2,7 +2,7 @@
 
 Hallucinated Dungeons separates mechanical truth from storytelling.
 
-The AI Game Master narrates the world, improvises characters and situations, and proposes checks when a player tries something uncertain. The deterministic referee owns rules resolution and persisted mechanical state. A confident paragraph is not a spell slot, a map coordinate, or permission to fly.
+The AI Game Master narrates the world and improvises characters and situations. The deterministic referee detects uncertain actions, prompts and resolves checks, and owns persisted mechanical state. A confident paragraph is not a spell slot, a map coordinate, or permission to fly.
 
 ## Core Flow
 
