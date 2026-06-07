@@ -5,7 +5,40 @@ QA thread role: read-only QA, no development changes.
 
 ## Summary
 
-Latest production regression pass confirms hazard consequences now narrate concrete results. Consumable-count querying and natural rope use still fail in production despite local tests. Client lint passed. Server tests pass.
+Latest production regression pass confirms the remaining ration-count and rope-use issues are fixed in production. Client lint passed. Server tests pass.
+
+## Latest QA Pass - 2026-06-07 After DEV Fix `d82268c`
+
+Scope:
+
+- Verified local `main` equals `origin/main` at `9752b67 Update QA_HANDOFF.md`; latest app-code fix is `d82268c Fix DM2 inventory counts and rope false positives`.
+- Rechecked production at `https://hallucinated-dungeons.vercel.app/` using existing `QA Smoke` session.
+- Rechecked local automation after the push.
+
+Automated checks:
+
+- Client `npm.cmd run lint`: PASS.
+- Server `npm.cmd test`: PASS, `427/427`.
+
+Verified fixed / passed in production:
+
+- DM2 ration count after consumption: PASS. The previously blank response now shows:
+
+```text
+You had Rations x9 in your Dungeoneer's Pack, and the context says you just ate that ration.
+So you now have Rations x8 left.
+```
+
+- Natural rope use: PASS. `i tie rope from my pack to the bridge rail before leaning over` now resolves with player-facing narration, says the hempen rope is tied securely to the bridge rail, and makes the line available for climbing/hauling/steadying.
+- Production console: PASS. No warn/error logs observed during this pass.
+
+QA note:
+
+- A fresh DM2 question attempt hit the known browser automation typing issue where the Rules textarea duplicated automated keystrokes and kept `ASK` disabled. QA did not count that as an app defect because the visible production transcript already contained the corrected ration answer after reload.
+
+Current blocker recommendation:
+
+- No remaining P2 blocker from this targeted inventory/hazard pass. From QA's current evidence, DEV can proceed toward 4D leveling, with normal caution around resource/inventory state because that is the area most likely to regress.
 
 ## Latest QA Pass - 2026-06-07 After DEV Fix `2500df3`
 
