@@ -449,10 +449,16 @@ function App() {
       setCharacterError({ message: 'No active session. Please refresh.' });
       return;
     }
+    if (characterId === activeCharacterId && currentCharacter) {
+      setCharacterJoining(false);
+      setCharacterError(null);
+      setCharacterStatus('ready');
+      return;
+    }
     setCharacterJoining(true);
     setCharacterError(null);
     socket.emit('join_character', { sessionId, sessionToken, characterId });
-  }, [sessionId, sessionToken]);
+  }, [activeCharacterId, currentCharacter, sessionId, sessionToken]);
 
   const handleCreateNewCharacter = useCallback(() => {
     setCurrentCharacter(null);
@@ -462,12 +468,9 @@ function App() {
   }, []);
 
   const handleSwitchCharacter = useCallback(() => {
-    if (sessionId && sessionToken && currentCharacter) {
-      socket.emit('leave_character', { sessionId, sessionToken });
-    }
     setCharacterError(null);
     setCharacterStatus('select');
-  }, [sessionId, sessionToken, currentCharacter]);
+  }, []);
 
   const handleRollCharacterStats = useCallback(() => new Promise((resolve) => {
     if (!sessionId || !sessionToken) {
@@ -740,7 +743,7 @@ function CharacterSheetModal({ character, content, onClose }) {
   const identity = character.identity || {};
   const abilities = character.abilities || {};
   const derived = character.derived_stats || {};
-  const passiveBonuses = character.active_effects || [];
+  const equippedDefenses = character.active_effects || [];
   const activeEffects = derived.active_spell_effects || [];
   const attacks = derived.attack_breakdowns || [];
   const skills = derived.skill_modifiers || {};
@@ -814,10 +817,10 @@ function CharacterSheetModal({ character, content, onClose }) {
             )) : <p className="muted-text">No active effects.</p>}
           </section>
 
-          {passiveBonuses.length > 0 && (
+          {equippedDefenses.length > 0 && (
             <section className="sheet-section">
-              <h3>Passive Bonuses</h3>
-              {passiveBonuses.map((effect) => (
+              <h3>Equipped Defenses</h3>
+              {equippedDefenses.map((effect) => (
                 <div key={`${effect.id || effect.name}-${effect.target || 'self'}`} className="sheet-line">
                   <strong>{formatEffectName(effect)}</strong>
                   <span>{formatEffectSummary(effect)}</span>

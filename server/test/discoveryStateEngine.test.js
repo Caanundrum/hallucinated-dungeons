@@ -6,7 +6,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { adjudicate } = require('../src/refereeCore');
-const { inferDiscoveryTarget } = require('../src/discoveryStateEngine');
+const {
+  applyDiscoveryCheckOutcome,
+  buildDiscoveryPendingMetadata,
+  inferDiscoveryTarget,
+} = require('../src/discoveryStateEngine');
 
 const characterSheet = {
   identity: { name: 'Lumen', level: 1, class: 'wizard', class_name: 'Wizard' },
@@ -95,6 +99,44 @@ test('successful Study records object knowledge on the visible target', () => {
   assert.equal(study.target_type, 'object');
   assert.equal(study.discovered, true);
   assert.equal(study.history[0].skill, 'investigation');
+});
+
+test('successful Investigation preserves explicit notice-board target and subject', () => {
+  const message = 'I inspect the notice board and look for details about the missing road-workers.';
+  const state = worldState({
+    scene_presence: {
+      ...worldState().scene_presence,
+      present_objects: ['palisade gate', 'muddy road'],
+    },
+  });
+  const metadata = buildDiscoveryPendingMetadata({
+    intent: {
+      raw: message,
+      check: { skill: 'investigation' },
+    },
+    worldState: state,
+  });
+  const resolved = applyDiscoveryCheckOutcome({
+    pending: {
+      ...metadata,
+      kind: 'skill_check',
+      skill: 'investigation',
+      dc: 10,
+      intent: message,
+    },
+    result: { total: 11 },
+    outcome: 'success',
+    worldState: state,
+  });
+  const study = resolved.worldState.discovery_state.studies.notice_board;
+
+  assert.equal(metadata.discovery_action, 'study');
+  assert.equal(metadata.discovery_target, 'notice board');
+  assert.equal(metadata.discovery_subject, 'missing road-workers');
+  assert.equal(study.target_type, 'object');
+  assert.equal(study.subject, 'missing road-workers');
+  assert.equal(study.discovered, true);
+  assert.match(resolved.lines.join('\n'), /notice board now has a successful study result about missing road-workers/);
 });
 
 test('Insight study records the targeted NPC state after the roll resolves', () => {

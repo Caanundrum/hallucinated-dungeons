@@ -8,6 +8,7 @@ const { estimateTokens } = require('./tokenUtils');
 const { getContentBundle, byId } = require('./contentData');
 const { filterActivePartyPresenceRows } = require('./partyPresence');
 const { buildRulesContext, summarizeRulesContextForPrompt } = require('./rulesContext');
+const { isEquipmentEffect } = require('./equipmentEffectEngine');
 
 const TOKEN_BUDGET = 8000; // trim if total estimated input exceeds this
 const CAMPAIGN_LOG_TOKEN_BUDGET = 2000;
@@ -51,7 +52,7 @@ async function build({ sessionId, dm1Prompt, playerMessage, liveCharacterIds = n
     `Present objects: ${formatSceneList(worldState.scene_presence?.present_objects)}.`,
     `Available exits: ${formatSceneList(worldState.scene_presence?.available_exits)}.`,
     `Practical time: ${formatTimeState(worldState.time_state)}.`,
-    `Active world effects: ${formatActiveEffects(worldState.active_effects)}.`,
+    `Tracked effects and equipped defenses: ${formatActiveEffects(worldState.active_effects)}.`,
     `Nearby but not present locations: ${formatSceneList(worldState.scene_presence?.nearby_locations)}.`,
     'Do not resolve interactions with NPCs, buildings, objects, or rooms unless they are present in the current location or the player explicitly travels to them first.',
     'If the player asks for an absent target, ask whether they head there instead of moving them silently.',
@@ -175,6 +176,9 @@ function formatActiveEffects(value) {
   if (!Array.isArray(value) || value.length === 0) return 'none';
   return value
     .map((effect) => {
+      if (isEquipmentEffect(effect)) {
+        return `${effect.name || effect.source_item_name || effect.id || 'equipment'} (equipped/passive defense, not a temporary spell effect)`;
+      }
       const remaining = effect.remaining_rounds != null
         ? `${effect.remaining_rounds} rounds left`
         : effect.remaining_minutes != null

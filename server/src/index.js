@@ -29,6 +29,7 @@ const {
 } = require('./spellEffectEngine');
 const {
   syncEquipmentEffectsToWorldState,
+  isEquipmentEffect,
 } = require('./equipmentEffectEngine');
 const {
   spendTurnResource,
@@ -348,6 +349,9 @@ function summarizeCharacterSheetForRules(characterSheet) {
   if (Array.isArray(derived.active_spell_effects) && derived.active_spell_effects.length) {
     lines.push(`Active effects: ${formatRulesActiveEffects(derived.active_spell_effects)}`);
   }
+  if (Array.isArray(characterSheet.active_effects) && characterSheet.active_effects.length) {
+    lines.push(`Equipped/passive defenses: ${formatRulesEquipmentEffects(characterSheet.active_effects)}`);
+  }
   if (features.length) {
     lines.push(`Features: ${features.map((feature) => `${feature.name} (${feature.source || 'feature'})`).join('; ')}`);
   }
@@ -374,6 +378,7 @@ function summarizeCharacterSheetForRules(characterSheet) {
 function formatRulesActiveEffects(effects = []) {
   if (!Array.isArray(effects) || effects.length === 0) return 'none';
   return effects.map((effect) => {
+    if (isEquipmentEffect(effect)) return formatRulesEquipmentEffect(effect);
     const remaining = effect.remaining_rounds != null
       ? `${effect.remaining_rounds} rounds left`
       : effect.remaining_minutes != null
@@ -391,6 +396,24 @@ function formatRulesActiveEffects(effects = []) {
       effect.concentration ? 'concentration' : null,
     ].filter(Boolean).join(' | ');
   }).join('; ');
+}
+
+function formatRulesEquipmentEffects(effects = []) {
+  const equipmentEffects = (effects || []).filter((effect) => isEquipmentEffect(effect) || effect.source_item_name || effect.source_item_id);
+  if (!equipmentEffects.length) return 'none';
+  return equipmentEffects.map(formatRulesEquipmentEffect).join('; ');
+}
+
+function formatRulesEquipmentEffect(effect = {}) {
+  const rules = (effect.rules_effects || [effect])
+    .map((rule) => `${rule.label || rule.source_item_name || rule.target}: ${rule.value != null ? formatRuleValue(rule.value) : rule.die || rule.mechanical_effect || rule.target}`)
+    .join(', ');
+  return [
+    effect.name || effect.source_item_name || effect.id || 'equipment',
+    'equipped/passive, not a temporary spell effect',
+    effect.mechanical_effect || null,
+    rules || null,
+  ].filter(Boolean).join(' | ');
 }
 
 function formatRuleValue(value) {
@@ -1499,7 +1522,10 @@ io.on('connection', (socket) => {
             contextParts.push(`NPCs previously encountered: ${encounteredNpcs.map((n) => `${n.name} (${n.disposition || 'unknown'})`).join(', ')}`);
           }
           if (ws.active_effects?.length) {
-            contextParts.push(`Active effects: ${formatRulesActiveEffects(ws.active_effects)}`);
+            const activeEffects = ws.active_effects.filter((effect) => !isEquipmentEffect(effect));
+            const equippedEffects = ws.active_effects.filter((effect) => isEquipmentEffect(effect));
+            if (activeEffects.length) contextParts.push(`Active temporary effects: ${formatRulesActiveEffects(activeEffects)}`);
+            if (equippedEffects.length) contextParts.push(`Equipped/passive defenses: ${formatRulesEquipmentEffects(equippedEffects)}`);
           }
           if (ws.combat_state && ws.combat_state.active) {
             contextParts.push(`COMBAT ACTIVE - Round ${ws.combat_state.round}. Combatants: ${
