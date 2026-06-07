@@ -51,6 +51,10 @@ const {
   applyProgressionAwards,
   formatProgressionAwardSummary,
 } = require('./progressionEngine');
+const {
+  applyLevelUp,
+  getLevelUpPreview,
+} = require('./levelUpEngine');
 
 // ── Setup ──────────────────────────────────────────────────────────────────
 const app    = express();
@@ -1150,7 +1154,86 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ── story_input ───────────────────────────────────────────────────────
+  // Phase 4D: level-up preview and guarded apply.
+  socket.on('get_level_up_preview', async ({ sessionId, sessionToken } = {}) => {
+    if (!hasValidSocketSession(socket, sessionId, sessionToken)) {
+      socket.emit('level_up_error', {
+        message: 'Your level-up preview could not be opened for this session. Please refresh.',
+      });
+      return;
+    }
+
+    try {
+      const character = await db.getCharacterForSession(sessionId);
+      if (!character?.character_sheet) {
+        socket.emit('level_up_error', {
+          message: 'Choose or create a character before leveling up.',
+        });
+        return;
+      }
+
+      socket.emit('level_up_preview', {
+        characterId: character.id,
+        preview: getLevelUpPreview(character.character_sheet, getContentBundle()),
+      });
+    } catch (err) {
+      console.error('get_level_up_preview error:', err);
+      socket.emit('level_up_error', {
+        message: 'The level-up table jammed. Try again in a moment.',
+      });
+    }
+  });
+
+  socket.on('level_up_character', async ({ sessionId, sessionToken, payload = {} } = {}) => {
+    if (!hasValidSocketSession(socket, sessionId, sessionToken)) {
+      socket.emit('level_up_error', {
+        message: 'Your character could not level up for this session. Please refresh.',
+      });
+      return;
+    }
+
+    try {
+      const character = await db.getCharacterForSession(sessionId);
+      if (!character?.character_sheet) {
+        socket.emit('level_up_error', {
+          message: 'Choose or create a character before leveling up.',
+        });
+        return;
+      }
+
+      const result = applyLevelUp({
+        characterSheet: character.character_sheet,
+        content: getContentBundle(),
+        payload,
+      });
+      if (!result.ok) {
+        socket.emit('level_up_error', {
+          message: result.error,
+          preview: result.preview,
+        });
+        return;
+      }
+
+      const saved = await db.updateCharacterSheet(character.id, result.characterSheet);
+      await syncCharacterToWorldState(sessionId, saved.character_sheet, saved.id).catch(console.error);
+      socket.emit('character_ready', {
+        characterId: saved.id,
+        character: saved.character_sheet,
+        shouldStartSession: false,
+      });
+      socket.emit('level_up_result', {
+        characterId: saved.id,
+        character: saved.character_sheet,
+        applied: result.applied,
+      });
+    } catch (err) {
+      console.error('level_up_character error:', err);
+      socket.emit('level_up_error', {
+        message: 'The level-up ceremony exploded in a small, rules-shaped cloud. Try again.',
+      });
+    }
+  });
+
   // Phase 4B: character selection and party presence.
   socket.on('join_character', async ({ sessionId, sessionToken, characterId } = {}) => {
     if (!hasValidSocketSession(socket, sessionId, sessionToken)) {
@@ -1255,6 +1338,7 @@ io.on('connection', (socket) => {
   });
 
   // Player narrative input.
+  // ── story_input ───────────────────────────────────────────────────────
   socket.on('story_input', async ({ message }) => {
     const sessionId = socket.sessionId;
     if (!sessionId) {

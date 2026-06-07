@@ -167,6 +167,9 @@ function App() {
   const [availableCharacters, setAvailableCharacters] = useState([]);
   const [activeCharacterId, setActiveCharacterId] = useState(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [levelUpPreview, setLevelUpPreview] = useState(null);
+  const [levelUpError, setLevelUpError] = useState(null);
+  const [levelUpBusy, setLevelUpBusy] = useState(false);
   const [characterError, setCharacterError] = useState(null);
   const [characterSaving, setCharacterSaving] = useState(false);
   const [characterJoining, setCharacterJoining] = useState(false);
@@ -213,6 +216,9 @@ function App() {
     socket.off('character_roll');
     socket.off('character_left');
     socket.off('level_up_available');
+    socket.off('level_up_preview');
+    socket.off('level_up_error');
+    socket.off('level_up_result');
 
     socket.connect();
 
@@ -234,6 +240,9 @@ function App() {
       setNarrative([]);
       setRulesLog([]);
       setCurrentCharacter(null);
+      setLevelUpPreview(null);
+      setLevelUpError(null);
+      setLevelUpBusy(false);
       setCharacterStatus('loading');
       socket.emit('get_character_data', { sessionId: id, sessionToken });
     });
@@ -271,6 +280,9 @@ function App() {
       const divider = { type: 'divider', text: '-- Session resumed --', id: 'divider-resume' };
       setNarrative([...narrativeHistory, divider]);
       setRulesLog(rulesHistory);
+      setLevelUpPreview(null);
+      setLevelUpError(null);
+      setLevelUpBusy(false);
       socket.emit('get_character_data', { sessionId: id, sessionToken });
     });
 
@@ -292,6 +304,7 @@ function App() {
     socket.on('character_ready', ({ character, characterId, shouldStartSession } = {}) => {
       setCharacterSaving(false);
       setCharacterJoining(false);
+      setLevelUpBusy(false);
       setCharacterError(null);
       if (character) setCurrentCharacter(character);
       if (characterId) setActiveCharacterId(characterId);
@@ -329,6 +342,29 @@ function App() {
           const option = summarizeCharacterOption(characterId, character);
           setAvailableCharacters((prev) => [option, ...prev.filter((item) => item.id !== characterId)]);
         }
+      }
+    });
+
+    socket.on('level_up_preview', ({ preview } = {}) => {
+      setLevelUpBusy(false);
+      setLevelUpError(null);
+      setLevelUpPreview(preview || null);
+    });
+
+    socket.on('level_up_error', ({ message, preview } = {}) => {
+      setLevelUpBusy(false);
+      setLevelUpError(message || 'Level up is not available yet.');
+      if (preview) setLevelUpPreview(preview);
+    });
+
+    socket.on('level_up_result', ({ character, characterId } = {}) => {
+      setLevelUpBusy(false);
+      setLevelUpPreview(null);
+      setLevelUpError(null);
+      if (character) setCurrentCharacter(character);
+      if (character && characterId) {
+        const option = summarizeCharacterOption(characterId, character);
+        setAvailableCharacters((prev) => [option, ...prev.filter((item) => item.id !== characterId)]);
       }
     });
 
@@ -401,6 +437,9 @@ function App() {
       socket.off('character_roll');
       socket.off('character_left');
       socket.off('level_up_available');
+      socket.off('level_up_preview');
+      socket.off('level_up_error');
+      socket.off('level_up_result');
       socket.disconnect();
     };
   }, []);
@@ -465,6 +504,8 @@ function App() {
       setCharacterError({ message: 'No active session. Please refresh.' });
       return;
     }
+    setLevelUpPreview(null);
+    setLevelUpError(null);
     if (characterId === activeCharacterId && currentCharacter) {
       setCharacterJoining(false);
       setCharacterError(null);
@@ -480,12 +521,39 @@ function App() {
     setCurrentCharacter(null);
     setActiveCharacterId(null);
     setCharacterError(null);
+    setLevelUpPreview(null);
+    setLevelUpError(null);
     setCharacterStatus('required');
   }, []);
 
   const handleSwitchCharacter = useCallback(() => {
     setCharacterError(null);
+    setLevelUpPreview(null);
+    setLevelUpError(null);
     setCharacterStatus('select');
+  }, []);
+
+  const handleOpenLevelUp = useCallback(() => {
+    if (!sessionId || !sessionToken) {
+      setLevelUpError('No active session. Please refresh.');
+      return;
+    }
+    setLevelUpBusy(true);
+    setLevelUpError(null);
+    socket.emit('get_level_up_preview', { sessionId, sessionToken });
+  }, [sessionId, sessionToken]);
+
+  const handleConfirmLevelUp = useCallback(() => {
+    if (!sessionId || !sessionToken || !levelUpPreview?.canApply) return;
+    setLevelUpBusy(true);
+    setLevelUpError(null);
+    socket.emit('level_up_character', { sessionId, sessionToken, payload: { hpMethod: 'fixed' } });
+  }, [levelUpPreview, sessionId, sessionToken]);
+
+  const handleCloseLevelUp = useCallback(() => {
+    setLevelUpPreview(null);
+    setLevelUpError(null);
+    setLevelUpBusy(false);
   }, []);
 
   const handleRollCharacterStats = useCallback(() => new Promise((resolve) => {
@@ -749,13 +817,28 @@ function App() {
 
       </main>
       {sheetOpen && currentCharacter && (
-        <CharacterSheetModal character={currentCharacter} content={characterContent} onClose={() => setSheetOpen(false)} />
+        <CharacterSheetModal
+          character={currentCharacter}
+          content={characterContent}
+          levelUpBusy={levelUpBusy}
+          onClose={() => setSheetOpen(false)}
+          onLevelUp={handleOpenLevelUp}
+        />
+      )}
+      {(levelUpPreview || levelUpError) && (
+        <LevelUpModal
+          preview={levelUpPreview}
+          error={levelUpError}
+          busy={levelUpBusy}
+          onClose={handleCloseLevelUp}
+          onConfirm={handleConfirmLevelUp}
+        />
       )}
     </div>
   );
 }
 
-function CharacterSheetModal({ character, content, onClose }) {
+function CharacterSheetModal({ character, content, levelUpBusy, onClose, onLevelUp }) {
   const identity = character.identity || {};
   const progression = character.progression || {};
   const abilities = character.abilities || {};
@@ -807,7 +890,14 @@ function CharacterSheetModal({ character, content, onClose }) {
             <p>{identity.species_name} {identity.class_name} - Level {identity.level || derived.level || 1}</p>
             {levelUpReady && <span className="level-up-badge">Level Up Available</span>}
           </div>
-          <button type="button" className="secondary-btn" onClick={onClose}>Close</button>
+          <div className="sheet-header-actions">
+            {levelUpReady && (
+              <button type="button" className="primary-btn" onClick={onLevelUp} disabled={levelUpBusy}>
+                {levelUpBusy ? 'Checking...' : 'Level Up'}
+              </button>
+            )}
+            <button type="button" className="secondary-btn" onClick={onClose}>Close</button>
+          </div>
         </div>
 
         <div className="sheet-stat-strip">
@@ -1034,6 +1124,86 @@ function CharacterSheetModal({ character, content, onClose }) {
   );
 }
 
+function LevelUpModal({ preview, error, busy, onClose, onConfirm }) {
+  const blockers = preview?.blockers || [];
+  const canApply = Boolean(preview?.canApply);
+  const canLevelUp = Boolean(preview?.canLevelUp);
+
+  return (
+    <div className="sheet-backdrop" role="dialog" aria-modal="true" aria-label="Level up preview">
+      <div className="level-up-modal">
+        <div className="sheet-header">
+          <div>
+            <p className="eyebrow">Level Up</p>
+            <h2>{preview ? `${preview.className} Level ${preview.nextLevel}` : 'Level Up'}</h2>
+            {preview && (
+              <p>
+                XP {preview.currentXp}/{preview.threshold ?? '--'} - Level {preview.currentLevel} to {preview.nextLevel}
+              </p>
+            )}
+          </div>
+          <button type="button" className="secondary-btn" onClick={onClose}>Close</button>
+        </div>
+
+        {error && <div className="level-up-alert">{error}</div>}
+
+        {preview && (
+          <div className="level-up-content">
+            <div className="sheet-stat-strip">
+              <SheetStat label="Status" value={canLevelUp ? 'Ready' : 'Not Yet'} />
+              <SheetStat label="HP Gain" value={`+${preview.hp?.increase ?? 0}`} />
+              <SheetStat label="PB" value={`${fmtMod(preview.proficiencyBonus?.current)} -> ${fmtMod(preview.proficiencyBonus?.next)}`} />
+              <SheetStat label="Apply" value={canApply ? 'Unlocked' : 'Blocked'} />
+            </div>
+
+            <section className="sheet-section">
+              <h3>Hit Points</h3>
+              <p className="muted-text">
+                Fixed increase: {preview.hp?.fixedBase ?? '--'} + CON {fmtMod(preview.hp?.constitutionModifier)}
+                {preview.hp?.perLevelBonus ? ` + bonus ${fmtMod(preview.hp.perLevelBonus)}` : ''}.
+              </p>
+            </section>
+
+            <section className="sheet-section">
+              <h3>New Features</h3>
+              {preview.features?.length ? preview.features.map((feature) => (
+                <div key={feature.id || feature.name} className="sheet-line">
+                  <strong>{feature.name}</strong>
+                  <span>{feature.description}</span>
+                </div>
+              )) : <p className="muted-text">No new feature data for this level.</p>}
+            </section>
+
+            {preview.spellcasting && (
+              <section className="sheet-section">
+                <h3>Spellcasting</h3>
+                <p className="muted-text">{formatPreviewSpellcasting(preview.spellcasting)}</p>
+              </section>
+            )}
+
+            <section className="sheet-section">
+              <h3>Before Applying</h3>
+              {blockers.length ? blockers.map((blocker) => (
+                <div key={`${blocker.type}-${blocker.message}`} className="sheet-line">
+                  <strong>{titleCase(blocker.type)}</strong>
+                  <span>{blocker.message}</span>
+                </div>
+              )) : <p className="muted-text">No blockers. The rules table is calm, which is suspicious but welcome.</p>}
+            </section>
+
+            <div className="level-up-actions">
+              <button type="button" className="secondary-btn" onClick={onClose}>Not Now</button>
+              <button type="button" className="primary-btn" onClick={onConfirm} disabled={!canApply || busy}>
+                {busy ? 'Applying...' : canApply ? 'Apply Level Up' : 'Rules Work Needed'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SheetStat({ label, value }) {
   return (
     <div className="sheet-stat">
@@ -1041,6 +1211,20 @@ function SheetStat({ label, value }) {
       <strong>{value}</strong>
     </div>
   );
+}
+
+function formatPreviewSpellcasting(spellcasting = {}) {
+  const parts = [];
+  if (spellcasting.cantrips !== undefined) parts.push(`${spellcasting.cantrips} cantrips`);
+  if (spellcasting.prepared_spells !== undefined) parts.push(`${spellcasting.prepared_spells} prepared spells`);
+  if (spellcasting.spellbook_spells_add) parts.push(`${spellcasting.spellbook_spells_add} spellbook additions`);
+  if (spellcasting.always_prepared_spells?.length) {
+    parts.push(`always prepared: ${spellcasting.always_prepared_spells.map((spell) => spell.replaceAll('_', ' ')).join(', ')}`);
+  }
+  if (spellcasting.slots) {
+    parts.push(`slots ${Object.entries(spellcasting.slots).map(([level, count]) => `L${level}:${count}`).join(', ')}`);
+  }
+  return parts.join(' - ') || 'No spellcasting changes.';
 }
 
 function formatEffectSummary(effect) {

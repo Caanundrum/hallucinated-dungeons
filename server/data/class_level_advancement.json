@@ -1,0 +1,382 @@
+{
+  "version": "srd-5.2.1-level-2-foundation",
+  "source": "SRD 5.2.1 class feature tables and level advancement rules",
+  "levels": {
+    "barbarian": {
+      "2": {
+        "features": [
+          {
+            "id": "danger_sense",
+            "name": "Danger Sense",
+            "description": "Gain advantage on Dexterity saving throws unless incapacitated."
+          },
+          {
+            "id": "reckless_attack",
+            "name": "Reckless Attack",
+            "description": "Choose to attack recklessly for advantage on Strength-based attacks, while attacks against you gain advantage until your next turn."
+          }
+        ],
+        "runtime_mechanics": ["danger_sense", "reckless_attack"],
+        "required_choices": [],
+        "resources": {
+          "rage": {
+            "name": "Rage",
+            "remaining": 2,
+            "max": 2,
+            "reset": "long_rest",
+            "recover_on_short_rest": 1
+          }
+        }
+      }
+    },
+    "bard": {
+      "2": {
+        "features": [
+          {
+            "id": "expertise",
+            "name": "Expertise",
+            "description": "Choose two proficient skills and double your proficiency bonus for checks with them."
+          },
+          {
+            "id": "jack_of_all_trades",
+            "name": "Jack of All Trades",
+            "description": "Add half your proficiency bonus to skill checks that do not already include proficiency."
+          }
+        ],
+        "runtime_mechanics": ["expertise_level_2", "jack_of_all_trades"],
+        "required_choices": [
+          {
+            "id": "expertise_skills",
+            "label": "Expertise Skills",
+            "type": "skill",
+            "count": 2
+          }
+        ],
+        "spellcasting": {
+          "cantrips": 2,
+          "prepared_spells": 5,
+          "slots": { "1": 3 }
+        }
+      }
+    },
+    "cleric": {
+      "2": {
+        "features": [
+          {
+            "id": "channel_divinity",
+            "name": "Channel Divinity",
+            "description": "Gain divine channeling uses for features such as Divine Spark and Turn Undead."
+          }
+        ],
+        "runtime_mechanics": ["channel_divinity", "divine_spark", "turn_undead"],
+        "required_choices": [],
+        "spellcasting": {
+          "cantrips": 3,
+          "prepared_spells": 5,
+          "slots": { "1": 3 }
+        },
+        "resources": {
+          "channel_divinity": {
+            "name": "Channel Divinity",
+            "remaining": 2,
+            "max": 2,
+            "reset": "short_rest"
+          }
+        }
+      }
+    },
+    "druid": {
+      "2": {
+        "features": [
+          {
+            "id": "wild_shape",
+            "name": "Wild Shape",
+            "description": "Gain uses of Wild Shape for beast forms."
+          },
+          {
+            "id": "wild_companion",
+            "name": "Wild Companion",
+            "description": "Use Wild Shape to cast Find Familiar without spending a spell slot or material components."
+          }
+        ],
+        "runtime_mechanics": ["wild_shape", "wild_companion"],
+        "required_choices": [],
+        "spellcasting": {
+          "cantrips": 2,
+          "prepared_spells": 5,
+          "slots": { "1": 3 }
+        },
+        "resources": {
+          "wild_shape": {
+            "name": "Wild Shape",
+            "remaining": 2,
+            "max": 2,
+            "reset": "short_rest"
+          }
+        }
+      }
+    },
+    "fighter": {
+      "2": {
+        "features": [
+          {
+            "id": "action_surge",
+            "name": "Action Surge",
+            "description": "Once per rest, push beyond normal limits to take an additional action on your turn."
+          },
+          {
+            "id": "tactical_mind",
+            "name": "Tactical Mind",
+            "description": "Spend Second Wind to improve a failed ability check without healing."
+          }
+        ],
+        "runtime_mechanics": ["action_surge", "tactical_mind"],
+        "required_choices": [],
+        "resources": {
+          "action_surge": {
+            "name": "Action Surge",
+            "remaining": 1,
+            "max": 1,
+            "reset": "short_rest"
+          }
+        }
+      }
+    },
+    "monk": {
+      "2": {
+        "features": [
+          {
+            "id": "monks_focus",
+            "name": "Monk's Focus",
+            "description": "Gain Focus Points for enhanced monk techniques."
+          },
+          {
+            "id": "unarmored_movement",
+            "name": "Unarmored Movement",
+            "description": "Move faster while not wearing armor or using a shield."
+          },
+          {
+            "id": "uncanny_metabolism",
+            "name": "Uncanny Metabolism",
+            "description": "Once per long rest, recover Focus Points and some hit points when initiative starts."
+          }
+        ],
+        "runtime_mechanics": ["focus_points", "unarmored_movement", "uncanny_metabolism"],
+        "required_choices": [],
+        "resources": {
+          "focus_points": {
+            "name": "Focus Points",
+            "remaining": 2,
+            "max": 2,
+            "reset": "short_rest"
+          },
+          "uncanny_metabolism": {
+            "name": "Uncanny Metabolism",
+            "remaining": 1,
+            "max": 1,
+            "reset": "long_rest"
+          }
+        },
+        "derived": {
+          "speed_bonus": 10
+        }
+      }
+    },
+    "paladin": {
+      "2": {
+        "features": [
+          {
+            "id": "fighting_style",
+            "name": "Fighting Style",
+            "description": "Choose one Fighting Style feat available to Paladins."
+          },
+          {
+            "id": "paladins_smite",
+            "name": "Paladin's Smite",
+            "description": "Divine Smite is always prepared, and you can cast it once without a spell slot each long rest."
+          }
+        ],
+        "runtime_mechanics": ["paladin_smite", "fighting_style_level_2"],
+        "required_choices": [
+          {
+            "id": "fighting_style",
+            "label": "Fighting Style",
+            "type": "fighting_style",
+            "count": 1
+          }
+        ],
+        "spellcasting": {
+          "prepared_spells": 3,
+          "always_prepared_spells": ["divine_smite"],
+          "slots": { "1": 2 }
+        },
+        "resources": {
+          "paladins_smite": {
+            "name": "Paladin's Smite",
+            "remaining": 1,
+            "max": 1,
+            "reset": "long_rest"
+          }
+        }
+      }
+    },
+    "ranger": {
+      "2": {
+        "features": [
+          {
+            "id": "deft_explorer",
+            "name": "Deft Explorer",
+            "description": "Gain Expertise in one proficient skill and learn two additional languages."
+          },
+          {
+            "id": "fighting_style",
+            "name": "Fighting Style",
+            "description": "Choose one Fighting Style feat or Druidic Warrior."
+          }
+        ],
+        "runtime_mechanics": ["deft_explorer", "fighting_style_level_2", "druidic_warrior"],
+        "required_choices": [
+          {
+            "id": "deft_explorer_expertise",
+            "label": "Deft Explorer Expertise",
+            "type": "skill",
+            "count": 1
+          },
+          {
+            "id": "deft_explorer_languages",
+            "label": "Deft Explorer Languages",
+            "type": "language",
+            "count": 2
+          },
+          {
+            "id": "fighting_style",
+            "label": "Fighting Style",
+            "type": "fighting_style",
+            "count": 1
+          }
+        ],
+        "spellcasting": {
+          "prepared_spells": 3,
+          "slots": { "1": 2 }
+        }
+      }
+    },
+    "rogue": {
+      "2": {
+        "features": [
+          {
+            "id": "cunning_action",
+            "name": "Cunning Action",
+            "description": "Use a bonus action for Dash, Disengage, or Hide."
+          }
+        ],
+        "runtime_mechanics": ["cunning_action"],
+        "required_choices": []
+      }
+    },
+    "sorcerer": {
+      "2": {
+        "features": [
+          {
+            "id": "font_of_magic",
+            "name": "Font of Magic",
+            "description": "Gain Sorcery Points that can become spell slots or fuel other sorcerous features."
+          },
+          {
+            "id": "metamagic",
+            "name": "Metamagic",
+            "description": "Choose two Metamagic options to shape your spells."
+          }
+        ],
+        "runtime_mechanics": ["font_of_magic", "metamagic"],
+        "required_choices": [
+          {
+            "id": "metamagic",
+            "label": "Metamagic Options",
+            "type": "metamagic",
+            "count": 2
+          }
+        ],
+        "spellcasting": {
+          "cantrips": 4,
+          "prepared_spells": 4,
+          "slots": { "1": 3 }
+        },
+        "resources": {
+          "sorcery_points": {
+            "name": "Sorcery Points",
+            "remaining": 2,
+            "max": 2,
+            "reset": "long_rest"
+          }
+        }
+      }
+    },
+    "warlock": {
+      "2": {
+        "features": [
+          {
+            "id": "magical_cunning",
+            "name": "Magical Cunning",
+            "description": "Perform a short rite once per long rest to recover some expended Pact Magic slots."
+          }
+        ],
+        "runtime_mechanics": ["magical_cunning", "eldritch_invocations_level_2"],
+        "required_choices": [
+          {
+            "id": "eldritch_invocations",
+            "label": "Additional Eldritch Invocations",
+            "type": "eldritch_invocation",
+            "count": 2,
+            "total_after_level": 3
+          }
+        ],
+        "spellcasting": {
+          "cantrips": 2,
+          "prepared_spells": 3,
+          "slots": { "1": 2 }
+        },
+        "resources": {
+          "magical_cunning": {
+            "name": "Magical Cunning",
+            "remaining": 1,
+            "max": 1,
+            "reset": "long_rest"
+          }
+        }
+      }
+    },
+    "wizard": {
+      "2": {
+        "features": [
+          {
+            "id": "scholar",
+            "name": "Scholar",
+            "description": "Gain Expertise in one scholarly skill proficiency."
+          }
+        ],
+        "runtime_mechanics": ["scholar"],
+        "required_choices": [
+          {
+            "id": "scholar_skill",
+            "label": "Scholar Expertise",
+            "type": "skill",
+            "count": 1
+          },
+          {
+            "id": "spellbook_spells",
+            "label": "Spellbook Additions",
+            "type": "wizard_spell",
+            "count": 2
+          }
+        ],
+        "spellcasting": {
+          "cantrips": 3,
+          "prepared_spells": 5,
+          "spellbook_spells_add": 2,
+          "slots": { "1": 3 }
+        }
+      }
+    }
+  }
+}

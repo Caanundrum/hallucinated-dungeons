@@ -19,6 +19,7 @@ const content = {
   spells: readJson('spells.json'),
   feats: readJson('feats.json'),
   xpThresholds: readJson('xp_thresholds.json'),
+  classAdvancement: readJson('class_level_advancement.json'),
   itemEffects: readJson('item_effects.json'),
   abilityScoreMethods: [
     {
