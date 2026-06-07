@@ -1494,15 +1494,15 @@ io.on('connection', (socket) => {
             if (scene.present_objects?.length) contextParts.push(`Objects present: ${scene.present_objects.join(', ')}`);
             if (scene.available_exits?.length) contextParts.push(`Available exits: ${scene.available_exits.join(', ')}`);
           }
-          const activeNpcs = (ws.npcs_encountered || []).filter((n) => n?.name);
-          if (activeNpcs.length > 0) {
-            contextParts.push(`NPCs present: ${activeNpcs.map((n) => `${n.name} (${n.disposition || 'unknown'})`).join(', ')}`);
+          const encounteredNpcs = (ws.npcs_encountered || []).filter((n) => n?.name);
+          if (encounteredNpcs.length > 0) {
+            contextParts.push(`NPCs previously encountered: ${encounteredNpcs.map((n) => `${n.name} (${n.disposition || 'unknown'})`).join(', ')}`);
           }
           if (ws.active_effects?.length) {
             contextParts.push(`Active effects: ${formatRulesActiveEffects(ws.active_effects)}`);
           }
           if (ws.combat_state && ws.combat_state.active) {
-            contextParts.push(`COMBAT ACTIVE — Round ${ws.combat_state.round}. Combatants: ${
+            contextParts.push(`COMBAT ACTIVE - Round ${ws.combat_state.round}. Combatants: ${
               (ws.combat_state.combatants || [])
                 .map((c) => `${c.name} (HP: ${c.hp}/${c.max_hp}, Initiative: ${c.initiative}${c.conditions?.length ? ', conditions: ' + c.conditions.join(', ') : ''})`)
                 .join('; ')
@@ -1513,7 +1513,7 @@ io.on('connection', (socket) => {
             const statParts = [];
             if (ps.name) statParts.push(`Name: ${ps.name}`);
             if (ps.class) statParts.push(`Class: ${ps.class} (level ${ps.level || 1})`);
-            if (ps.hp !== null) statParts.push(`HP: ${ps.hp}/${ps.max_hp}`);
+            if (ps.hp !== null && ps.hp !== undefined) statParts.push(`HP: ${ps.hp}/${ps.max_hp ?? '?'}`);
             if (ps.armor_class) statParts.push(`AC: ${ps.armor_class}`);
             if (ps.speed) statParts.push(`Speed: ${ps.speed} ft`);
             if (ps.alignment) statParts.push(`Alignment: ${ps.alignment}`);
