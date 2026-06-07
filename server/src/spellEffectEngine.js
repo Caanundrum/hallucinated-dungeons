@@ -526,7 +526,8 @@ function getSpellTargetContext({ spell, spellCastMessage = '', worldState = {}, 
   if (worldState.combat_state?.active) {
     const combat = cloneCombatState(worldState.combat_state);
     const requestedId = normalizeName(worldState.__spell_target_id);
-    const requestedName = normalizeName(worldState.__spell_target_name);
+    const requestedName = normalizeName(worldState.__spell_target_name || inferSpellTargetName(spellCastMessage, worldState, spell));
+    const hasRequestedTarget = Boolean(requestedId || requestedName);
     const target = (combat.combatants || []).find((combatant) => (
       !combatant.is_player
       && Number(combatant.hp) > 0
@@ -534,8 +535,11 @@ function getSpellTargetContext({ spell, spellCastMessage = '', worldState = {}, 
         (requestedId && normalizeName(combatant.id) === requestedId)
         || (requestedName && targetNamesMatch(combatant.name, requestedName))
       )
-    )) || firstEnemy(combat);
+    ));
     if (target) return { combat, target, activeCombat: true };
+    if (hasRequestedTarget) return null;
+    const fallback = firstEnemy(combat);
+    if (fallback) return { combat, target: fallback, activeCombat: true };
   }
 
   const explicitTarget = inferSpellTargetName(spellCastMessage, worldState, spell);

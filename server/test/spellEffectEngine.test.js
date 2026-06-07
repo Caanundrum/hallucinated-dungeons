@@ -484,6 +484,22 @@ test('Fire Bolt uses spell attack bonus and can consume a combat turn', () => {
   assert.match(outcome.reply, /12\+5 = 17 vs AC 12/);
 });
 
+test('combat spells block explicit absent targets instead of retargeting first enemy', () => {
+  const startingWorld = combatWorld();
+  const cast = resolveSpellCast({
+    message: 'I cast Fire Bolt at the dragon.',
+    content,
+    characterSheet: casterSheet(),
+    worldState: startingWorld,
+  });
+
+  const skeleton = startingWorld.combat_state.combatants.find((combatant) => combatant.name === 'Skeleton');
+
+  assert.equal(cast.blocked, true);
+  assert.match(cast.reply, /valid target in the current scene/);
+  assert.equal(skeleton.hp, 10);
+});
+
 test('active spell attack bonuses apply to spell attack resolution', () => {
   const cast = resolveSpellCast({
     message: 'I cast Fire Bolt at the skeleton.',

@@ -839,7 +839,13 @@ function SpeciesChoiceStep({ species, content, choices, onChoice }) {
           {species.choices.map((choice) => (
             <label key={choice.id} className="field-label">
               {choice.label}
-              <select value={choices[choice.id] || ''} onChange={(event) => onChoice(choice.id, event.target.value)}>
+              <select
+                id={`species-choice-${choice.id}`}
+                name={`species-choice-${choice.id}`}
+                aria-label={`${species.name} ${choice.label}`}
+                value={choices[choice.id] || ''}
+                onChange={(event) => onChoice(choice.id, event.target.value)}
+              >
                 <option value="">Choose {choice.label}</option>
                 {choice.type === 'skill' && (choice.options || []).map((skillId) => (
                   <option key={skillId} value={skillId}>
