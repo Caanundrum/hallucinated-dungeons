@@ -5,7 +5,51 @@ QA thread role: read-only QA, no development changes.
 
 ## Summary
 
-Latest production playtest passed core flow checks, with one new rules-answer bug and one discovery follow-up bug for DEV to fix. Client lint passed. Server tests pass.
+Latest production regression pass confirms the DM2 AC-source fix. Discovery follow-ups no longer request extra rolls, but still return referee/meta text instead of actual player-facing notice-board content. Client lint passed. Server tests pass.
+
+## Latest QA Pass - 2026-06-07 After DEV Fixes `3a3127f` / `9420094`
+
+Scope:
+
+- Verified local `main` equals `origin/main` at `9420094 Discovery state`.
+- Inspected fix commits `3a3127f Fix DM2 AC sources and discovery followups` and `9420094 Discovery state`.
+- Played production at `https://hallucinated-dungeons.vercel.app/` using the existing `QA Smoke` character.
+
+Verified fixed / passed:
+
+- DM2 AC exact-source answer: PASS in production on a fresh prompt. `Current exact AC sources after latest fix?` returned Chain Mail 16, Shield +2, Fighting Style: Defense +1, and total 19. No raw `armor_formula` token appeared.
+- Discovery follow-up roll gating: PARTIAL PASS in production. `Read the notice board details again.` and `Use the established notice board discovery...` did not request another roll, and story input stayed enabled after each response.
+- Production console: PASS. No warn/error logs observed during this pass.
+- Automated checks: PASS. Client `npm.cmd run lint` passed. Server `npm.cmd test` passed `411/411`.
+
+Still failing / needs follow-up:
+
+### P2: Known discovery follow-up returns referee/meta text instead of revealing content
+
+Production actions:
+
+```text
+Read the notice board details again.
+Use the established notice board discovery to read what it says about the missing road-workers.
+```
+
+Observed response both times:
+
+```text
+Discovery: notice details already has a successful study result on record. No new roll is needed; use the established result and reveal what that target can fairly provide.
+```
+
+Expected:
+
+No extra roll is correct, but the player should receive actual in-world notice-board content or a narrative reveal. The response should not tell the player/GM to reveal the content; it should reveal it.
+
+Additional note:
+
+This existing production session still contains legacy polluted discovery state from the previous bug (`notice details`). That may explain the target label, but not the player-facing problem. Even with an explicit prompt naming `notice board` and `missing road-workers`, the output remained meta/referee text instead of actual notice contents.
+
+Suggested fix:
+
+Route known-discovery follow-up responses back through DM1/player-facing narration after the referee confirms no roll is needed. The final chat message should contain the fair revealed detail, not the internal instruction.
 
 ## Latest QA Pass - 2026-06-07 After DEV Fix `52260cb`
 
