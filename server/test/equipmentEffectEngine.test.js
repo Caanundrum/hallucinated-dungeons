@@ -9,6 +9,7 @@ const {
   buildEquipmentActiveEffects,
   syncEquipmentEffectsToWorldState,
 } = require('../src/equipmentEffectEngine');
+const { applyActiveEffectsToCharacterSheet } = require('../src/spellEffectEngine');
 
 test('builds passive effects for equipped and attuned items only', () => {
   const effects = buildEquipmentActiveEffects({
@@ -58,4 +59,29 @@ test('syncs equipment effects while preserving non-equipment active effects', ()
     'wand_spark',
   ]);
   assert.equal(synced.active_effects.some((effect) => effect.id === 'equipment_old_boots'), false);
+});
+
+test('equipment effects do not populate active spell effects on character sheet', () => {
+  const equipmentEffect = {
+    id: 'equipment_shield',
+    name: 'Shield',
+    source_type: 'equipment',
+    rules_effects: [{ target: 'shield_bonus', value: 2, label: 'Shield' }],
+  };
+  const spellEffect = {
+    id: 'shield_of_faith',
+    name: 'Shield of Faith',
+    source_type: 'spell',
+    rules_effects: [{ target: 'armor_class_bonus', value: 2, label: 'Shield of Faith' }],
+  };
+  const sheet = applyActiveEffectsToCharacterSheet({
+    derived_stats: {
+      armor_class: 18,
+      armor_class_breakdown: [],
+      active_spell_effects: [],
+    },
+  }, [equipmentEffect, spellEffect]);
+
+  assert.deepEqual(sheet.derived_stats.active_spell_effects.map((effect) => effect.id), ['shield_of_faith']);
+  assert.equal(sheet.derived_stats.armor_class, 20);
 });

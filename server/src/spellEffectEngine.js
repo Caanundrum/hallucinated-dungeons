@@ -952,6 +952,7 @@ function formatSigned(value) {
 
 function applyActiveEffectsToCharacterSheet(characterSheet = {}, effects = []) {
   const normalizedEffects = normalizeEffects(effects);
+  const visibleActiveEffects = normalizedEffects.filter((effect) => !isEquipmentEffect(effect));
   const derived = characterSheet.derived_stats || {};
   const currentBreakdown = derived.armor_class_breakdown || [];
   const currentSpellArmorBonus = sumSpellArmorBreakdown(currentBreakdown);
@@ -973,9 +974,14 @@ function applyActiveEffectsToCharacterSheet(characterSheet = {}, effects = []) {
         ...currentBreakdown.filter((part) => !isSpellArmorBreakdown(part)),
         ...buildSpellArmorBreakdown(normalizedEffects),
       ],
-      active_spell_effects: normalizedEffects,
+      active_spell_effects: visibleActiveEffects,
     },
   };
+}
+
+function isEquipmentEffect(effect = {}) {
+  return effect.source_type === 'equipment'
+    || String(effect.id || '').startsWith('equipment_');
 }
 
 function applyActiveEffectsToWorldState(worldState = {}, effects = [], characterSheet = null) {

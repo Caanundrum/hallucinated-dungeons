@@ -580,7 +580,8 @@ async function syncCharacterFromWorldState(socket, sessionId, { forceEmit = fals
   }
 
   const worldEffects = Array.isArray(worldState.active_effects) ? worldState.active_effects : [];
-  if (JSON.stringify(nextDerived.active_spell_effects || []) !== JSON.stringify(worldEffects)) {
+  const visibleWorldEffects = worldEffects.filter((effect) => !isEquipmentEffect(effect));
+  if (JSON.stringify(nextDerived.active_spell_effects || []) !== JSON.stringify(visibleWorldEffects)) {
     const adjustedSheet = applyActiveEffectsToCharacterSheet({ ...sheet, derived_stats: nextDerived }, worldEffects);
     Object.assign(nextDerived, adjustedSheet.derived_stats || {});
     changed = true;

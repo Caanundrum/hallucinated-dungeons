@@ -744,7 +744,7 @@ function CharacterSheetModal({ character, content, onClose }) {
   const abilities = character.abilities || {};
   const derived = character.derived_stats || {};
   const equippedDefenses = character.active_effects || [];
-  const activeEffects = derived.active_spell_effects || [];
+  const activeEffects = (derived.active_spell_effects || []).filter((effect) => !isEquipmentEffect(effect));
   const attacks = derived.attack_breakdowns || [];
   const skills = derived.skill_modifiers || {};
   const saves = derived.saving_throw_modifiers || {};
@@ -1046,6 +1046,12 @@ function formatEffectName(effect) {
   if (effect.id) return titleCase(String(effect.id).replaceAll('_', ' '));
   if (effect.target) return titleCase(String(effect.target).replaceAll('_', ' '));
   return 'Passive Effect';
+}
+
+function isEquipmentEffect(effect = {}) {
+  return effect.source_type === 'equipment'
+    || String(effect.id || '').startsWith('equipment_')
+    || Boolean(effect.source_item_id || effect.source_item_name);
 }
 
 export default App;
