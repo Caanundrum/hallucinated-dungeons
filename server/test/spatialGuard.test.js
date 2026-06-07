@@ -163,6 +163,31 @@ test('allows carried objects even after they are removed from scene presence', (
   assert.equal(checkSpatialAction('Open the wax-sealed note.', state), null);
 });
 
+test('allows standard pack contents from carried inventory without unpacking phrase', () => {
+  const state = {
+    current_location: 'Lantern Bridge',
+    scene_presence: {
+      exact_location: 'Lantern Bridge',
+      location_type: 'bridge',
+      present_npcs: [],
+      present_objects: ['bridge rail', 'dark water'],
+      available_exits: ['far bank'],
+      nearby_locations: [],
+    },
+    object_states: {},
+    inventory_state: {
+      carried_objects: [
+        { name: "Dungeoneer's Pack", source: 'character_sheet' },
+        { name: 'Hempen Rope (50 feet)', source: 'pack_contents', source_container: "Dungeoneer's Pack" },
+        { name: 'Torch', quantity: 10, source: 'pack_contents', source_container: "Dungeoneer's Pack" },
+      ],
+    },
+  };
+
+  assert.equal(checkSpatialAction('I tie rope from my pack to the bridge rail before leaning over.', state), null);
+  assert.equal(checkSpatialAction('I light a torch from my pack and hold it near the bridge rail.', state), null);
+});
+
 test('allows visible details of recently described present objects', () => {
   const state = {
     current_location: 'Bellwatch Hollow',

@@ -40,6 +40,8 @@ const {
   spendTurnResource,
   getSpellActionResource,
 } = require('./actionEconomy');
+const { buildResourceState } = require('./resourceEngine');
+const { syncInventoryStateFromCharacterSheet } = require('./inventoryStateEngine');
 
 // ── Setup ──────────────────────────────────────────────────────────────────
 const app    = express();
@@ -570,6 +572,10 @@ function normalizeActiveCharacterWorldState(worldState, characterSheet, characte
   const stats = characterSheetToWorldStats(characterSheet, characterId);
   const currentPlayerStats = worldState.player_stats || db.DEFAULT_WORLD_STATE.player_stats;
   const sameCharacter = Boolean(stats.character_id && currentPlayerStats.character_id === stats.character_id);
+  const currentResourceWorld = sameCharacter
+    ? { ...worldState, player_stats: currentPlayerStats }
+    : { player_stats: {} };
+  const resources = buildResourceState(characterSheet, currentResourceWorld);
   const nextPlayerStats = {
     ...currentPlayerStats,
     ...stats,
@@ -579,6 +585,7 @@ function normalizeActiveCharacterWorldState(worldState, characterSheet, characte
     ammunition_spent_since_recovery: sameCharacter
       ? currentPlayerStats.ammunition_spent_since_recovery || {}
       : {},
+    resources,
   };
   const baseWorldState = {
     ...worldState,
@@ -586,7 +593,12 @@ function normalizeActiveCharacterWorldState(worldState, characterSheet, characte
     player_stats: nextPlayerStats,
     combat_state: alignCombatPlayerToCharacter(worldState.combat_state, characterSheet, nextPlayerStats),
   };
-  return syncEquipmentEffectsToWorldState(baseWorldState, characterSheet);
+  return syncInventoryStateFromCharacterSheet(
+    syncEquipmentEffectsToWorldState(baseWorldState, characterSheet),
+    characterSheet,
+    getContentBundle(),
+    { characterId: stats.character_id, resetCarriedObjects: !sameCharacter }
+  );
 }
 
 function buildCharacterAmmunitionState(characterSheet = {}) {
@@ -625,6 +637,52 @@ function alignCombatPlayerToCharacter(combatState, characterSheet, playerStats) 
   const enemiesAlive = (aligned.combatants || [])
     .some((combatant) => !combatant.is_player && Number(combatant.hp || 0) > 0);
   return enemiesAlive ? aligned : null;
+}
+
+function formatCarriedInventoryForRules(carriedObjects = []) {
+  if (!Array.isArray(carriedObjects) || carriedObjects.length === 0) return '';
+  return carriedObjects
+    .filter((item) => item?.name)
+    .map((item) => {
+      const quantity = Number(item.quantity || 1) > 1 ? ` x${Number(item.quantity)}` : '';
+      const container = item.source_container ? ` in ${item.source_container}` : '';
+      return `${item.name}${quantity}${container}`;
+    })
+    .join(', ');
+}
+
+function formatObjectStateForRules(objectStates = {}) {
+  const entries = Object.values(objectStates || {}).filter((entry) => entry?.name);
+  if (!entries.length) return '';
+  return entries.slice(0, 12).map((entry) => {
+    const flags = [
+      entry.carried_by === 'player' ? 'carried' : null,
+      entry.present ? 'present' : null,
+      entry.is_open ? 'open' : null,
+      entry.is_read ? 'read' : null,
+      entry.used ? 'used' : null,
+      entry.last_interaction ? `last ${entry.last_interaction}` : null,
+    ].filter(Boolean);
+    return `${entry.name}${flags.length ? ` (${flags.join(', ')})` : ''}`;
+  }).join('; ');
+}
+
+function formatResourceStateForRules(resources = {}) {
+  const entries = Object.entries(resources || {}).filter(([, value]) => value && typeof value === 'object' && !Array.isArray(value));
+  if (!entries.length) return '';
+  return entries.map(([key, resource]) => {
+    if (key === 'spell_uses') {
+      const spellUses = Object.entries(resource)
+        .map(([spellKey, use]) => `${use.name || spellKey} ${use.remaining ?? '?'} / ${use.max ?? '?'}`)
+        .join(', ');
+      return `Spell-limited uses: ${spellUses}`;
+    }
+    const name = resource.name || key.replaceAll('_', ' ');
+    const max = resource.max !== undefined ? `/${resource.max}` : '';
+    const unit = resource.unit ? ` ${resource.unit}` : '';
+    const reset = resource.reset ? `, resets ${resource.reset.replaceAll('_', ' ')}` : '';
+    return `${name}: ${resource.remaining ?? '?'}${max}${unit}${reset}`;
+  }).join('; ');
 }
 
 function hasValidSocketSession(socket, sessionId, sessionToken) {
@@ -1420,6 +1478,10 @@ io.on('connection', (socket) => {
           if (encounteredNpcs.length > 0) {
             contextParts.push(`NPCs previously encountered: ${encounteredNpcs.map((n) => `${n.name} (${n.disposition || 'unknown'})`).join(', ')}`);
           }
+          const carriedInventory = formatCarriedInventoryForRules(ws.inventory_state?.carried_objects);
+          if (carriedInventory) contextParts.push(`Available carried inventory: ${carriedInventory}`);
+          const objectStateSummary = formatObjectStateForRules(ws.object_states);
+          if (objectStateSummary) contextParts.push(`Tracked object state: ${objectStateSummary}`);
           if (ws.active_effects?.length) {
             const activeEffects = ws.active_effects.filter((effect) => !isEquipmentEffect(effect));
             const equippedEffects = ws.active_effects.filter((effect) => isEquipmentEffect(effect));
@@ -1459,6 +1521,8 @@ io.on('connection', (socket) => {
               if (originSpellText.length) statParts.push(`Origin magic: ${originSpellText.join(', ')}`);
             }
             if (ps.conditions?.length) statParts.push(`Conditions: ${ps.conditions.join(', ')}`);
+            const resourceSummary = formatResourceStateForRules(ps.resources);
+            if (resourceSummary) statParts.push(`Resources: ${resourceSummary}`);
             if (ps.ammunition && Object.keys(ps.ammunition).length > 0) {
               statParts.push(`Ammunition: ${Object.values(ps.ammunition).map((item) => `${item.name || item.id} ${item.remaining}`).join(', ')}`);
             }

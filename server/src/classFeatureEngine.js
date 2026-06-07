@@ -90,6 +90,15 @@ function resolveRage({ worldState = {}, characterSheet = {} } = {}) {
 
 function resolveSecondWind({ worldState = {}, characterSheet = {}, rollDie = defaultRollDie } = {}) {
   if (!isClass(characterSheet, 'fighter')) return wrongClass('Second Wind', 'Fighter', worldState);
+  const missingHp = getMissingHp(worldState, characterSheet);
+  if (missingHp <= 0) {
+    return {
+      handled: true,
+      logType: 'feature_second_wind_full_hp',
+      worldState: mergeWorldResources(worldState, buildResourceState(characterSheet, worldState)),
+      reply: 'You are already at full HP, so **Second Wind** would not restore anything. No use is spent; save the heroic inhale for when something has actually dented you.',
+    };
+  }
 
   const spent = spendFeatureCost({ worldState, characterSheet, actionResource: 'bonus_action', actionLabel: 'Second Wind', resource: 'second_wind' });
   if (!spent.ok) return spent.result;

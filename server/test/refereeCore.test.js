@@ -110,6 +110,54 @@ test('contextual phrasing maps present targets to referee checks', () => {
   assert.match(socialApproach.reply, /Charisma \(Persuasion\)/);
 });
 
+test('hazardous swimming and climbing in heavy armor prompt Athletics instead of free narration', () => {
+  const armoredSheet = {
+    ...characterSheet,
+    equipped: { armor: 'chain_mail', off_hand: 'shield' },
+    inventory: [
+      { id: 'chain_mail', name: 'Chain Mail', type: 'armor', armor_category: 'heavy' },
+      { id: 'shield', name: 'Shield', type: 'shield' },
+      { id: 'dungeoneer_pack', name: "Dungeoneer's Pack", type: 'pack' },
+    ],
+    derived_stats: {
+      ...characterSheet.derived_stats,
+      skill_modifiers: {
+        ...characterSheet.derived_stats.skill_modifiers,
+        athletics: { total: 5, ability: 'str', proficient: true },
+      },
+    },
+  };
+  const bridgeState = worldState({
+    current_location: 'Lantern Bridge',
+    scene_presence: {
+      exact_location: 'Lantern Bridge over dark water',
+      location_type: 'slick bridge',
+      present_npcs: [],
+      present_objects: ['dark water', 'bridge support', 'bridge rail'],
+      available_exits: ['far bank'],
+    },
+  });
+
+  const jump = adjudicate({
+    message: 'I jump into the dark water.',
+    worldState: bridgeState,
+    characterSheet: armoredSheet,
+  });
+  const climb = adjudicate({
+    message: 'I climb back up onto the bridge.',
+    worldState: bridgeState,
+    characterSheet: armoredSheet,
+  });
+
+  assert.equal(jump.handled, true);
+  assert.equal(jump.worldState.pending_roll.skill, 'athletics');
+  assert.ok(jump.worldState.pending_roll.dc >= 25);
+  assert.match(jump.worldState.pending_roll.dc_source, /heavy armor/);
+  assert.match(jump.reply, /Strength \(Athletics\)/);
+  assert.equal(climb.worldState.pending_roll.skill, 'athletics');
+  assert.match(climb.worldState.pending_roll.dc_source, /shield and carried gear/);
+});
+
 test('condition modes are stored on pending checks and saves for the server roller', () => {
   const poisonedCheck = adjudicate({
     message: "I study the clerk's face.",

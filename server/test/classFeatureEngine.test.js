@@ -92,6 +92,32 @@ test('unavailable feature resources do not spend the combat Bonus Action', () =>
   assert.match(result.reply, /not available/);
 });
 
+test('Second Wind at full HP does not spend the use or Bonus Action', () => {
+  const result = resolveFeatureAction({
+    message: 'I use Second Wind.',
+    worldState: combatWorld({
+      player_stats: { hp: 12, max_hp: 12, armor_class: 16 },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', hp: 12, max_hp: 12, ac: 16, is_player: true },
+          { name: 'Goblin', hp: 8, max_hp: 8, ac: 12, is_player: false },
+        ],
+      },
+    }),
+    characterSheet: sheet('fighter'),
+    rollDie: sequenceRolls([6]),
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.player_stats.hp, 12);
+  assert.equal(result.worldState.player_stats.resources.second_wind.remaining, 2);
+  assert.equal(result.worldState.combat_state.turn_resources, undefined);
+  assert.match(result.reply, /No use is spent/);
+});
+
 
 test('Lay on Hands spends healing pool without exceeding missing HP', () => {
   const result = resolveFeatureAction({

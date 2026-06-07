@@ -45,6 +45,13 @@ const CHECK_RULES = [
     pattern: /\b(?:track|tracks|trail|spoor|footprints|follow signs|signs of passage)\b/i,
   },
   {
+    id: 'athletics',
+    skill: 'athletics',
+    ability: 'str',
+    label: 'Strength (Athletics)',
+    pattern: /\b(?:swim|climb|scramble|jump|leap|dive|pull myself|haul myself|hold on|grab hold)\b.*\b(?:dark water|water|river|stream|current|bridge support|ledge|wall|cliff|rope|rail|pit|drop)\b/i,
+  },
+  {
     id: 'investigation',
     skill: 'investigation',
     ability: 'int',
@@ -203,6 +210,7 @@ function inferContextualCheck(text, worldState = {}) {
 
   if (isContextualPersuasion(lower, npcs)) return skillRule('persuasion');
   if (isContextualInsight(lower, npcs, objects)) return skillRule('insight');
+  if (isContextualAthletics(lower, worldState)) return skillRule('athletics');
   if (isContextualInvestigation(lower, objects, npcs)) return skillRule('investigation');
   return null;
 }
@@ -224,6 +232,17 @@ function isContextualInvestigation(text, objects, npcs) {
   if (!/\b(?:investigate|examine|inspect|study|search|check|read|look over|look at)\b/i.test(text)) return false;
   if (referencesAnyEntity(text, npcs) && !referencesAnyEntity(text, objects)) return false;
   return referencesAnyEntity(text, objects) || referencesObjectishNoun(text);
+}
+
+function isContextualAthletics(text, worldState = {}) {
+  if (!/\b(?:swim|climb|scramble|jump|leap|dive|pull myself|haul myself|hold on|grab hold)\b/i.test(text)) return false;
+  const sceneText = compact(JSON.stringify({
+    location: worldState.current_location,
+    scene: worldState.scene_presence,
+    objects: worldState.object_states,
+  }));
+  const combined = `${compact(text)} ${sceneText}`;
+  return /\b(?:water|river|stream|current|bridge|support|ledge|wall|cliff|pit|drop|dark|rain|slick|mud|rope|rail)\b/.test(combined);
 }
 
 function skillRule(skill) {

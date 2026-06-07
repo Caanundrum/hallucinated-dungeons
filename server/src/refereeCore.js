@@ -304,7 +304,7 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
   const modifier = getCheckModifier(characterSheet, check, worldState);
   const bonus = getActiveBonusDice(worldState, 'check', { skill: check.skill })[0] || null;
   const hideAction = isHideActionCheck({ rule_action: intent.ruleAction, skill: check.skill, intent: intent.raw });
-  const dcAssessment = assessDc(intent.raw, check, worldState, inCombat, { hideAction });
+  const dcAssessment = assessDc(intent.raw, check, worldState, inCombat, { hideAction, characterSheet });
   const dc = dcAssessment.dc;
   const conditionMode = getD20ConditionMode({
     subject: conditionSubject,
@@ -2596,6 +2596,25 @@ function assessDc(text, check = {}, worldState = {}, inCombat, options = {}) {
     }
   }
 
+  if (check.skill === 'athletics') {
+    if (/\b(?:dark|water|river|stream|current|rain|slick|mud|drop|pit|ledge|bridge support)\b/.test(combinedText)) {
+      addAdjustment(5, 'hazardous footing, water, or visibility');
+    }
+    if (/\b(?:swim|dive|jump into|leap into)\b/.test(messageText) && /\b(?:water|river|stream|current)\b/.test(combinedText)) {
+      addAdjustment(5, 'dangerous swim or water entry');
+    }
+    const load = getPhysicalLoadContext(options.characterSheet || {});
+    if (load.heavyArmor && /\b(?:water|swim|dive|jump into|climb|scramble|pull myself)\b/.test(combinedText)) {
+      addAdjustment(5, 'heavy armor complicates the physical challenge');
+    }
+    if (load.shield && /\b(?:water|swim|climb|scramble|pull myself)\b/.test(combinedText)) {
+      addAdjustment(2, 'shield and carried gear get in the way');
+    }
+    if (load.pack && /\b(?:water|swim|climb|scramble|pull myself)\b/.test(combinedText)) {
+      addAdjustment(2, 'loaded adventuring pack');
+    }
+  }
+
   if (inCombat && ['stealth', 'sleight_of_hand', 'persuasion', 'deception', 'intimidation', 'performance'].includes(check.skill)) {
     addAdjustment(2, 'combat pressure');
   }
@@ -2616,6 +2635,7 @@ function successTextFor(check) {
     deception: 'Your lie holds together well enough to pass the moment.',
     intimidation: 'Your pressure works. The target yields, hesitates, or gives ground.',
     performance: 'Your performance draws the intended attention and shifts the room.',
+    athletics: 'You manage the physical challenge and keep control of your footing, grip, or swim.',
   };
   return map[check.skill] || 'You succeed at the attempted check.';
 }
@@ -2632,8 +2652,21 @@ function failureTextFor(check) {
     deception: 'The falsehood does not hold cleanly.',
     intimidation: 'The pressure fails to produce the result you wanted.',
     performance: 'The performance does not shift the room in your favor.',
+    athletics: 'The physical challenge goes badly enough to create a real complication: lost position, danger, damage, fatigue, or another consequence that fits the scene.',
   };
   return map[check.skill] || 'The attempted check fails.';
+}
+
+function getPhysicalLoadContext(characterSheet = {}) {
+  const equipped = characterSheet.equipped || {};
+  const inventory = characterSheet.inventory || [];
+  const armor = inventory.find((item) => item.id === equipped.armor) || {};
+  const offHand = inventory.find((item) => item.id === equipped.off_hand) || {};
+  return {
+    heavyArmor: armor.armor_category === 'heavy' || /\bheavy\b/i.test(armor.description || ''),
+    shield: offHand.type === 'shield' || equipped.off_hand === 'shield',
+    pack: inventory.some((item) => item.type === 'pack'),
+  };
 }
 
 function updatePlayerHp({ worldState, hp, deathSaves }) {
