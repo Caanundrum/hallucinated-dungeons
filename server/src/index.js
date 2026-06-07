@@ -42,6 +42,11 @@ const {
 } = require('./actionEconomy');
 const { buildResourceState } = require('./resourceEngine');
 const { syncInventoryStateFromCharacterSheet } = require('./inventoryStateEngine');
+const {
+  answerInventoryCountQuestion,
+  formatCarriedInventoryForRules,
+} = require('./rulesInventoryAnswers');
+const { shouldAllowModerationFalsePositive } = require('./safetyFalsePositive');
 
 // ── Setup ──────────────────────────────────────────────────────────────────
 const app    = express();
@@ -170,6 +175,10 @@ function recentNarrationForSpatialGuard(history = []) {
 async function moderateUserMessage(socket, errorEvent, message) {
   const moderation = await ai.moderateText(message);
   if (moderation.ok) return true;
+  if (shouldAllowModerationFalsePositive(message, moderation.flaggedCategories)) {
+    console.warn('User input allowed after likely moderation false positive:', moderation.flaggedCategories.join(', '));
+    return true;
+  }
 
   console.warn('User input blocked by moderation:', moderation.flaggedCategories.join(', '));
   socket.emit(errorEvent, { message: moderation.publicMessage, code: 'moderation_blocked' });
@@ -637,18 +646,6 @@ function alignCombatPlayerToCharacter(combatState, characterSheet, playerStats) 
   const enemiesAlive = (aligned.combatants || [])
     .some((combatant) => !combatant.is_player && Number(combatant.hp || 0) > 0);
   return enemiesAlive ? aligned : null;
-}
-
-function formatCarriedInventoryForRules(carriedObjects = []) {
-  if (!Array.isArray(carriedObjects) || carriedObjects.length === 0) return '';
-  return carriedObjects
-    .filter((item) => item?.name)
-    .map((item) => {
-      const quantity = Number(item.quantity || 1) > 1 ? ` x${Number(item.quantity)}` : '';
-      const container = item.source_container ? ` in ${item.source_container}` : '';
-      return `${item.name}${quantity}${container}`;
-    })
-    .join(', ');
 }
 
 function formatObjectStateForRules(objectStates = {}) {
@@ -1459,10 +1456,18 @@ io.on('connection', (socket) => {
       // Step 3: Fetch world state for context injection (spec §8.5)
       // If this fails, fall back gracefully — DM2 still answers without context.
       let worldStateContext = '';
+      let deterministicRulesReply = '';
+      let activeCharacter = null;
       try {
         const worldStateRow = await db.getWorldState(sessionId);
-        const ws = worldStateRow?.state;
+        let ws = worldStateRow?.state;
+        activeCharacter = await db.getCharacterForSession(sessionId).catch(() => null);
+        if (ws && activeCharacter?.character_sheet) {
+          ws = normalizeActiveCharacterWorldState(ws, activeCharacter.character_sheet, activeCharacter.id);
+          await db.updateWorldState(sessionId, ws);
+        }
         if (ws) {
+          deterministicRulesReply = answerInventoryCountQuestion(message, ws);
           const contextParts = [];
           if (ws.current_location) {
             contextParts.push(`Current location: ${ws.current_location}`);
@@ -1541,7 +1546,7 @@ io.on('connection', (socket) => {
           }
         }
 
-        const activeCharacter = await db.getCharacterForSession(sessionId);
+        activeCharacter ||= await db.getCharacterForSession(sessionId).catch(() => null);
         if (activeCharacter?.id) {
           trackSocketCharacter(socket, activeCharacter.id);
           await db.upsertCharacterPresence({
@@ -1560,6 +1565,26 @@ io.on('connection', (socket) => {
       }
 
       // Step 4: Call DM2 (utility model — with world state context injected)
+      if (deterministicRulesReply) {
+        try {
+          await db.saveMessage(sessionId, 'dm2', deterministicRulesReply, null);
+        } catch (dbErr) {
+          console.error('rules_input: db.saveMessage(dm2 deterministic) failed:', dbErr.message);
+        }
+        socket.emit('dm2_response', { message: deterministicRulesReply });
+        await db.logDmCall({
+          sessionId,
+          dm:           'dm2_inventory_referee',
+          model:        'deterministic',
+          playerInput:  message,
+          fullPrompt:   JSON.stringify({ worldStateContext }),
+          dmResponse:   deterministicRulesReply,
+          inputTokens:  null,
+          outputTokens: null,
+        }).catch(console.error);
+        return;
+      }
+
       socket.emit('dm2_typing', true);
 
       let response;
@@ -1588,24 +1613,27 @@ io.on('connection', (socket) => {
         return;
       }
 
-      const reply     = response.text;
+      const reply     = response.text || '';
       const inputTok  = response.inputTokens;
       const outputTok = response.outputTokens;
       const safeReply = await moderateAssistantReply(
         reply,
         'The Rules Arbiter declines. Repeating the request will not unlock a secret answer; it will only make the silence more judgmental. Ask a fantasy rules question instead.'
       );
+      const finalReply = safeReply && safeReply.trim()
+        ? safeReply
+        : 'I could not find a rules answer for that from the current game state. Ask about a specific sheet value, inventory item, resource, spell, roll, or combat rule.';
 
       // Step 5: save DM2 response
       try {
-        await db.saveMessage(sessionId, 'dm2', safeReply, null);
+        await db.saveMessage(sessionId, 'dm2', finalReply, null);
       } catch (dbErr) {
         console.error('rules_input: db.saveMessage(dm2) failed:', dbErr.message);
         // Non-fatal: response was received — still emit to client
       }
 
       socket.emit('dm2_typing', false);
-      socket.emit('dm2_response', { message: safeReply });
+      socket.emit('dm2_response', { message: finalReply });
 
       await db.logDmCall({
         sessionId,
@@ -1613,7 +1641,7 @@ io.on('connection', (socket) => {
         model:        UTILITY_MODEL,
         playerInput:  message,
         fullPrompt:   DM2_PROMPT + '\n\n' + message + worldStateContext,
-        dmResponse:   safeReply,
+        dmResponse:   finalReply,
         inputTokens:  inputTok,
         outputTokens: outputTok,
       }).catch(console.error);
