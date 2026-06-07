@@ -5,7 +5,78 @@ QA thread role: read-only QA, no development changes.
 
 ## Summary
 
-Latest production regression pass confirms several inventory/resource fixes landed, but two state integration issues remain: rope-use phrasing still asks for a rephrase, and DM2 does not see consumed ration counts. Hazard checks now trigger, but failed hazards still return meta consequence text instead of a concrete applied complication. Client lint passed. Server tests pass.
+Latest production regression pass confirms hazard consequences now narrate concrete results. Consumable-count querying and natural rope use still fail in production despite local tests. Client lint passed. Server tests pass.
+
+## Latest QA Pass - 2026-06-07 After DEV Fix `2500df3`
+
+Scope:
+
+- Verified local `main` equals `origin/main` at `c302bd7 Update QA_HANDOFF.md`; latest app-code fix is `2500df3 Apply concrete hazard and inventory consequences`.
+- Played production at `https://hallucinated-dungeons.vercel.app/` using existing `QA Smoke` session.
+- Rechecked local automation after the push.
+
+Automated checks:
+
+- Client `npm.cmd run lint`: PASS.
+- Server `npm.cmd test`: PASS, `423/423`.
+
+Verified fixed / passed in production:
+
+- Hazard failed consequence: PASS. `i jump into the water` requested DC 30 Athletics; failed result now says the character hits the water badly, armor/shield/pack pull them under, and they come up struggling below Lantern Bridge. It no longer shows the meta/template consequence text.
+- Hazard roll gating: PASS. Pending roll locked input and cleared/unlocked after rolling.
+- Ration consumption narration: PASS. `i eat one ration from my pack again` produced normal narration and said one more ration is gone.
+- Production console: PASS. No warn/error logs observed during this pass.
+
+Still failing / needs follow-up:
+
+### P2: DM2 ration-count query returns blank after consumption
+
+Production sequence:
+
+```text
+i eat one ration from my pack again
+how many rations do i have left after eating that ration
+```
+
+Observed:
+
+DM1 correctly narrated that one more ration was consumed. DM2 then produced an empty Rules response:
+
+```text
+RULES
+
+ASK A RULES QUESTION
+```
+
+Expected:
+
+DM2 should answer with the current ration count, or at minimum explain that exact consumable tracking is unavailable. A blank answer is worse than the previous stale `10 rations left` response.
+
+Suggested fix:
+
+Check the DM2/rules-summary path for consumed carried inventory quantities. Ensure the answer renderer handles updated consumable counts and does not emit an empty response when asked for post-consumption quantity.
+
+### P2/P3: Natural rope use still denied in production
+
+Production action:
+
+```text
+i tie rope from my pack to the bridge rail before leaning over
+```
+
+Observed:
+
+```text
+The Game Master lowers the screen and stares at you over it. That idea has been denied entry to the campaign, the tavern, and polite society. Try something else.
+```
+
+Expected:
+
+The action should resolve using the known Hempen Rope from the carried Dungeoneer's Pack contents. Local tests now include `using rope from a pack resolves to carried Hempen Rope`, but production still rejects this natural phrasing in the current saved session.
+
+Suggested fix:
+
+Verify deployed code path and saved-session inventory normalization. This may be a legacy session/state mismatch, but the live player experience still rejects the clear action.
 
 ## Latest QA Pass - 2026-06-07 After DEV Fix `362a3b4`
 
