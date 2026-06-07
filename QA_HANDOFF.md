@@ -5,7 +5,46 @@ QA thread role: read-only QA, no development changes.
 
 ## Summary
 
-Latest production regression pass confirms the remaining ration-count and rope-use issues are fixed in production. Client lint passed. Server tests pass.
+Latest production regression pass confirms the first 4D XP foundation is present and stable in smoke testing. XP is visible on the Character Sheet and DM2 reports the 0/300 level 2 threshold. Client lint passed. Server tests pass.
+
+## Latest QA Pass - 2026-06-07 First 4D Push `3490ab6`
+
+Scope:
+
+- Verified local `main` equals `origin/main` at `58d28d5 Update QA_HANDOFF.md`; latest app-code fix is `3490ab6 Add server-owned XP award foundation`.
+- Inspected changed surface: `client/src/App.jsx`, `client/src/CharacterSelect.jsx`, `server/src/progressionEngine.js`, `server/src/index.js`, `server/src/rulesSheetSummary.js`, `server/test/progressionEngine.test.js`, and related validator/UI updates.
+- Rechecked production at `https://hallucinated-dungeons.vercel.app/` using existing `QA Smoke` session.
+- Rechecked local automation after the push.
+
+Automated checks:
+
+- Client `npm.cmd run lint`: PASS.
+- Server `npm.cmd test`: PASS, `433/433`.
+
+Verified fixed / passed in production:
+
+- Character Sheet progression display: PASS. Sheet now shows `XP 0` for `QA Smoke`.
+- DM2 progression awareness: PASS. `how much xp do i have and when do i level up?` answered `XP 0` and identified level 2 threshold as `300 XP`.
+- Failed challenge stability: PASS. A failed Athletics check after `i secure the rope and climb safely back onto the bridge` resolved normally, unlocked input, and did not corrupt XP display.
+- Production console: PASS. No warn/error logs observed during this pass.
+
+Verified by local automated coverage:
+
+- Combat ending awards server-owned XP and marks level-up availability at threshold.
+- Progression awards dedupe by source id.
+- Successful discovery awards exploration XP.
+- Successful social influence awards social XP.
+- Combat XP fallback uses simple HP bands when no stat-card XP exists.
+- XP thresholds load from the 2024 progression table.
+- DM2 sheet summary includes progression text such as `Progression: XP 125/300`.
+
+Open QA note:
+
+- I did not force a successful XP-awarding event in production during this pass. The existing `QA Smoke` session was in a difficult bridge/water state, and the natural challenge attempted failed. XP remained at 0, which is reasonable for a failed challenge. A fresh scenario that can deliberately produce a new successful discovery/social/combat award should be tested before declaring the full progression loop production-proven.
+
+Current recommendation:
+
+- First 4D foundation is safe to continue building on. Next QA should target a controlled XP award path in production, then check sheet display, DM2 progression summary, dedupe behavior, reload persistence, and level-up-ready display near/over 300 XP.
 
 ## Latest QA Pass - 2026-06-07 After DEV Fix `d82268c`
 
