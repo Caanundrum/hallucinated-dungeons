@@ -5,7 +5,160 @@ QA thread role: read-only QA, no development changes.
 
 ## Summary
 
-Latest production regression pass confirms the DM2 AC-source fix. Discovery follow-ups no longer request extra rolls, but still return referee/meta text instead of actual player-facing notice-board content. Client lint passed. Server tests pass.
+Latest production regression pass confirms the discovery follow-up narration fix. The prior DM2 AC-source fix remains passing. Client lint passed. Server tests pass.
+
+## Player Realism QA Pass - 2026-06-07
+
+Scope:
+
+- Played production as a realistic player using `QA Smoke` on Lantern Bridge.
+- Focused on natural actions, item use, risky choices, rules questions, reload persistence, and limit behavior.
+- No app code changes made by QA.
+
+Verified passed:
+
+- Movement continuity: PASS. `I step onto Lantern Bridge and keep my shield ready.` moved the character onto the bridge, listed visible objects, requested no unnecessary roll, and kept input enabled.
+- Discovery/inspection gating: PASS. `I look over the side and search the dark water below.` requested a DC 15 Investigation roll, locked input, then unlocked after the roll resolved.
+- Pack opening branch: PASS after explicit unpacking. `i open the dungeoneers pack and sort through the contents` revealed bedroll, mess kit, tinderbox, torches, rations, waterskin, and 50 feet of hempen rope.
+- Torch use after unpacking: PASS. `i light a torch and hold it over the dark water` produced player-facing scene details after generation completed.
+- Invalid combat target: PASS. `i attack the shadow in the water with my longsword` blocked cleanly instead of inventing a target or combat.
+- Reload persistence: PASS. Reload preserved recent bridge/pack history and no console warnings/errors appeared.
+- Character Sheet baseline: PASS. AC 19, Active Effects empty, Shield/Chain Mail under Equipped Defenses.
+
+New findings:
+
+### P2: Starter pack contents are not immediately usable from listed equipment
+
+Production action before opening the pack:
+
+```text
+i tie rope from my pack to the bridge rail before leaning over
+```
+
+Observed:
+
+```text
+The Game Master lowers the screen and stares at you over it. That idea has been denied entry to the campaign, the tavern, and polite society. Try something else.
+```
+
+Related action:
+
+```text
+i light a torch from my pack and hold it near the bridge rail
+```
+
+Observed:
+
+```text
+You can hold a torch near the bridge rail, but no torch is currently established in your inventory. Your visible carried objects are empty, while your pack contents haven’t been separately itemized in the current state.
+```
+
+Impact:
+
+A player sees `Dungeoneer's Pack` on the sheet and reasonably expects standard pack contents to be available. The game can reveal those contents if the player explicitly opens/sorts the pack, but normal use like `take rope from my pack` fails or is rejected before that step. This makes starting equipment feel unavailable until the player discovers the magic phrase.
+
+Suggested fix:
+
+Seed standard contents for starting equipment packs into available inventory/carryable state at character creation or session sync, or automatically expand known pack contents when a player names a standard item from a carried pack.
+
+### P2: Physical hazard actions in armor resolve without checks or consequences
+
+Production sequence:
+
+```text
+i jump into the dark water
+i try to swim back to the surface and grab the bridge support
+i climb back up onto the bridge
+```
+
+Observed:
+
+All resolved as free narration with no Athletics check, Strength check, exhaustion/damage risk, drowning pressure, equipment complication, or other cost. This happened while the character was wearing Chain Mail and carrying Shield/gear.
+
+Impact:
+
+The game is under-gating obvious physical hazards. This weakens the referee layer and lets high-risk environmental actions bypass the same roll/difficulty system used for lower-risk inspections.
+
+Suggested fix:
+
+Classify swimming/climbing in dangerous water, especially while armored, as a referee-gated physical challenge. Use Athletics/Strength or an appropriate save/check, and consider armor/equipment context when setting DC or consequences.
+
+### P2: DM2 cannot see established story inventory/resource state
+
+After DM1 established pack contents and after Second Wind was used, DM2 answered from the static sheet only.
+
+Production prompt:
+
+```text
+what items are currently available from my pack
+```
+
+Observed:
+
+DM2 said it could only see `Dungeoneer's Pack` and could not list contents because the sheet does not break them out, despite DM1 having just established the pack contents in story state.
+
+Production prompt:
+
+```text
+how many second wind uses do i have left
+```
+
+Observed:
+
+DM2 answered that level 1 Fighter has `Second Wind = 1 use per rest` and `you have 1 Second Wind use left right now unless it was already spent...`, even though DM1 had just spent one use and earlier feature text says level 1 has two uses.
+
+Impact:
+
+DM2 is not reliably aware of current world/resource state beyond the static character sheet. This matters for Phase 4D leveling because resources, granted features, inventory, and progression choices will increasingly need a single consistent state story.
+
+Suggested fix:
+
+Feed DM2 a current rules-state summary that includes tracked resources/spent uses, carried object state, unpacked pack contents, active scene inventory, and recent item state changes.
+
+### P3: Second Wind can be wasted at full HP with weak feedback
+
+Production action at 14/14 HP:
+
+```text
+i use second wind
+```
+
+Observed:
+
+```text
+You use Second Wind as a Bonus Action and regain 0 HP (1 + 1). HP: 14 -> 14. Uses left: 1.
+```
+
+Impact:
+
+This may be rules-legal, but it is poor player UX. Most players would expect a warning or no-spend confirmation when a limited healing resource has no benefit. The roll text also reads like `1 + 1` rather than clearly showing `1d10 + Fighter level`.
+
+Suggested fix:
+
+Consider blocking or confirming zero-benefit limited-resource use outside combat, or clearly state that the player is spending it despite being at full HP. Improve roll display to show the die/source.
+
+## Latest QA Pass - 2026-06-07 After DEV Fix `bbf71d4`
+
+Scope:
+
+- Verified local `main` equals `origin/main` at `272c93d DiscoveryFix`; latest app-code fix is `bbf71d4 Route discovery followups through narration`.
+- Played production at `https://hallucinated-dungeons.vercel.app/` using the existing `QA Smoke` character.
+- Rechecked local automation after the push.
+
+Verified fixed / passed:
+
+- Discovery follow-up narration: PASS in production. Prompt `Use the established notice board discovery to read what it says about the missing road-workers.` produced player-facing narrative/details instead of referee/meta text.
+- Natural player phrasing follow-up: PASS in production after QA corrected an over-directed test. Prompt `Read the notice board again.` produced player-facing notice-board content without mentioning internal discovery state.
+- Discovery follow-up roll gating: PASS. No new roll was requested; story input remained enabled after the response.
+- Stale target pollution mitigation: PASS for this repro. Even though the session still had old `notice details` state in history, the fresh explicit `notice board` prompt revealed the missing road-workers notice content.
+- Production console: PASS. No warn/error logs observed during this pass.
+- Automated checks: PASS. Client `npm.cmd run lint` passed. Server `npm.cmd test` passed `412/412`.
+
+No open regressions from the latest targeted pass.
+
+Follow-up correction:
+
+- QA initially used an overly leading prompt (`Use the established notice board discovery...`). User correctly pointed out that real players will not phrase actions that way. QA reran with natural wording (`Read the notice board again.`), and production still passed: it revealed the notice content, requested no roll, kept input enabled, and logged no console warnings/errors.
 
 ## Latest QA Pass - 2026-06-07 After DEV Fixes `3a3127f` / `9420094`
 
