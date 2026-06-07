@@ -44,7 +44,7 @@ function CharacterSelect({
                 Level {character.summary?.level || 1} {character.summary?.species || ''} {character.summary?.className || ''}
               </span>
               <small>
-                HP {character.summary?.hp ?? '--'}/{character.summary?.maxHp ?? '--'} · AC {character.summary?.armorClass ?? '--'}
+                HP {character.summary?.hp ?? '--'}/{character.summary?.maxHp ?? '--'} / AC {character.summary?.armorClass ?? '--'}
               </small>
             </button>
           ))}

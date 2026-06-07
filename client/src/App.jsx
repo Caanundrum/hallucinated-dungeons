@@ -263,7 +263,7 @@ function App() {
       }
 
       // Add a divider after restored history to mark the resumed session boundary
-      const divider = { type: 'divider', text: '— Session resumed —', id: 'divider-resume' };
+      const divider = { type: 'divider', text: '-- Session resumed --', id: 'divider-resume' };
       setNarrative([...narrativeHistory, divider]);
       setRulesLog(rulesHistory);
       socket.emit('get_character_data', { sessionId: id, sessionToken });
@@ -567,7 +567,7 @@ function App() {
           <p className="legal-disclosure">Rules reference: SRD 5.2.1 (CC BY 4.0)</p>
         </div>
         <span className={`connection-status ${connected ? 'online' : 'offline'}`}>
-          {connected ? '⚔ Connected' : '✖ Disconnected'}
+          {connected ? 'Connected' : 'Disconnected'}
         </span>
       </header>
 
@@ -611,11 +611,11 @@ function App() {
             {pendingRoll && !dm1Typing && (
               <div className="dice-roller" id="dice-roller">
                 <div className="dice-roller-header">
-                  <span className="dice-roller-label">🎲 Roll Required</span>
+                  <span className="dice-roller-label">Roll Required</span>
                   <span className="dice-roller-spec">
                     {pendingRoll.diceCount}d{pendingRoll.dieSides}
                     {pendingRoll.modifier > 0 && ` + ${pendingRoll.modifier}`}
-                    {pendingRoll.modifier < 0 && ` − ${Math.abs(pendingRoll.modifier)}`}
+                    {pendingRoll.modifier < 0 && ` - ${Math.abs(pendingRoll.modifier)}`}
                     {pendingRoll.bonusDice && ` + ${pendingRoll.bonusDice.diceCount}d${pendingRoll.bonusDice.dieSides}`}
                   </span>
                 </div>
