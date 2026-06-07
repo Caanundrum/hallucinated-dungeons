@@ -5,7 +5,99 @@ QA thread role: read-only QA, no development changes.
 
 ## Summary
 
-Production smoke test passed with one confirmed rules-engine bug and one minor accessibility note. Client lint passed. Server tests pass outside the restricted Codex sandbox.
+Latest production playtest passed core flow checks, with one new rules-answer bug and one discovery follow-up bug for DEV to fix. Client lint passed. Server tests pass.
+
+## Latest QA Pass - 2026-06-07 After DEV Fix `52260cb`
+
+Scope:
+
+- Inspected latest commits: `caf4ea2 Target QA Fix`, `52260cb Keep equipment out of active effects display`.
+- Played production at `https://hallucinated-dungeons.vercel.app/` using existing `QA Smoke` character.
+- Rechecked local automation after production play.
+
+Verified fixed / passed:
+
+- Equipment display after additional state sync: PASS. Character Sheet now shows `Active Effects -> No active effects.` and lists `Shield` / `Chain Mail` only under `Equipped Defenses`.
+- Lantern Bridge movement continuity: PASS. `Go to lantern bridge.` produced coherent location narration with no roll.
+- Pending roll gating: PASS. `Pause and look around first.` requested exactly one `Roll 1d20 +2`; story input locked during the pending Perception roll and unlocked after resolution.
+- Production console: PASS. No warn/error logs observed during this latest pass.
+- Automated checks: PASS. Client `npm.cmd run lint` passed. Server `npm.cmd test` passed `408/408`.
+
+New / still failing:
+
+### P2: DM2 exact AC-source answer omits Defense and prints raw formula token
+
+Production prompt after Character Sheet showed no active effects:
+
+```text
+List my AC sources exactly.
+```
+
+Observed DM2 answer:
+
+```text
+Your AC sources on this sheet are:
+- Chain Mail: armor_formula
+- Shield (equipped): +2
+Total AC shown on your sheet: 19 (i.e., Chain Mail + Shield; no other temporary spell effects are listed).
+```
+
+Expected:
+
+```text
+Chain Mail: 16
+Shield (equipped): +2
+Fighting Style: Defense: +1 while wearing armor
+Total: 19
+```
+
+Impact:
+
+The UI sheet is now clean, but the rules assistant still cannot produce the exact AC source list from the sheet. It exposes an internal token (`armor_formula`) and makes the math incomplete by saying Chain Mail + Shield explains AC 19.
+
+Suggested fix:
+
+Provide DM2 a structured AC breakdown that includes passive class/style modifiers such as Defense, and render armor formulas to player-facing numbers before answering.
+
+### P2/P3: Discovery follow-up asks for another check instead of revealing known notice details
+
+Production sequence:
+
+```text
+Study notice board.
+```
+
+Result:
+
+```text
+Discovery: notice board pinned with requests and warnings now has a successful study result on record.
+```
+
+Follow-up:
+
+```text
+Read notice details.
+```
+
+Observed:
+
+The game requested another DC 10 Intelligence (Investigation), then recorded a second synthetic target:
+
+```text
+Discovery: notice details now has a successful study result on record.
+```
+
+Expected:
+
+After a successful study of the notice board, a follow-up read/details action should use the established `notice board` discovery and reveal fair details, not require another identical Investigation check and create `notice details` as a separate target.
+
+Suggested fix:
+
+When the player asks to read/reveal details after a successful discovery, resolve against the existing discovered target/subject before prompting a new check. Treat phrases like `notice details` as a follow-up intent for `notice board`, not a new searchable object.
+
+Minor QA tooling note:
+
+- Browser `fill` / `type` helpers still hit a local virtual-clipboard issue, so production entry was performed with direct key presses. This is a QA environment nuisance, not an app defect.
 
 ## Regression Pass - 2026-06-07 After QA Fixes
 
