@@ -5,7 +5,119 @@ QA thread role: read-only QA, no development changes.
 
 ## Summary
 
-Latest production regression pass confirms the discovery follow-up narration fix. The prior DM2 AC-source fix remains passing. Client lint passed. Server tests pass.
+Latest production regression pass confirms several inventory/resource fixes landed, but two state integration issues remain: rope-use phrasing still asks for a rephrase, and DM2 does not see consumed ration counts. Hazard checks now trigger, but failed hazards still return meta consequence text instead of a concrete applied complication. Client lint passed. Server tests pass.
+
+## Latest QA Pass - 2026-06-07 After DEV Fix `362a3b4`
+
+Scope:
+
+- Verified local `main` equals `origin/main` at `7cc4946 Inventory QA`; latest app-code fix is `362a3b4 Fix inventory state and hazard checks`.
+- Played production at `https://hallucinated-dungeons.vercel.app/` using existing `QA Smoke` session.
+- Rechecked local automation after the push.
+
+Automated checks:
+
+- Client `npm.cmd run lint`: PASS.
+- Server `npm.cmd test`: PASS, `419/419`.
+
+Verified fixed / passed in production:
+
+- DM2 pack awareness: PASS. `what items are currently available from my pack now` listed Dungeoneer's Pack contents: bedroll, mess kit, tinderbox, Torch x10, Rations x10, waterskin, hempen rope, crowbar, hammer, pitons, etc.
+- DM2 Second Wind awareness: PASS. `how many second wind uses do i have left now` returned `Second Wind: 1/2 remaining`.
+- Second Wind at full HP: PASS. `i use second wind again` did not spend a use and clearly said full HP means no healing/use spent.
+- Hazard gating: PARTIAL PASS. `i jump into the dark water again` now requested a DC 30 Strength (Athletics), locked input, and unlocked after the roll.
+- Direct pack item use: PASS for rations. `i eat one ration from my pack` produced normal narration and said one ration was consumed.
+- Production console: PASS. No warn/error logs observed during this pass.
+
+Still failing / needs follow-up:
+
+### P2: Failed hazard check returns meta consequence text instead of applying/narrating the consequence
+
+Production action:
+
+```text
+i jump into the dark water again
+```
+
+Observed:
+
+The game correctly prompted:
+
+```text
+Make a DC 30 Strength (Athletics).
+```
+
+After rolling failure:
+
+```text
+Roll 9 (natural 4; 4+5=9) vs DC 30: failure.
+
+The physical challenge goes badly enough to create a real complication: lost position, danger, damage, fatigue, or another consequence that fits the scene.
+```
+
+Expected:
+
+The referee should apply and narrate an actual consequence, such as being swept under the bridge, losing grip/position, taking damage, gaining a fatigue/exhaustion marker, losing/dropping an item, or being forced into another immediate danger state. The player should not see an instruction/template about what kind of consequence should happen.
+
+Suggested fix:
+
+Route failed hazard outcomes through player-facing narration/state mutation after the deterministic check resolves. The message should contain the chosen consequence, not the abstract consequence menu.
+
+### P2: DM2 sees available pack contents but not consumed item counts
+
+Production sequence:
+
+```text
+i eat one ration from my pack
+how many rations do i have left in my pack now
+```
+
+Observed:
+
+DM1 narrated:
+
+```text
+one ration is available and one is consumed.
+```
+
+DM2 answered:
+
+```text
+You currently have Rations x10 in your Dungeoneer’s Pack...
+So the answer is: 10 rations left.
+```
+
+Expected:
+
+After consuming one ration from an established pack count of 10, DM2 should answer 9 remaining, or state that consumption tracking is not authoritative yet. It should not ignore the just-established consumption.
+
+Suggested fix:
+
+Persist consumable item count changes into carried inventory state and include those current counts in DM2's rules-state summary.
+
+### P3: Rope use still asks for a rephrase instead of executing a clear natural action
+
+Production action:
+
+```text
+i tie rope from my pack to the bridge rail before leaning over
+```
+
+Observed:
+
+```text
+You can absolutely tie off the rope, but a small reality check first: your pack has been opened, and the rope is part of that pack’s contents, not a separate magical rope hidden in your sleeves.
+
+If you want to proceed, you can say “I take out the hempen rope and tie it to the bridge rail before leaning over.”
+```
+
+Impact:
+
+This is much better than the previous generic denial, but the original player action is already clear enough to execute. Asking for the exact rephrase still feels like a magic-phrase requirement.
+
+Suggested fix:
+
+Treat `tie rope from my pack` as equivalent to taking out the known hempen rope and tying it off. Only ask for clarification if multiple ropes/items exist or the target is unclear.
 
 ## Player Realism QA Pass - 2026-06-07
 
