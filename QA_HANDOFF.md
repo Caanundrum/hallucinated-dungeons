@@ -7,6 +7,26 @@ QA thread role: read-only QA, no development changes.
 
 Production smoke test passed with one confirmed rules-engine bug and one minor accessibility note. Client lint passed. Server tests pass outside the restricted Codex sandbox.
 
+## Regression Pass - 2026-06-07 After QA Fixes
+
+User reported the prior findings were fixed. QA reran targeted checks against latest local repo and production.
+
+Verified fixed / passed:
+
+- P1 active-combat invalid spell target retargeting: PASS locally. `Fire Bolt at the dragon` with only Skeleton present now blocks before outcome/damage.
+- P2 Defense Fighting Style AC preview/review: PASS by code inspection and automated coverage. `client/src/CharacterWizard.jsx` now includes `Defense Fighting Style` in `calculateAcPreview`; server character validation test covers Defense AC 19.
+- P3 redundant Switch narration for current character: PASS in production. Reselecting current `QA Smoke` through Switch did not add another join narration; before/after join narration count remained 2.
+- P3 notice-board Investigation discovery target: PASS in automated coverage. `server/test/discoveryStateEngine.test.js` now covers `notice board` target and `missing road-workers` subject.
+- Automated checks: PASS. Server `npm.cmd test` passed 407/407. Client `npm.cmd run lint` passed.
+
+Still failing / needs follow-up:
+
+- P3 equipment under Active Effects: PARTIAL/FAIL in production. Character Sheet now has an `Equipped Defenses` section, but the same Shield and Chain Mail entries still also appear under `Active Effects` as `Effect active`. This remains confusing and keeps equipment mixed with temporary active effects.
+
+Production note:
+
+- Browser text-entry helpers hit a local virtual-clipboard failure while attempting to create a fresh visible AC-retest character. QA did not claim a fresh production creation pass for AC preview after that point; AC preview fix was verified from current code/tests instead.
+
 ## Confirmed Bug
 
 ### P1: Explicit invalid spell targets in active combat silently retarget to the first enemy
