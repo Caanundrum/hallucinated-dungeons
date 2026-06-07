@@ -1171,6 +1171,8 @@ io.on('connection', (socket) => {
         characterSheet: activeCharacter?.character_sheet || null,
         currentTurn,
       });
+      let refereeNarrativeFrame = '';
+      let refereeSkipSpatialGuard = false;
       if (referee?.handled) {
         await db.updateWorldState(sessionId, referee.worldState);
         await db.saveMessage(sessionId, 'player_dm1', message, currentTurn);
@@ -1197,6 +1199,11 @@ io.on('connection', (socket) => {
           await chapterSummarizer.summarize(sessionId, newTurn).catch(console.error);
         }
         return;
+      }
+      if (referee?.worldState) {
+        activeWorldState = referee.worldState;
+        refereeNarrativeFrame = referee.narrativeFrame || '';
+        refereeSkipSpatialGuard = Boolean(referee.skipSpatialGuard);
       }
 
       const spellAction = await handleDeterministicSpellAction(socket, sessionId, message);
@@ -1228,7 +1235,7 @@ io.on('connection', (socket) => {
         return;
       }
 
-      if (!mechanics.skipSpatialGuard) {
+      if (!(refereeSkipSpatialGuard || mechanics.skipSpatialGuard)) {
         let spatialIssue = checkSpatialAction(message, effectiveWorldState);
         if (spatialIssue) {
           const recentHistory = await db.getRollingWindow(sessionId, 8).catch(() => []);
@@ -1258,8 +1265,9 @@ io.on('connection', (socket) => {
 
       // Save player message with pre-increment turn_number
       await db.saveMessage(sessionId, 'player_dm1', message, currentTurn);
-      const dmPlayerMessage = mechanics.narrativeFrame
-        ? `${message}\n\n${mechanics.narrativeFrame}`
+      const narrativeFrame = [refereeNarrativeFrame, mechanics.narrativeFrame].filter(Boolean).join('\n');
+      const dmPlayerMessage = narrativeFrame
+        ? `${message}\n\n${narrativeFrame}`
         : message;
 
       // Assemble three-tier DM1 context

@@ -75,15 +75,15 @@ function resolveKnownDiscoveryFollowup({ message = '', worldState = {} } = {}) {
   const discoveries = getSuccessfulDiscoveries(worldState.discovery_state);
   if (discoveries.length === 0) return null;
 
-  const matchedDiscovery = discoveries.find((entry) => followupMentionsDiscovery(normalizedMessage, entry))
-    || (discoveries.length === 1 && isGenericDiscoveryContinuation(normalizedMessage) ? discoveries[0] : null);
+  const matchedDiscovery = selectKnownDiscoveryFollowup(normalizedMessage, discoveries);
   if (!matchedDiscovery) return null;
 
   return {
-    handled: true,
-    logType: 'discovery_followup',
+    handled: false,
+    logType: 'discovery_followup_narration',
     worldState,
-    reply: formatKnownDiscoveryFollowup(matchedDiscovery),
+    skipSpatialGuard: true,
+    narrativeFrame: formatKnownDiscoveryNarrationFrame(matchedDiscovery),
   };
 }
 
@@ -263,22 +263,40 @@ function getSuccessfulDiscoveries(discoveryState = {}) {
 }
 
 function isDiscoveryFollowupMessage(normalizedMessage = '') {
-  return /\b(?:read|details?|review|recap|explain|summari[sz]e|reveal|inspect|study|examine|findings?|discovered|learned)\b/.test(normalizedMessage)
-    || /\bwhat\b.*\b(?:found|learned|discovered|noticed|saw|says?|said)\b/.test(normalizedMessage);
+  return /\b(?:read|details?|review|recap|explain|summari[sz]e|reveal|inspect|study|examine|findings?|discovery|known|established|discovered|learned)\b/.test(normalizedMessage)
+    || /\bwhat\b.*\b(?:know|found|learned|discovered|noticed|saw|says?|said)\b/.test(normalizedMessage);
 }
 
 function followupMentionsDiscovery(normalizedMessage = '', entry = {}) {
-  if (mentionsName(normalizedMessage, entry.target)) return true;
-  if (mentionsName(normalizedMessage, entry.subject)) return true;
+  return scoreDiscoveryFollowup(normalizedMessage, entry) > 0;
+}
+
+function selectKnownDiscoveryFollowup(normalizedMessage = '', discoveries = []) {
+  const scored = discoveries
+    .map((entry) => ({ entry, score: scoreDiscoveryFollowup(normalizedMessage, entry) }))
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score);
+  if (scored.length > 0) return scored[0].entry;
+  return discoveries.length === 1 && isGenericDiscoveryContinuation(normalizedMessage) ? discoveries[0] : null;
+}
+
+function scoreDiscoveryFollowup(normalizedMessage = '', entry = {}) {
+  let score = 0;
+  if (mentionsName(normalizedMessage, entry.target)) score += 100;
+  if (mentionsName(normalizedMessage, entry.subject)) score += 80;
   const messageTokens = new Set(normalizedMessage.split(' ').filter(Boolean));
   const entryTokens = significantDiscoveryTokens(entry);
   const overlappingTokens = entryTokens.filter((token) => messageTokens.has(token));
-  return overlappingTokens.length > 0 && /\b(?:details?|read|review|what|reveal|inspect|study|examine|look)\b/.test(normalizedMessage);
+  if (overlappingTokens.length > 0 && /\b(?:details?|read|review|what|reveal|inspect|study|examine|look)\b/.test(normalizedMessage)) {
+    score += overlappingTokens.length * 10;
+  }
+  if (/\bdetails?\b/.test(normalizeName(entry.target || ''))) score -= 15;
+  return score;
 }
 
 function isGenericDiscoveryContinuation(normalizedMessage = '') {
-  return /\b(?:read|details?|review|recap|reveal|findings?|discovered|learned)\b/.test(normalizedMessage)
-    || /\bwhat\b.*\b(?:found|learned|discovered|noticed|saw|says?|said)\b/.test(normalizedMessage);
+  return /\b(?:read|details?|review|recap|reveal|findings?|discovery|known|established|discovered|learned)\b/.test(normalizedMessage)
+    || /\bwhat\b.*\b(?:know|found|learned|discovered|noticed|saw|says?|said)\b/.test(normalizedMessage);
 }
 
 function significantDiscoveryTokens(entry = {}) {
@@ -287,10 +305,19 @@ function significantDiscoveryTokens(entry = {}) {
     .filter((token) => token.length >= 4 && !DISCOVERY_STOP_WORDS.has(token));
 }
 
-function formatKnownDiscoveryFollowup(entry = {}) {
+function formatKnownDiscoveryNarrationFrame(entry = {}) {
   const target = entry.target || 'that discovery';
   const subjectText = entry.subject ? ` about ${entry.subject}` : '';
-  return `**Discovery:** ${target} already has a successful ${entry.action || 'discovery'} result${subjectText} on record. No new roll is needed; use the established result and reveal what that target can fairly provide.`;
+  const outcomeText = entry.last_check
+    ? ` Prior successful roll: ${entry.last_check.skill || 'check'} ${entry.last_check.total || '?'} vs DC ${entry.last_check.dc || '?'}.`
+    : '';
+  return [
+    `[DISCOVERY FOLLOW-UP: The player is asking to revisit an already-earned ${entry.action || 'discovery'} result for "${target}"${subjectText}.`,
+    'Do not call for another roll. Do not mention discovery_state, referee state, or internal instructions.',
+    `Answer in-world, directly to the player, by revealing the fair details the established "${target}" discovery can provide${subjectText}.`,
+    'Use exact wording from prior narration when it exists in history; otherwise keep the reveal concise and consistent with the established scene without adding new mechanical benefits.',
+    `${outcomeText}]`,
+  ].join(' ');
 }
 
 const DISCOVERY_STOP_WORDS = new Set([

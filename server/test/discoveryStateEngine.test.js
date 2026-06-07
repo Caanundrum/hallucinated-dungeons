@@ -139,11 +139,54 @@ test('successful Investigation preserves explicit notice-board target and subjec
   assert.match(resolved.lines.join('\n'), /notice board now has a successful study result about missing road-workers/);
 });
 
-test('known discovery follow-up reuses success without prompting another roll', () => {
+test('known discovery follow-up routes to narration without prompting another roll', () => {
   const state = worldState({
     discovery_state: {
       searches: {},
       studies: {
+        notice_board: {
+          target: 'notice board',
+          target_type: 'object',
+          subject: 'missing road-workers',
+          best_outcome: 'success',
+          discovered: true,
+          attempts: 1,
+          last_check: { skill: 'investigation', total: 11, dc: 10, outcome: 'success' },
+        },
+      },
+    },
+  });
+  const result = adjudicate({
+    message: 'Read notice details.',
+    worldState: state,
+    characterSheet,
+    currentTurn: 14,
+  });
+
+  assert.equal(result.handled, false);
+  assert.equal(result.logType, 'discovery_followup_narration');
+  assert.equal(result.skipSpatialGuard, true);
+  assert.equal(result.worldState.pending_roll, null);
+  assert.equal(result.worldState.discovery_state.studies.notice_details, undefined);
+  assert.match(result.narrativeFrame, /already-earned study result for "notice board" about missing road-workers/);
+  assert.match(result.narrativeFrame, /Do not call for another roll/);
+  assert.match(result.narrativeFrame, /Answer in-world/);
+  assert.doesNotMatch(result.narrativeFrame, /use the established result and reveal/);
+});
+
+test('known discovery follow-up prefers explicit target over stale details pollution', () => {
+  const state = worldState({
+    discovery_state: {
+      searches: {},
+      studies: {
+        notice_details: {
+          target: 'notice details',
+          target_type: 'object',
+          subject: '',
+          best_outcome: 'success',
+          discovered: true,
+          attempts: 1,
+        },
         notice_board: {
           target: 'notice board',
           target_type: 'object',
@@ -156,18 +199,15 @@ test('known discovery follow-up reuses success without prompting another roll', 
     },
   });
   const result = adjudicate({
-    message: 'Read notice details.',
+    message: 'Read the notice board details again.',
     worldState: state,
     characterSheet,
-    currentTurn: 14,
+    currentTurn: 15,
   });
 
-  assert.equal(result.handled, true);
-  assert.equal(result.logType, 'discovery_followup');
-  assert.equal(result.worldState.pending_roll, null);
-  assert.equal(result.worldState.discovery_state.studies.notice_details, undefined);
-  assert.match(result.reply, /notice board already has a successful study result about missing road-workers/);
-  assert.match(result.reply, /No new roll is needed/);
+  assert.equal(result.handled, false);
+  assert.match(result.narrativeFrame, /"notice board" about missing road-workers/);
+  assert.doesNotMatch(result.narrativeFrame, /"notice details"/);
 });
 
 test('Insight study records the targeted NPC state after the roll resolves', () => {
