@@ -5,7 +5,76 @@ QA thread role: read-only QA, no development changes.
 
 ## Summary
 
-Latest production regression pass confirms the Fighter level 2 mechanics push is stable in automation and the production level-1 guards behave correctly. Production awarded real discovery XP, the Character Sheet updated to `25/300`, Level Up controls remained hidden below threshold, and level-1 Action Surge was denied cleanly. Client lint passes. Server tests pass.
+Latest production regression pass confirms the gated QA level-up readiness endpoint works in production when called with the configured secret. A fresh QA socket session created a Fighter, raised XP to the level 2 threshold, returned an apply-ready preview, and successfully applied Fighter level 2 with Action Surge and Tactical Mind. Player-facing `QA Smoke` remains stable at Level 1 with `25/300 XP`.
+
+## Latest QA Pass - 2026-06-12 QA Secret Follow-Up / Level-Up Apply E2E
+
+Scope:
+
+- Used the configured production QA tools secret provided by the user in chat. The secret was not written to this file.
+- Created a fresh temporary QA-controlled production socket session and valid Fighter character named `QA Leveler`.
+- Called production `POST /qa/level-up-ready` for that temporary session.
+- Exercised the production socket level-up preview and apply events.
+- Rechecked the visible production `QA Smoke` session stayed stable.
+
+Production verified / passed:
+
+- Temporary socket session creation: PASS.
+- Temporary Fighter save: PASS. `QA Leveler` started Level 1, XP 0, HP 13/13.
+- QA endpoint with valid secret: PASS. Returned `200 OK`, XP `300`, threshold `300`, current level `1`, next level `2`, `canApply: true`, blockers `[]`.
+- Level-up availability emit: PASS. Socket received `level_up_available`.
+- Level-up preview socket event: PASS. Preview returned `canLevelUp: true`, `canApply: true`, HP increase `+9`, features `Action Surge` and `Tactical Mind`, blockers `[]`.
+- Level-up apply socket event: PASS. `level_up_result` returned Level 2, XP `300`, next threshold `900`, HP `22/22`, Action Surge resource `{ remaining: 1, max: 1, reset: short_rest }`, and progression history recorded fixed HP increase `9`.
+- Visible `QA Smoke` session stability: PASS. It remains Level 1 at `25/300 XP`; no below-threshold Level Up controls are shown.
+
+Open QA note:
+
+- The production server-side and socket level-up flow is now proven. The only remaining unverified piece is the literal React Level Up modal in the visible browser, because the browser automation surface cannot safely extract or replace the current session token, and a blocked browser security policy prevented the temporary in-page storage inspection path. To test the modal visually, QA needs either the visible session moved to 300 XP by the QA endpoint using its current session credentials, or an approved UI/deep-link route to open the temporary QA session in the browser.
+
+Current recommendation:
+
+- Treat Fighter level 2 backend/apply flow as production-passed. DEV can either proceed with the next 4D slice or add a QA-safe way to open/select a specific test session in the frontend so the React modal can be visually verified too. The engine crossed the bridge; now we just need to look at the bridge toll booth.
+
+## Latest QA Pass - 2026-06-12 Gated QA Level-Up Readiness Tool `efcf3ae`
+
+Scope:
+
+- Verified latest app-code commit under test: `efcf3ae Add gated QA level-up readiness tool`; current `HEAD` is `7ea3ec5 Update QA_HANDOFF.md` and only changes `QA_HANDOFF.md`.
+- Inspected changed surface: `README.md`, `server/src/index.js`, `server/src/progressionEngine.js`, `server/src/qaTools.js`, `server/test/progressionEngine.test.js`, and `server/test/qaTools.test.js`.
+- Rechecked production frontend at `https://hallucinated-dungeons.vercel.app/`.
+- Probed production backend health and the new QA endpoint at `https://hallucinated-dungeons-production.up.railway.app`.
+
+Automated checks:
+
+- Client `npm.cmd run lint`: PASS.
+- Server `npm.cmd test`: PASS, `453/453`.
+- `git diff --check efcf3ae^ efcf3ae`: PASS.
+
+Verified fixed / passed in production:
+
+- Backend health: PASS. `GET /health` returned `200 OK`.
+- QA endpoint default safety: PASS. `POST /qa/level-up-ready` with no secret/body returned `404 {"ok":false,"error":"Not found."}`. This indicates the tool is not publicly exposed when `QA_TOOLS_SECRET` is absent.
+- Frontend smoke: PASS. App loaded connected.
+- Character Sheet: PASS. `QA Smoke` remains `Human Fighter - Level 1` with `XP 25/300`.
+- Below-threshold Level Up affordance: PASS. No `Level Up Available` badge and no `Level Up` button are visible at `25/300`.
+- Production console: PASS. No warn/error logs observed during this pass.
+
+Verified by local automated coverage:
+
+- QA tools stay disabled unless a server secret is configured.
+- QA tools accept either `x-qa-tools-secret` or Bearer auth when the secret matches.
+- `buildLevelUpReadySheet` raises the active character to the next threshold.
+- Explicit high QA XP targets are not lowered.
+- `setCharacterXp` recalculates level-up readiness and records a QA/manual award.
+- `setCharacterXp` clears readiness when XP is below the next threshold.
+
+Open QA note:
+
+- The new QA readiness tool cannot yet be used in production from QA because the live backend appears to have no `QA_TOOLS_SECRET` configured, and QA does not have a secret to send. That is good from a security standpoint, but it leaves the original above-threshold Level Up modal/apply production test still blocked.
+
+Current recommendation:
+
+- Configure `QA_TOOLS_SECRET` in production and provide QA the secret through the agreed secure channel, or provide another controlled XP-ready test character. Then QA can call `/qa/level-up-ready`, verify the Level Up badge/button, open the preview modal, apply Fighter level 2, and test Action Surge/Tactical Mind as an actual level 2 character. Right now the key exists, but it is sitting in a locked drawer with no label.
 
 ## Latest QA Pass - 2026-06-12 Fighter Leveling `97bd4b8`
 
