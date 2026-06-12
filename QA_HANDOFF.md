@@ -1,11 +1,50 @@
 # Hallucinated Dungeons QA Handoff
 
-Date: 2026-06-07
+Date: 2026-06-12
 QA thread role: read-only QA, no development changes.
 
 ## Summary
 
-Latest production regression pass confirms the first 4D XP foundation is present and stable in smoke testing. XP is visible on the Character Sheet and DM2 reports the 0/300 level 2 threshold. Client lint passed. Server tests pass.
+Latest production regression pass confirms the guarded level-up preview foundation is behaving safely below threshold. XP is visible on the Character Sheet, no Level Up control appears at XP 0, DM2 correctly reports that the player cannot level up yet, client lint passes, and server tests pass.
+
+## Latest QA Pass - 2026-06-12 Guarded Level-Up Preview `f18c036`
+
+Scope:
+
+- Verified latest app-code commit under test: `f18c036 Add guarded level-up preview flow`; current `HEAD` is `023ea19 Update QA_HANDOFF.md`.
+- Inspected changed surface: `client/src/App.jsx`, `client/src/App.css`, `server/src/index.js`, `server/src/levelUpEngine.js`, `server/src/contentData.js`, `server/data/class_level_advancement.json`, and `server/test/levelUpEngine.test.js`.
+- Rechecked production at `https://hallucinated-dungeons.vercel.app/` using the existing `QA Smoke` session.
+- Checked desktop and mobile sheet behavior for the below-threshold player state.
+
+Automated checks:
+
+- Client `npm.cmd run lint`: PASS.
+- Server `npm.cmd test`: PASS, `439/439`.
+
+Verified fixed / passed in production:
+
+- Character Sheet progression guard: PASS. `QA Smoke` remains `Human Fighter - Level 1` with `XP 0`.
+- Below-threshold Level Up affordance: PASS. At XP 0, the Character Sheet shows only `Close`; no `Level Up Available` badge and no `Level Up` button are exposed.
+- DM2 progression answer: PASS. Natural player question `Can I level up yet, and how much XP do I have?` answered that XP is `0` and the character cannot level up yet.
+- Mobile sheet layout: PASS at `390x844`. Sheet header/stat strip did not horizontally overflow, XP showed `0`, and no hidden/broken Level Up action appeared.
+- Production console: PASS. No warn/error logs observed during this pass.
+
+Verified by local automated coverage:
+
+- Level-up preview stays unavailable below the XP threshold.
+- Fighter level 2 preview uses fixed HP and blocks unsupported mechanics.
+- Applying a blocked level returns a preview and does not mutate the sheet.
+- Fixed HP increase includes per-level HP bonuses such as Tough.
+- `applyLevelUp` can apply an unblocked advancement record.
+- Proficiency bonus follows the SRD advancement table cadence.
+
+Open QA note:
+
+- I did not production-test the above-threshold preview modal because the active production character has XP 0 and there is no safe player-realistic way in this session to force 300 XP. Local tests cover the ready/blocked/apply paths, but production still needs a controlled XP-ready character or a reliable award scenario to verify the visible preview modal and `Rules Work Needed` blocked-apply state.
+
+Current recommendation:
+
+- No blocker found in the below-threshold guard. DEV can continue 4D build-out, but before calling level-up production-proven, QA needs an XP-ready state to test the actual preview modal and blocked/apply behavior end to end. The lever is there; we still need a character heavy enough to pull it.
 
 ## Latest QA Pass - 2026-06-07 First 4D Push `3490ab6`
 
