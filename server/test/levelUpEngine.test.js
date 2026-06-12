@@ -59,31 +59,54 @@ test('level-up preview stays unavailable below the XP threshold', () => {
   assert.equal(preview.threshold, 300);
 });
 
-test('fighter level 2 preview uses fixed HP and blocks unsupported mechanics', () => {
+test('fighter level 2 preview uses fixed HP and is apply-ready', () => {
   const preview = getLevelUpPreview(baseSheet({
     identity: { experience_points: 300, level_up_available: true },
     progression: { experience_points: 300 },
   }), getContentBundle());
 
   assert.equal(preview.canLevelUp, true);
-  assert.equal(preview.canApply, false);
+  assert.equal(preview.canApply, true);
   assert.equal(preview.hp.hitDie, 10);
   assert.equal(preview.hp.fixedBase, 6);
   assert.equal(preview.hp.constitutionModifier, 2);
   assert.equal(preview.hp.increase, 8);
   assert.deepEqual(preview.features.map((feature) => feature.name), ['Action Surge', 'Tactical Mind']);
-  assert(preview.blockers.some((entry) => entry.type === 'unsupported_mechanic' && entry.message.includes('Action Surge')));
+  assert.deepEqual(preview.blockers, []);
 });
 
-test('applying a real blocked level returns a preview and does not mutate the sheet', () => {
+test('applying fighter level 2 updates level, HP, hit dice, and Action Surge resource', () => {
   const sheet = baseSheet({
     identity: { experience_points: 300, level_up_available: true },
     progression: { experience_points: 300 },
   });
   const result = applyLevelUp({ characterSheet: sheet, content: getContentBundle() });
 
+  assert.equal(result.ok, true);
+  assert.equal(result.characterSheet.identity.level, 2);
+  assert.equal(result.characterSheet.derived_stats.max_hp, 20);
+  assert.equal(result.characterSheet.resources.hit_dice.max, 2);
+  assert.equal(result.characterSheet.resources.action_surge.remaining, 1);
+  assert(result.characterSheet.features.some((feature) => feature.name === 'Action Surge'));
+  assert(result.characterSheet.features.some((feature) => feature.name === 'Tactical Mind'));
+});
+
+test('applying a blocked choice-heavy level returns a preview and does not mutate the sheet', () => {
+  const sheet = baseSheet({
+    identity: {
+      class: 'bard',
+      class_name: 'Bard',
+      experience_points: 300,
+      level_up_available: true,
+    },
+    progression: { experience_points: 300 },
+  });
+  const result = applyLevelUp({ characterSheet: sheet, content: getContentBundle() });
+
   assert.equal(result.ok, false);
   assert.equal(result.preview.canLevelUp, true);
+  assert.equal(result.preview.canApply, false);
+  assert(result.preview.blockers.some((entry) => entry.type === 'required_choice'));
   assert.equal(sheet.identity.level, 1);
 });
 

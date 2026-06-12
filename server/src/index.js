@@ -426,7 +426,9 @@ async function handleDeterministicSpellAction(socket, sessionId, message) {
 
   if (currentWorldState.combat_state?.active) {
     const actionResource = getSpellActionResource(result.spell);
-    const spent = spendTurnResource(result.worldState, actionResource, result.spell.name, result.characterSheet);
+    const spent = spendTurnResource(result.worldState, actionResource, result.spell.name, result.characterSheet, {
+      actionType: actionResource === 'action' ? 'magic' : null,
+    });
     if (!spent.ok) {
       const currentTurn = currentWorldState.session_turn ?? 0;
       await db.saveMessage(sessionId, 'player_dm1', message, currentTurn);

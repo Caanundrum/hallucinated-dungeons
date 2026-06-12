@@ -44,7 +44,7 @@ function beginPlayerTurn(worldState = {}, characterSheet = {}) {
   };
 }
 
-function spendTurnResource(worldState = {}, resource, label = 'that action', characterSheet = {}) {
+function spendTurnResource(worldState = {}, resource, label = 'that action', characterSheet = {}, options = {}) {
   if (!resource || !worldState.combat_state?.active) {
     return { ok: true, worldState };
   }
@@ -55,6 +55,37 @@ function spendTurnResource(worldState = {}, resource, label = 'that action', cha
 
   const readyState = ensureTurnResources(worldState, characterSheet);
   const resources = readyState.combat_state.turn_resources;
+  if (resource === 'action' && !resources.action_available && resources.extra_action_available) {
+    if (options.actionType === 'magic') {
+      return {
+        ok: false,
+        worldState: readyState,
+        reply: 'Action Surge grants an extra action, but that extra action cannot be the Magic action. Use it for a non-Magic action, or save the spell for a regular action.',
+      };
+    }
+    return {
+      ok: true,
+      worldState: {
+        ...readyState,
+        combat_state: {
+          ...readyState.combat_state,
+          turn_resources: {
+            ...resources,
+            extra_action_available: false,
+            used: [
+              ...(resources.used || []),
+              {
+                resource,
+                label,
+                source: 'Action Surge',
+              },
+            ],
+          },
+        },
+      },
+    };
+  }
+
   const key = RESOURCE_KEYS[resource];
   if (!resources[key]) {
     const resourceLabel = RESOURCE_LABELS[resource] || resource;
@@ -79,6 +110,47 @@ function spendTurnResource(worldState = {}, resource, label = 'that action', cha
             {
               resource,
               label,
+            },
+          ],
+        },
+      },
+    },
+  };
+}
+
+function grantActionSurgeAction(worldState = {}, characterSheet = {}) {
+  if (!worldState.combat_state?.active) {
+    return {
+      ok: false,
+      worldState,
+      reply: 'Action Surge matters during your turn in combat. Outside combat, the world is already letting you act without counting every heartbeat.',
+    };
+  }
+
+  const readyState = ensureTurnResources(worldState, characterSheet);
+  const resources = readyState.combat_state.turn_resources;
+  if (resources.extra_action_available) {
+    return {
+      ok: false,
+      worldState: readyState,
+      reply: 'Action Surge is already granting an extra action this turn. Use that one before trying to stack more tactical enthusiasm on top.',
+    };
+  }
+
+  return {
+    ok: true,
+    worldState: {
+      ...readyState,
+      combat_state: {
+        ...readyState.combat_state,
+        turn_resources: {
+          ...resources,
+          extra_action_available: true,
+          used: [
+            ...(resources.used || []),
+            {
+              resource: 'action_surge',
+              label: 'Action Surge',
             },
           ],
         },
@@ -195,6 +267,7 @@ function getSpellActionResource(spell = {}) {
 function describeAvailableResources(resources = {}) {
   const available = [];
   if (resources.action_available) available.push('Action');
+  if (resources.extra_action_available) available.push('Action Surge action');
   if (resources.bonus_action_available) available.push('Bonus Action');
   if (resources.reaction_available) available.push('Reaction');
   if (Number(resources.movement_remaining || 0) > 0) {
@@ -207,6 +280,7 @@ function buildFreshTurnResources(characterSheet = {}, worldState = {}) {
   return {
     actor: 'player',
     action_available: true,
+    extra_action_available: false,
     bonus_action_available: true,
     reaction_available: true,
     movement_remaining: getSpeed(characterSheet, worldState),
@@ -238,6 +312,7 @@ module.exports = {
   continuePlayerTurn,
   describeAvailableResources,
   ensureTurnResources,
+  grantActionSurgeAction,
   spendTurnResource,
   spendMovement,
   grantMovement,

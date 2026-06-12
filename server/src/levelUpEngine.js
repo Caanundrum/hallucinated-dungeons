@@ -1,7 +1,10 @@
 const { getContentBundle, byId } = require('./contentData');
 const { abilityMod } = require('./characterValidator');
 
-const SUPPORTED_LEVEL_UP_MECHANICS = new Set();
+const SUPPORTED_LEVEL_UP_MECHANICS = new Set([
+  'action_surge',
+  'tactical_mind',
+]);
 
 function getLevelUpPreview(characterSheet = {}, content = getContentBundle(), options = {}) {
   const currentLevel = getCharacterLevel(characterSheet);

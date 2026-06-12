@@ -35,10 +35,12 @@ const {
 } = require('./damageHealingEngine');
 const {
   applyPendingRollResourceIntent,
+  buildResourceState,
   completeLongRestResources,
   completeShortRestResources,
   getAutoD20RerollRules,
   mergeWorldResources,
+  spendResource,
 } = require('./resourceEngine');
 const {
   getAttackMode,
@@ -140,6 +142,10 @@ function adjudicate({ message, worldState = {}, characterSheet = null, currentTu
   const state = normalizeWorldState(worldState);
   const intent = resolveIntent(text, { worldState: state });
   const sheet = characterSheet || {};
+
+  if (state.pending_tactical_mind) {
+    return resolvePendingTacticalMind({ message: text, worldState: state, characterSheet: sheet, rollDie });
+  }
 
   if (state.pending_reaction) {
     return resolvePendingReaction({ message: text, worldState: state, characterSheet: sheet, rollDie });
@@ -567,9 +573,32 @@ function resolveCheckRoll({ pending, result, worldState, characterSheet }) {
     nextState = consumeActiveEffects(nextState, resolvedPending.bonus_effect_ids, characterSheet);
   }
 
-  let reply = buildCheckResolutionReply(resolvedPending, result, outcome);
-  const hiddenOutcome = applyHideCheckOutcome({
+  const tacticalMind = maybePromptTacticalMind({
     pending: resolvedPending,
+    result,
+    outcome,
+    worldState: nextState,
+    characterSheet,
+  });
+  if (tacticalMind) return tacticalMind;
+
+  return finalizeCheckResolution({
+    pending: resolvedPending,
+    result,
+    outcome,
+    worldState: nextState,
+    characterSheet,
+  });
+}
+
+function finalizeCheckResolution({ pending, result, outcome, worldState, characterSheet }) {
+  let nextState = {
+    ...worldState,
+    pending_tactical_mind: null,
+  };
+  let reply = buildCheckResolutionReply(pending, result, outcome);
+  const hiddenOutcome = applyHideCheckOutcome({
+    pending,
     result,
     outcome,
     worldState: nextState,
@@ -578,7 +607,7 @@ function resolveCheckRoll({ pending, result, worldState, characterSheet }) {
   nextState = hiddenOutcome.worldState;
   if (hiddenOutcome.lines.length) reply += `\n\n${hiddenOutcome.lines.join('\n\n')}`;
   const socialOutcome = applySocialCheckOutcome({
-    pending: resolvedPending,
+    pending,
     result,
     outcome,
     worldState: nextState,
@@ -586,7 +615,7 @@ function resolveCheckRoll({ pending, result, worldState, characterSheet }) {
   nextState = socialOutcome.worldState;
   if (socialOutcome.lines.length) reply += `\n\n${socialOutcome.lines.join('\n\n')}`;
   const discoveryOutcome = applyDiscoveryCheckOutcome({
-    pending: resolvedPending,
+    pending,
     result,
     outcome,
     worldState: nextState,
@@ -594,7 +623,7 @@ function resolveCheckRoll({ pending, result, worldState, characterSheet }) {
   nextState = discoveryOutcome.worldState;
   if (discoveryOutcome.lines.length) reply += `\n\n${discoveryOutcome.lines.join('\n\n')}`;
   const objectOutcome = applyObjectChallengeOutcome({
-    pending: resolvedPending,
+    pending,
     result,
     outcome,
     worldState: nextState,
@@ -602,7 +631,7 @@ function resolveCheckRoll({ pending, result, worldState, characterSheet }) {
   nextState = objectOutcome.worldState;
   if (objectOutcome.lines.length) reply += `\n\n${objectOutcome.lines.join('\n\n')}`;
   const hazardOutcome = applyAthleticsHazardOutcome({
-    pending: resolvedPending,
+    pending,
     result,
     outcome,
     worldState: nextState,
@@ -611,7 +640,7 @@ function resolveCheckRoll({ pending, result, worldState, characterSheet }) {
   if (hazardOutcome.lines.length) reply += `\n\n${hazardOutcome.lines.join('\n\n')}`;
   if (!pending.combat) {
     const advanced = advanceNarrativeTime({
-      message: resolvedPending.intent || '',
+      message: pending.intent || '',
       worldState: nextState,
       characterSheet,
       defaultElapsed: { minutes: 1 },
@@ -635,6 +664,123 @@ function resolveCheckRoll({ pending, result, worldState, characterSheet }) {
     worldState: nextState,
     reply,
   };
+}
+
+function maybePromptTacticalMind({ pending, result, outcome, worldState, characterSheet }) {
+  if (!isTacticalMindEligible({ pending, result, outcome, worldState, characterSheet })) return null;
+  return {
+    handled: true,
+    logType: 'referee_tactical_mind_prompt',
+    worldState: {
+      ...worldState,
+      pending_tactical_mind: {
+        pending,
+        result,
+        outcome,
+      },
+    },
+    reply: `${buildCheckResolutionLine(pending, result, outcome)}\n\n**Tactical Mind is available.** You can spend one Second Wind use to roll 1d10 and add it to this failed ability check. If the check still fails, no use is spent. Say **use Tactical Mind** or **decline Tactical Mind**.`,
+  };
+}
+
+function resolvePendingTacticalMind({ message, worldState, characterSheet, rollDie = defaultRollDie }) {
+  const decision = getTacticalMindDecision(message);
+  const pendingChoice = worldState.pending_tactical_mind;
+  if (!pendingChoice?.pending || !pendingChoice?.result) {
+    return {
+      handled: true,
+      logType: 'referee_tactical_mind_missing',
+      worldState: { ...worldState, pending_tactical_mind: null },
+      reply: 'There is no Tactical Mind decision waiting right now.',
+    };
+  }
+
+  if (decision === 'decline') {
+    return finalizeCheckResolution({
+      pending: pendingChoice.pending,
+      result: pendingChoice.result,
+      outcome: pendingChoice.outcome,
+      worldState: { ...worldState, pending_tactical_mind: null },
+      characterSheet,
+    });
+  }
+
+  if (decision !== 'use') {
+    return {
+      handled: true,
+      logType: 'referee_tactical_mind_choice_required',
+      worldState,
+      reply: 'Choose **use Tactical Mind** or **decline Tactical Mind** before the result lands. The rules are holding the door open and starting to make eye contact.',
+    };
+  }
+
+  const resources = buildResourceState(characterSheet, worldState);
+  if (Number(resources.second_wind?.remaining || 0) <= 0) {
+    return finalizeCheckResolution({
+      pending: pendingChoice.pending,
+      result: pendingChoice.result,
+      outcome: pendingChoice.outcome,
+      worldState: {
+        ...mergeWorldResources(worldState, resources),
+        pending_tactical_mind: null,
+      },
+      characterSheet,
+    });
+  }
+
+  const die = rollDie(10);
+  const revisedTotal = Number(pendingChoice.result.total || 0) + Number(die || 0);
+  const revisedMargin = revisedTotal - Number(pendingChoice.pending.dc || DEFAULT_CHECK_DC);
+  const revisedOutcome = getRollOutcome({ pending: pendingChoice.pending, margin: revisedMargin });
+  const succeeded = revisedMargin >= 0;
+  let nextState = {
+    ...worldState,
+    pending_tactical_mind: null,
+  };
+  let result = {
+    ...pendingChoice.result,
+    total: revisedTotal,
+    rollText: `${revisedTotal} (${pendingChoice.result.rollText}; Tactical Mind 1d10=${die})`,
+  };
+
+  let tacticalLine = `**Tactical Mind:** 1d10 = ${die}. Revised total ${revisedTotal} vs DC ${pendingChoice.pending.dc}: ${succeeded ? '**success**' : '**still fails**'}.`;
+  if (succeeded) {
+    const spent = spendResource({ worldState: nextState, characterSheet, resource: 'second_wind' });
+    nextState = spent.worldState;
+    tacticalLine += ` Second Wind uses left: ${Number(spent.resources.second_wind?.remaining || 0)}.`;
+  } else {
+    nextState = mergeWorldResources(nextState, resources);
+    tacticalLine += ' No Second Wind use is spent.';
+  }
+
+  const finalized = finalizeCheckResolution({
+    pending: pendingChoice.pending,
+    result,
+    outcome: revisedOutcome,
+    worldState: nextState,
+    characterSheet,
+  });
+  return {
+    ...finalized,
+    logType: 'referee_tactical_mind_resolution',
+    reply: `${tacticalLine}\n\n${finalized.reply}`,
+  };
+}
+
+function isTacticalMindEligible({ pending, result, outcome, worldState, characterSheet }) {
+  if (!['skill_check', 'ability_check'].includes(pending.kind)) return false;
+  if (Number(result.total || 0) >= Number(pending.dc || DEFAULT_CHECK_DC)) return false;
+  if (!['failure', 'near_miss'].includes(outcome)) return false;
+  if (!isClass(characterSheet, 'fighter') || getCharacterLevel(characterSheet) < 2) return false;
+  const resources = buildResourceState(characterSheet, worldState);
+  return Number(resources.second_wind?.remaining || 0) > 0;
+}
+
+function getTacticalMindDecision(message = '') {
+  const text = String(message || '').toLowerCase();
+  if (/\b(?:decline|skip|no|not now|save it|do not use|don't use|dont use)\b/.test(text)) return 'decline';
+  if (/\b(?:use|spend|apply|try)\s+(?:my\s+)?tactical\s+mind\b|\btactical\s+mind\b/.test(text)) return 'use';
+  return null;
 }
 
 function resolveDeathSave({ result, worldState, characterSheet, rollDie }) {
@@ -748,15 +894,19 @@ function getDeathSaveStatus(worldState = {}) {
 }
 
 function buildCheckResolutionReply(pending, result, outcome) {
-  const dc = Number(pending.dc || DEFAULT_CHECK_DC);
-  const label = pending.kind === 'saving_throw' ? pending.label || 'Saving throw' : 'Roll';
-  const rolled = result.rollText || String(result.total);
-  const rollLine = `${label} ${rolled} vs DC ${dc}: ${outcome === 'success' ? '**success**' : outcome === 'near_miss' ? '**near miss**' : '**failure**'}.`;
+  const rollLine = buildCheckResolutionLine(pending, result, outcome);
   if (outcome === 'success') return `${rollLine}\n\n${pending.success_result || 'You accomplish what you set out to do.'}`;
   if (outcome === 'near_miss') {
     return `${rollLine}\n\nYou do not get the clean result you wanted, but you catch enough to keep moving: ${pending.failure_result || 'the attempt does not fully work.'}`;
   }
   return `${rollLine}\n\n${pending.failure_result || 'The attempt fails, and the world refuses to politely pretend otherwise.'}`;
+}
+
+function buildCheckResolutionLine(pending, result, outcome) {
+  const dc = Number(pending.dc || DEFAULT_CHECK_DC);
+  const label = pending.kind === 'saving_throw' ? pending.label || 'Saving throw' : 'Roll';
+  const rolled = result.rollText || String(result.total);
+  return `${label} ${rolled} vs DC ${dc}: ${outcome === 'success' ? '**success**' : outcome === 'near_miss' ? '**near miss**' : '**failure**'}.`;
 }
 
 function withConcreteCheckResult({ pending = {}, outcome, worldState = {} } = {}) {
@@ -3149,6 +3299,14 @@ function rollDamage(formula, rollDie, crit = false) {
 
 function getCurrentHp(characterSheet, worldState) {
   return Number(worldState.player_stats?.hp ?? characterSheet?.derived_stats?.hp ?? characterSheet?.derived_stats?.max_hp ?? 10);
+}
+
+function isClass(characterSheet = {}, classId) {
+  return normalizeId(characterSheet.identity?.class || characterSheet.identity?.class_name) === classId;
+}
+
+function getCharacterLevel(characterSheet = {}) {
+  return Number(characterSheet.identity?.level || characterSheet.derived_stats?.level || 1);
 }
 
 function getPlayerConditionSubject(characterSheet = {}, worldState = {}) {

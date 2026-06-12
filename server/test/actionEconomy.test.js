@@ -8,6 +8,7 @@ const assert = require('node:assert/strict');
 const {
   beginPlayerTurn,
   continuePlayerTurn,
+  grantActionSurgeAction,
   grantMovement,
   setTurnFlag,
   spendTurnResource,
@@ -65,6 +66,21 @@ test('bonus action and action are tracked separately', () => {
   assert.equal(action.ok, true);
   assert.equal(action.worldState.combat_state.turn_resources.bonus_action_available, false);
   assert.equal(action.worldState.combat_state.turn_resources.action_available, false);
+});
+
+test('Action Surge grants one extra non-Magic action after the regular action is spent', () => {
+  const started = beginPlayerTurn(combatWorld(), characterSheet);
+  const attacked = spendTurnResource(started, 'action', 'Attack', characterSheet);
+  const surged = grantActionSurgeAction(attacked.worldState, characterSheet);
+  const magic = spendTurnResource(surged.worldState, 'action', 'Magic Missile', characterSheet, { actionType: 'magic' });
+  const secondAttack = spendTurnResource(magic.worldState, 'action', 'Attack', characterSheet);
+
+  assert.equal(surged.ok, true);
+  assert.equal(surged.worldState.combat_state.turn_resources.extra_action_available, true);
+  assert.equal(magic.ok, false);
+  assert.match(magic.reply, /cannot be the Magic action/);
+  assert.equal(secondAttack.ok, true);
+  assert.equal(secondAttack.worldState.combat_state.turn_resources.extra_action_available, false);
 });
 
 test('movement spend reduces remaining movement without consuming the action', () => {

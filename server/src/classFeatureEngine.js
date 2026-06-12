@@ -1,4 +1,7 @@
-const { spendTurnResource } = require('./actionEconomy');
+const {
+  grantActionSurgeAction,
+  spendTurnResource,
+} = require('./actionEconomy');
 const { rollDie } = require('./dice');
 const {
   buildResourceState,
@@ -19,6 +22,7 @@ function resolveFeatureAction({ message = '', worldState = {}, characterSheet = 
   if (!intent) return null;
 
   if (intent.id === 'rage') return resolveRage({ worldState, characterSheet });
+  if (intent.id === 'action_surge') return resolveActionSurge({ worldState, characterSheet });
   if (intent.id === 'second_wind') return resolveSecondWind({ worldState, characterSheet, rollDie });
   if (intent.id === 'lay_on_hands') return resolveLayOnHands({ message, worldState, characterSheet });
   if (intent.id === 'innate_sorcery') return resolveInnateSorcery({ worldState, characterSheet });
@@ -38,12 +42,53 @@ function resolveFeatureAction({ message = '', worldState = {}, characterSheet = 
 function getFeatureIntent(message = '') {
   const text = String(message || '').toLowerCase();
   if (/\b(?:enter|use|start|activate|go into)?\s*rage\b/.test(text)) return { id: 'rage' };
+  if (/\baction\s+surge\b/.test(text)) return { id: 'action_surge' };
   if (/\bsecond\s+wind\b/.test(text)) return { id: 'second_wind' };
   if (/\blay\s+on\s+hands\b/.test(text)) return { id: 'lay_on_hands' };
   if (/\binnate\s+sorcery\b/.test(text)) return { id: 'innate_sorcery' };
   if (/\bbardic\s+inspiration\b/.test(text)) return { id: 'bardic_inspiration' };
   if (/\barcane\s+recovery\b/.test(text)) return { id: 'arcane_recovery' };
   return null;
+}
+
+function resolveActionSurge({ worldState = {}, characterSheet = {} } = {}) {
+  if (!isClass(characterSheet, 'fighter')) return wrongClass('Action Surge', 'Fighter', worldState);
+  if (getCharacterLevel(characterSheet) < 2) {
+    return {
+      handled: true,
+      logType: 'feature_action_surge_level_required',
+      worldState,
+      reply: 'Action Surge is a level 2 Fighter feature. At level 1, the tactical lightning has not been installed yet.',
+    };
+  }
+
+  const resources = buildResourceState(characterSheet, worldState);
+  if (Number(resources.action_surge?.remaining || 0) <= 0) {
+    return {
+      handled: true,
+      logType: 'feature_action_surge_unavailable',
+      worldState: mergeWorldResources(worldState, resources),
+      reply: 'Action Surge has no uses left until a Short or Long Rest restores it.',
+    };
+  }
+
+  const surged = grantActionSurgeAction(worldState, characterSheet);
+  if (!surged.ok) {
+    return {
+      handled: true,
+      logType: 'feature_action_surge_unavailable',
+      worldState: surged.worldState,
+      reply: surged.reply,
+    };
+  }
+
+  const spent = spendResource({ worldState: surged.worldState, characterSheet, resource: 'action_surge' });
+  return {
+    handled: true,
+    logType: 'feature_action_surge',
+    worldState: spent.worldState,
+    reply: `You use **Action Surge** and gain one extra action this turn. The extra action cannot be the Magic action. Uses left: ${remainingResourceText(spent.worldState, characterSheet, 'action_surge')}.`,
+  };
 }
 
 function resolveRage({ worldState = {}, characterSheet = {} } = {}) {

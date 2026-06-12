@@ -118,6 +118,41 @@ test('Second Wind at full HP does not spend the use or Bonus Action', () => {
   assert.match(result.reply, /No use is spent/);
 });
 
+test('Action Surge grants an extra action and spends its level 2 resource', () => {
+  const result = resolveFeatureAction({
+    message: 'I use Action Surge.',
+    worldState: combatWorld({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        turn_resources: {
+          action_available: false,
+          bonus_action_available: true,
+          reaction_available: true,
+          movement_remaining: 30,
+          used: [{ resource: 'action', label: 'Attack' }],
+        },
+        combatants: [
+          { name: 'Ari', hp: 5, max_hp: 12, ac: 16, is_player: true },
+          { name: 'Goblin', hp: 8, max_hp: 8, ac: 12, is_player: false },
+        ],
+      },
+    }),
+    characterSheet: sheet('fighter', {
+      identity: { name: 'Ari', class: 'fighter', level: 2 },
+      resources: {
+        action_surge: { name: 'Action Surge', remaining: 1, max: 1, reset: 'short_rest' },
+      },
+    }),
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.player_stats.resources.action_surge.remaining, 0);
+  assert.equal(result.worldState.combat_state.turn_resources.extra_action_available, true);
+  assert.match(result.reply, /extra action/);
+});
+
 
 test('Lay on Hands spends healing pool without exceeding missing HP', () => {
   const result = resolveFeatureAction({

@@ -169,8 +169,19 @@ test('builds level 1 class feature resources from the character sheet', () => {
   });
 
   assert.equal(fighter.second_wind.remaining, 2);
+  assert.equal(fighter.action_surge, undefined);
   assert.equal(paladin.lay_on_hands.max, 5);
   assert.equal(bard.bardic_inspiration.max, 3);
+});
+
+test('builds Fighter Action Surge resource starting at level 2', () => {
+  const fighter = buildResourceState({
+    identity: { class: 'fighter', level: 2 },
+    derived_stats: { proficiency_bonus: 2 },
+  });
+
+  assert.equal(fighter.action_surge.remaining, 1);
+  assert.equal(fighter.action_surge.reset, 'short_rest');
 });
 
 test('short and long rests recover class feature resources', () => {

@@ -381,6 +381,159 @@ test('resolves an authenticated skill roll against the stored DC', () => {
   assert.match(result.reply, /clerk keeps his motive/);
 });
 
+test('Tactical Mind can turn a failed ability check into a success and spends Second Wind only then', () => {
+  const fighter = {
+    ...characterSheet,
+    identity: { ...characterSheet.identity, class: 'fighter', class_name: 'Fighter', level: 2 },
+    resources: {
+      second_wind: { name: 'Second Wind', remaining: 2, max: 2, reset: 'long_rest', recover_on_short_rest: 1 },
+    },
+  };
+  const failed = adjudicate({
+    message: '[ROLL REQUEST: roll_test]',
+    worldState: worldState({
+      pending_roll: {
+        id: 'roll_test',
+        kind: 'skill_check',
+        skill: 'insight',
+        ability: 'wis',
+        label: 'Wisdom (Insight)',
+        modifier: 2,
+        dc: 15,
+        failure_result: 'The clerk keeps his motive tucked away.',
+        success_result: 'You read the clerk clearly.',
+      },
+    }),
+    characterSheet: fighter,
+    rollDie: sequenceRolls([5]),
+  });
+  const used = adjudicate({
+    message: 'Use Tactical Mind.',
+    worldState: failed.worldState,
+    characterSheet: fighter,
+    rollDie: sequenceRolls([8]),
+  });
+
+  assert.equal(failed.handled, true);
+  assert.equal(failed.worldState.pending_roll, null);
+  assert.equal(failed.worldState.pending_tactical_mind.pending.id, 'roll_test');
+  assert.match(failed.reply, /Tactical Mind is available/);
+  assert.equal(used.worldState.pending_tactical_mind, null);
+  assert.equal(used.worldState.player_stats.resources.second_wind.remaining, 1);
+  assert.match(used.reply, /Revised total 15 vs DC 15: \*\*success\*\*/);
+  assert.match(used.reply, /You read the clerk clearly/);
+});
+
+test('Tactical Mind does not spend Second Wind when the bonus still fails', () => {
+  const fighter = {
+    ...characterSheet,
+    identity: { ...characterSheet.identity, class: 'fighter', class_name: 'Fighter', level: 2 },
+    resources: {
+      second_wind: { name: 'Second Wind', remaining: 2, max: 2, reset: 'long_rest', recover_on_short_rest: 1 },
+    },
+  };
+  const failed = adjudicate({
+    message: '[ROLL REQUEST: roll_test]',
+    worldState: worldState({
+      pending_roll: {
+        id: 'roll_test',
+        kind: 'ability_check',
+        ability: 'str',
+        label: 'Strength Check',
+        modifier: 3,
+        dc: 20,
+        failure_result: 'The gate does not budge.',
+      },
+    }),
+    characterSheet: fighter,
+    rollDie: sequenceRolls([5]),
+  });
+  const used = adjudicate({
+    message: 'Use Tactical Mind.',
+    worldState: failed.worldState,
+    characterSheet: fighter,
+    rollDie: sequenceRolls([3]),
+  });
+
+  assert.equal(used.worldState.player_stats.resources.second_wind.remaining, 2);
+  assert.match(used.reply, /still fails/);
+  assert.match(used.reply, /No Second Wind use is spent/);
+  assert.match(used.reply, /gate does not budge/);
+});
+
+test('declining Tactical Mind applies the original failed result without spending Second Wind', () => {
+  const fighter = {
+    ...characterSheet,
+    identity: { ...characterSheet.identity, class: 'fighter', class_name: 'Fighter', level: 2 },
+    resources: {
+      second_wind: { name: 'Second Wind', remaining: 2, max: 2, reset: 'long_rest', recover_on_short_rest: 1 },
+    },
+  };
+  const failed = adjudicate({
+    message: '[ROLL REQUEST: roll_test]',
+    worldState: worldState({
+      pending_roll: {
+        id: 'roll_test',
+        kind: 'skill_check',
+        skill: 'insight',
+        ability: 'wis',
+        label: 'Wisdom (Insight)',
+        modifier: 2,
+        dc: 15,
+        failure_result: 'The clerk keeps his motive tucked away.',
+      },
+    }),
+    characterSheet: fighter,
+    rollDie: sequenceRolls([5]),
+  });
+  const declined = adjudicate({
+    message: 'Decline Tactical Mind.',
+    worldState: failed.worldState,
+    characterSheet: fighter,
+  });
+
+  assert.equal(declined.worldState.pending_tactical_mind, null);
+  assert.equal(declined.worldState.player_stats.resources, undefined);
+  assert.match(declined.reply, /Roll 7 .* vs DC 15: \*\*failure\*\*/);
+  assert.match(declined.reply, /clerk keeps his motive/);
+});
+
+test('plain-language Tactical Mind decline does not accidentally spend the feature', () => {
+  const fighter = {
+    ...characterSheet,
+    identity: { ...characterSheet.identity, class: 'fighter', class_name: 'Fighter', level: 2 },
+    resources: {
+      second_wind: { name: 'Second Wind', remaining: 2, max: 2, reset: 'long_rest', recover_on_short_rest: 1 },
+    },
+  };
+  const failed = adjudicate({
+    message: '[ROLL REQUEST: roll_test]',
+    worldState: worldState({
+      pending_roll: {
+        id: 'roll_test',
+        kind: 'skill_check',
+        skill: 'insight',
+        ability: 'wis',
+        label: 'Wisdom (Insight)',
+        modifier: 2,
+        dc: 15,
+        failure_result: 'The clerk keeps his motive tucked away.',
+      },
+    }),
+    characterSheet: fighter,
+    rollDie: sequenceRolls([5]),
+  });
+  const declined = adjudicate({
+    message: "Don't use Tactical Mind.",
+    worldState: failed.worldState,
+    characterSheet: fighter,
+  });
+
+  assert.equal(declined.worldState.pending_tactical_mind, null);
+  assert.equal(declined.worldState.player_stats.resources, undefined);
+  assert.match(declined.reply, /clerk keeps his motive/);
+});
+
 test('spends Heroic Inspiration to reroll a failed pending d20 test', () => {
   const prompt = adjudicate({
     message: "I study the clerk's face.",

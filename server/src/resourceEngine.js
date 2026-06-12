@@ -21,6 +21,12 @@ const RESOURCE_DEFINITIONS = {
     reset: 'long_rest',
     recover_on_short_rest: 1,
   },
+  action_surge: {
+    name: 'Action Surge',
+    remaining: 1,
+    max: 1,
+    reset: 'short_rest',
+  },
   lay_on_hands: {
     name: 'Lay on Hands',
     reset: 'long_rest',
@@ -321,7 +327,10 @@ function applyClassResourceDefaults(resources, characterSheet = {}, worldResourc
   const defaults = {};
 
   if (classId === 'barbarian') defaults.rage = RESOURCE_DEFINITIONS.rage;
-  if (classId === 'fighter') defaults.second_wind = RESOURCE_DEFINITIONS.second_wind;
+  if (classId === 'fighter') {
+    defaults.second_wind = RESOURCE_DEFINITIONS.second_wind;
+    if (level >= 2) defaults.action_surge = RESOURCE_DEFINITIONS.action_surge;
+  }
   if (classId === 'paladin') {
     const max = level * 5;
     defaults.lay_on_hands = { ...RESOURCE_DEFINITIONS.lay_on_hands, remaining: max, max };
