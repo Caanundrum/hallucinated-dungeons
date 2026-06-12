@@ -5,7 +5,51 @@ QA thread role: read-only QA, no development changes.
 
 ## Summary
 
-Latest production regression pass confirms the guarded level-up preview foundation is behaving safely below threshold. XP is visible on the Character Sheet, no Level Up control appears at XP 0, DM2 correctly reports that the player cannot level up yet, client lint passes, and server tests pass.
+Latest production regression pass confirms the Fighter level 2 mechanics push is stable in automation and the production level-1 guards behave correctly. Production awarded real discovery XP, the Character Sheet updated to `25/300`, Level Up controls remained hidden below threshold, and level-1 Action Surge was denied cleanly. Client lint passes. Server tests pass.
+
+## Latest QA Pass - 2026-06-12 Fighter Leveling `97bd4b8`
+
+Scope:
+
+- Verified latest app-code commit under test: `97bd4b8 Enable fighter level 2 mechanics`; current `HEAD` is `99113b7 Fighter leveling` and only changes `QA_HANDOFF.md`.
+- Inspected changed surface: `server/src/actionEconomy.js`, `server/src/classFeatureEngine.js`, `server/src/index.js`, `server/src/levelUpEngine.js`, `server/src/refereeCore.js`, `server/src/resourceEngine.js`, and related tests.
+- Rechecked production at `https://hallucinated-dungeons.vercel.app/` using the existing `QA Smoke` session.
+- Checked normal player flows only; did not mutate production data outside gameplay.
+
+Automated checks:
+
+- Client `npm.cmd run lint`: PASS.
+- Server `npm.cmd test`: PASS, `447/447`.
+- `git diff --check 97bd4b8^ 97bd4b8`: PASS.
+
+Verified fixed / passed in production:
+
+- Character availability: PASS. Normal Switch flow only exposed `QA Smoke`, a Level 1 Human Fighter with `XP 0` at test start; no hidden XP-ready character was available.
+- Level-1 Action Surge guard: PASS. Player action `I use Action Surge.` returned `Action Surge is a level 2 Fighter feature. At level 1, the tactical lightning has not been installed yet.` No resource was invented and no console errors appeared.
+- Generic action submission: PASS. `I look around for anyone nearby.` produced a normal DC 20 Wisdom (Perception) roll prompt.
+- Roll resolution and XP award: PASS. Successful Perception roll awarded `XP: +25 ... Total: 25/300 XP.`
+- Character Sheet after XP: PASS. Sheet showed `XP 25/300`, stayed Level 1, and still showed no `Level Up Available` badge or `Level Up` button below threshold.
+- Production console: PASS. No warn/error logs observed during this pass.
+
+Verified by local automated coverage:
+
+- Fighter level 2 preview is apply-ready.
+- Applying Fighter level 2 updates level, HP, hit dice, features, and Action Surge resource.
+- Action Surge grants one extra non-Magic action after the regular action is spent.
+- Action Surge spends its level 2 resource.
+- Magic actions are blocked from the Action Surge extra action path.
+- Tactical Mind can convert a failed ability check into success and spends Second Wind only on success.
+- Tactical Mind does not spend Second Wind when the added d10 still fails.
+- Tactical Mind decline paths resolve the original failed check without spending the feature.
+- Resource defaults build Fighter Action Surge starting at level 2.
+
+Open QA note:
+
+- The actual above-threshold production Level Up modal and Apply Level Up button still were not tested because the only available production character is now `25/300 XP`, not 300+. Local tests cover the path, but QA still needs an XP-ready character or reliable XP-award route to verify the visible preview/apply flow in production.
+
+Current recommendation:
+
+- No blocker found for this push. DEV can continue 4D work, but should provide or create a controlled way for QA to reach/test 300 XP in production. Otherwise QA can only prove the below-threshold guard and local apply logic, which is a bit like inspecting the drawbridge from the parking lot.
 
 ## Latest QA Pass - 2026-06-12 Guarded Level-Up Preview `f18c036`
 
