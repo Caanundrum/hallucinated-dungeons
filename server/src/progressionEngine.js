@@ -249,6 +249,65 @@ function withProgressionOnCharacterSheet({
   };
 }
 
+function setCharacterXp(characterSheet = {}, xp = 0, options = {}) {
+  const priorProgression = characterSheet.progression || {};
+  const progression = normalizeProgression(priorProgression);
+  const currentXp = getCharacterXp(characterSheet);
+  const nextXp = Math.max(0, Math.floor(Number(xp || 0)));
+  const level = getCharacterLevel(characterSheet);
+  const nextThreshold = getXpThreshold(level + 1);
+  const levelUpAvailable = nextThreshold !== null && nextXp >= nextThreshold
+    ? {
+        ready: true,
+        current_level: level,
+        next_level: level + 1,
+        threshold: nextThreshold,
+        current_xp: nextXp,
+      }
+    : null;
+
+  const awardedSourceIds = { ...(progression.awarded_source_ids || {}) };
+  const xpAwards = [...(progression.xp_awards || [])];
+  const sourceId = options.sourceId || null;
+  const amount = Math.max(0, nextXp - currentXp);
+  let totalXpAwarded = Number(progression.total_xp_awarded || 0);
+
+  if (sourceId && amount > 0 && !awardedSourceIds[sourceId]) {
+    const timestamp = new Date().toISOString();
+    awardedSourceIds[sourceId] = timestamp;
+    totalXpAwarded += amount;
+    xpAwards.push({
+      id: `xp_${normalizeId(sourceId)}_${Date.now()}`,
+      amount,
+      source_type: options.sourceType || 'manual',
+      source_id: sourceId,
+      reason: options.reason || 'manual XP adjustment',
+      session_turn: Number(options.sessionTurn || 0),
+      awarded_at: timestamp,
+      metadata: options.metadata || {},
+    });
+  }
+
+  return {
+    ...withProgressionOnCharacterSheet({
+      characterSheet,
+      xp: nextXp,
+      levelUpAvailable,
+      xpAwards: xpAwards.slice(-MAX_STORED_AWARDS),
+    }),
+    progression: {
+      ...priorProgression,
+      ...progression,
+      experience_points: nextXp,
+      next_level_xp: nextThreshold,
+      xp_awards: xpAwards.slice(-MAX_STORED_AWARDS),
+      awarded_source_ids: awardedSourceIds,
+      total_xp_awarded: totalXpAwarded,
+      level_up_available: levelUpAvailable,
+    },
+  };
+}
+
 function normalizeProgression(value = {}) {
   const progression = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   return {
@@ -315,4 +374,5 @@ module.exports = {
   detectSocialAwards,
   formatProgressionAwardSummary,
   getXpThreshold,
+  setCharacterXp,
 };

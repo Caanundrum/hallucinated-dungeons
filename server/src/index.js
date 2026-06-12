@@ -55,6 +55,11 @@ const {
   applyLevelUp,
   getLevelUpPreview,
 } = require('./levelUpEngine');
+const {
+  buildLevelUpReadySheet,
+  hasValidQaToolsSecret,
+  isQaToolsEnabled,
+} = require('./qaTools');
 
 // ── Setup ──────────────────────────────────────────────────────────────────
 const app    = express();
@@ -1843,6 +1848,73 @@ io.on('connection', (socket) => {
 });
 
 // ── Health check ───────────────────────────────────────────────────────────
+app.post('/qa/level-up-ready', async (req, res) => {
+  if (!isQaToolsEnabled()) {
+    res.status(404).json({ ok: false, error: 'Not found.' });
+    return;
+  }
+
+  if (!hasValidQaToolsSecret(req)) {
+    res.status(403).json({ ok: false, error: 'QA tools secret is invalid.' });
+    return;
+  }
+
+  const { sessionId, sessionToken, xp } = req.body || {};
+  if (!isValidSessionToken(sessionId, sessionToken)) {
+    res.status(401).json({ ok: false, error: 'Session token is invalid.' });
+    return;
+  }
+
+  try {
+    const character = await db.getCharacterForSession(sessionId);
+    if (!character?.character_sheet) {
+      res.status(404).json({ ok: false, error: 'No active character found for that session.' });
+      return;
+    }
+
+    const ready = buildLevelUpReadySheet(character.character_sheet, {
+      xp,
+      sourceId: `qa:level_up_ready:${character.id}:level_${Number(character.character_sheet.identity?.level || 1) + 1}`,
+      metadata: { session_id: sessionId, character_id: character.id },
+    });
+    if (!ready.ok) {
+      res.status(400).json({ ok: false, error: ready.error });
+      return;
+    }
+
+    const saved = await db.updateCharacterSheet(character.id, ready.characterSheet);
+    await syncCharacterToWorldState(sessionId, saved.character_sheet, saved.id).catch(console.error);
+    const preview = getLevelUpPreview(saved.character_sheet, getContentBundle());
+
+    io.to(sessionId).emit('character_ready', {
+      characterId: saved.id,
+      character: saved.character_sheet,
+      shouldStartSession: false,
+    });
+    if (saved.character_sheet.progression?.level_up_available?.ready) {
+      io.to(sessionId).emit('level_up_available', {
+        characterId: saved.id,
+        character: saved.character_sheet,
+        progression: saved.character_sheet.progression.level_up_available,
+      });
+    }
+
+    res.json({
+      ok: true,
+      characterId: saved.id,
+      currentXp: preview.currentXp,
+      threshold: preview.threshold,
+      currentLevel: preview.currentLevel,
+      nextLevel: preview.nextLevel,
+      canApply: preview.canApply,
+      blockers: preview.blockers,
+    });
+  } catch (err) {
+    console.error('qa level-up-ready error:', err);
+    res.status(500).json({ ok: false, error: 'QA level-up preparation failed.' });
+  }
+});
+
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });

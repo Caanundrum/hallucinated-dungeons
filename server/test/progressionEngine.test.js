@@ -12,6 +12,7 @@ const {
   detectSocialAwards,
   formatProgressionAwardSummary,
   getXpThreshold,
+  setCharacterXp,
 } = require('../src/progressionEngine');
 
 function sheet(overrides = {}) {
@@ -177,4 +178,39 @@ test('XP thresholds load from the 2024 progression table', () => {
   assert.equal(getXpThreshold(2), 300);
   assert.equal(getXpThreshold(20), 355000);
   assert.equal(getXpThreshold(21), null);
+});
+
+test('setCharacterXp recalculates level-up readiness and records a manual award', () => {
+  const result = setCharacterXp(sheet({ identity: { experience_points: 25 } }), 300, {
+    sourceType: 'qa',
+    sourceId: 'qa:level_up_ready:test',
+    reason: 'QA level-up readiness',
+  });
+
+  assert.equal(result.identity.experience_points, 300);
+  assert.equal(result.identity.level_up_available, true);
+  assert.equal(result.progression.level_up_available.next_level, 2);
+  assert.equal(result.progression.xp_awards.length, 1);
+  assert.equal(result.progression.xp_awards[0].amount, 275);
+  assert.equal(result.progression.xp_awards[0].source_type, 'qa');
+});
+
+test('setCharacterXp clears level-up readiness below the next threshold', () => {
+  const result = setCharacterXp(sheet({
+    identity: { experience_points: 300, level_up_available: true },
+    progression: {
+      experience_points: 300,
+      level_up_available: {
+        ready: true,
+        current_level: 1,
+        next_level: 2,
+        threshold: 300,
+        current_xp: 300,
+      },
+    },
+  }), 100);
+
+  assert.equal(result.identity.experience_points, 100);
+  assert.equal(result.identity.level_up_available, false);
+  assert.equal(result.progression.level_up_available, null);
 });
