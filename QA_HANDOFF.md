@@ -5,7 +5,48 @@ QA thread role: read-only QA, no development changes.
 
 ## Summary
 
-Latest production ability fishing finally proved the remaining Tactical Mind success/spend branch live: a failed Athletics check was raised from 23 to 29 by Tactical Mind, succeeded against DC 29, and spent Second Wind from `2/2` to `1/2`. Fighter level 2 Action Surge and Tactical Mind core production coverage is now complete for the branches QA has been tracking.
+Latest production Rogue pass verified creation, QA level-up readiness, level-up apply, and explicit Cunning Action behavior live for `QA Rogue`. New blockers are around player-natural Cunning Action phrasing and action-economy messaging: explicit `I use Cunning Action to Hide/Dash` works, but normal player phrasing like `bonus action to hide` does not route to Cunning Action.
+
+## Latest QA Pass - 2026-06-13 Rogue Level 2 Production Gameplay `ab63e08`
+
+Scope:
+
+- Verified latest app-code commit under test: `ab63e08 Enable barbarian and rogue level 2`; current `HEAD` is `1b608d7 Update QA_HANDOFF.md`.
+- Rechecked production frontend at `https://hallucinated-dungeons.vercel.app/` using a newly created visible `QA Rogue`.
+- No app code changes were made by QA.
+
+Automated checks:
+
+- Server `npm.cmd test`: PASS, `467/467`.
+- Client `npm.cmd run lint`: PASS.
+- `git diff --check ab63e08^ ab63e08`: PASS.
+
+Production verified / passed:
+
+- Character creation, Human Rogue: PASS. Created `QA Rogue` through the full 9-step UI with Human size/languages, Rogue class choices, Criminal background, Human Skillful/Versatile choices, skills, Expertise, equipment, and review.
+- Creation math: PASS. Review showed Human Rogue, HP `10`, AC `14`, languages `Common, Draconic, Dwarvish, Thieves' Cant, Elvish`, skills/tool choices, and Rogue class choices as selected.
+- QA level-up readiness helper by active character name: PASS. `QA Rogue` was prepared at `currentXp: 300`, `threshold: 300`, `currentLevel: 1`, `nextLevel: 2`, `canApply: true`, `blockers: []`.
+- Visible level-up UI: PASS. Character sheet showed `QA Rogue`, `Human Rogue - Level 1`, `Level Up Available`, XP `300/300`, and a `Level Up` button.
+- Rogue level-up preview: PASS. Preview showed `Rogue Level 2`, XP `300/300 - Level 1 to 2`, HP gain, and new feature `Cunning Action`.
+- Apply level-up: PASS. After apply, sheet showed `Human Rogue - Level 2`, XP `300/900`, and `Cunning Action`.
+- Out-of-combat Stealth: PASS. `I duck behind the bridge support and try to hide.` requested DC 15 Dexterity (Stealth), used `+7`, rolled 16 vs DC 15, and resolved hidden.
+- Combat setup and initiative: PASS. Pressing the dark water encounter began combat, requested initiative `1d20+5`, and produced order `QA Rogue (22), First Hostile Shape That Comes Close (6)`.
+- Explicit Cunning Action Hide: PASS. `I use Cunning Action to Hide.` requested DC 15 Dexterity (Stealth), used `+7`, explicitly said it used Bonus Action through Cunning Action, and after success listed only `Reaction, 30 ft movement`.
+- Explicit Cunning Action Dash: PASS. `I use Cunning Action to Dash away from the hostile shape.` said it used Cunning Action to Dash as a Bonus Action and increased movement to 60 ft.
+
+New findings for DEV:
+
+- P1 player-natural Cunning Action Hide does not route to Cunning Action. In combat, `I use my bonus action to hide behind the bridge support.` resolved as `You take the Utilize action to use bridge support`, consumed the main Action, and left `Bonus Action` available. Explicit `I use Cunning Action to Hide.` works, but a normal player should not need to know the exact engine phrase.
+- P2 Cunning Action Dash follow-up text incorrectly says Bonus Action remains available. After explicit Cunning Action Dash, the response said `You use Cunning Action to Dash as a Bonus Action` and then `60 feet of movement remain. You can move, use a Bonus Action, or end your turn.` A follow-up second Cunning Action did not grant a second bonus action, so this may be display/state-summary wording rather than a spend loophole.
+- P2 repeated Cunning Action after Dash gives the wrong blocker reason. After using Cunning Action Dash, then normal Action Disengage, `I use Cunning Action to Hide again.` was blocked with `Your Action is already spent this turn`, even though the command explicitly asked for Cunning Action and the relevant exhausted resource was Bonus Action.
+- P2 Hidden disadvantage may not be applied or shown on enemy attack. After explicit Cunning Action Hide succeeded, GM said attacks against QA Rogue have Disadvantage until reveal. On enemy turn, the attack displayed a single roll `8+3 = 11 vs AC 19` with no disadvantage wording. It missed, so the outcome was not wrong, but the displayed roll does not prove disadvantage was applied.
+- P2 hidden/readied-action phrasing can throw a GM error. `I stay hidden, watch the dark water, and ready my shortsword for the next hostile shape that comes within reach.` returned `The Game Master encountered an error. Please try again.` A simpler follow-up movement/search command did not error.
+- P3 Cunning Action plus ready wording is overmatched by Ready parsing. `I use my bonus action to hide behind the bridge support, then keep my shortsword ready.` answered only about Ready support and did not resolve the hide/bonus-action part.
+- P3 Rogue Standard Array default is legal but odd. Default Standard Array put STR 15 and DEX 14 before background bonuses, producing final STR 15 / DEX 16. Not a blocker, but class-aware default assignment would feel better for players.
+
+Current recommendation:
+
+- Treat Rogue level-up preview/apply and explicit Cunning Action mechanics as production-passed. Before building more on Rogue combat, DEV should fix natural-language Cunning Action routing and the post-spend action-economy summaries; otherwise players will think the feature is broken unless they know the exact spell words. Tiny parser trapdoor, full-size player bruise.
 
 ## Latest QA Pass - 2026-06-13 Tactical Mind Success/Spend Production Proof
 

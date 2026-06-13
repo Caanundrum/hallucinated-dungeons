@@ -146,16 +146,22 @@ function setReadiedAction(worldState = {}, readiedAction = {}) {
 }
 
 function isReadyIntent(message = '') {
-  return /\b(?:ready|hold|prepare)\b/i.test(String(message || ''))
-    && /\b(?:action|attack|strike|shot|swing|stab|hit|shoot|loose|fire|spell|cast)\b/i.test(String(message || ''));
+  const text = String(message || '');
+  return /\b(?:ready|hold|prepare)\b/i.test(text)
+    && (/\b(?:action|attack|strike|shot|swing|stab|hit|shoot|loose|fire|spell|cast)\b/i.test(text) || hasWeaponReadyPhrase(text));
 }
 
 function parseReadyResponse(message = '') {
-  if (/\b(?:cast|spell)\b/i.test(String(message || ''))) return { type: 'spell' };
-  if (/\b(?:attack|strike|shot|swing|stab|hit|shoot|loose|fire)\b/i.test(String(message || ''))) {
+  const text = String(message || '');
+  if (/\b(?:cast|spell)\b/i.test(text)) return { type: 'spell' };
+  if (/\b(?:attack|strike|shot|swing|stab|hit|shoot|loose|fire)\b/i.test(text) || hasWeaponReadyPhrase(text)) {
     return { type: 'weapon_attack' };
   }
   return { type: 'unknown' };
+}
+
+function hasWeaponReadyPhrase(message = '') {
+  return /\b(?:weapon|shortsword|longsword|dagger|club|mace|quarterstaff|staff|spear|javelin|handaxe|axe|scimitar|rapier|sword|blade|bow|crossbow|sling)\b/i.test(String(message || ''));
 }
 
 function parseReadyTrigger(message = '') {

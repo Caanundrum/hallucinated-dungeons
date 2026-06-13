@@ -299,7 +299,7 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
   let combatConsumeText = '';
   let combatConsumeKey = 'exploration';
   if (inCombat) {
-    const spent = spendCombatCheckResource({ worldState, characterSheet, check, hideAction });
+    const spent = spendCombatCheckResource({ worldState, characterSheet, check, hideAction, message: intent.raw });
     if (!spent.ok) {
       return {
         handled: true,
@@ -382,10 +382,17 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
   };
 }
 
-function spendCombatCheckResource({ worldState = {}, characterSheet = {}, check = {}, hideAction = false } = {}) {
+function spendCombatCheckResource({ worldState = {}, characterSheet = {}, check = {}, hideAction = false, message = '' } = {}) {
   if (hideAction && canUseCunningAction(characterSheet)) {
     const bonus = spendTurnResource(worldState, 'bonus_action', 'Cunning Action: Hide', characterSheet);
     if (bonus.ok) {
+      return {
+        ...bonus,
+        consumes: 'bonus_action',
+        cunningAction: true,
+      };
+    }
+    if (wantsCunningAction(message)) {
       return {
         ...bonus,
         consumes: 'bonus_action',
@@ -1577,6 +1584,10 @@ function resolveInitiative({ pending, result, worldState, characterSheet, rollDi
 }
 
 function resolveCombatAction({ message, intent, worldState, characterSheet, currentTurn, rollDie }) {
+  if (shouldPrioritizeCombatCheck(intent)) {
+    return promptCheck({ intent, worldState, characterSheet, currentTurn, inCombat: true });
+  }
+
   const readyAction = resolveReadyAction({ message, worldState, characterSheet });
   if (readyAction) return readyAction;
 
@@ -1829,6 +1840,11 @@ function hasLivingEnemies(combat = {}) {
 
 function shouldPromptCombatCheck(intent) {
   return ['hide', 'search', 'study', 'influence'].includes(intent.ruleAction) || Boolean(intent.check);
+}
+
+function shouldPrioritizeCombatCheck(intent = {}) {
+  if (!intent.check || !shouldPromptCombatCheck(intent)) return false;
+  return isHideActionCheck({ rule_action: intent.ruleAction, skill: intent.check.skill, intent: intent.raw });
 }
 
 function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie }) {
@@ -3369,6 +3385,10 @@ function isClass(characterSheet = {}, classId) {
 
 function canUseCunningAction(characterSheet = {}) {
   return isClass(characterSheet, 'rogue') && getCharacterLevel(characterSheet) >= 2;
+}
+
+function wantsCunningAction(message = '') {
+  return /\b(?:cunning action|bonus action)\b/i.test(String(message || ''));
 }
 
 function getClassD20AdvantageSources({ characterSheet = {}, subject = {}, testType = '', ability = '' } = {}) {

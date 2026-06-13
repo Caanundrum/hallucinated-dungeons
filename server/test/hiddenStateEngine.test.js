@@ -163,3 +163,41 @@ test('creature attacks against a hidden player have Disadvantage', () => {
   assert.match(result.reply, /18\/3 with disadvantage, using 3/);
   assert.match(result.reply, /Hidden target/);
 });
+
+test('natural Cunning Action Hide applies hidden state before creature attacks', () => {
+  const rogueLevel2 = {
+    ...rogueSheet,
+    identity: { ...rogueSheet.identity, level: 2 },
+  };
+  const prompted = adjudicate({
+    message: 'I use my bonus action to hide behind the bridge support.',
+    worldState: combatWorld({
+      scene_presence: {
+        exact_location: 'Lantern Bridge',
+        present_npcs: [],
+        present_objects: ['bridge support'],
+        available_exits: [],
+      },
+    }),
+    characterSheet: rogueLevel2,
+    currentTurn: 7,
+  });
+  const resolved = adjudicate({
+    message: `[ROLL REQUEST: ${prompted.worldState.pending_roll.id}]`,
+    worldState: prompted.worldState,
+    characterSheet: rogueLevel2,
+    rollDie: sequenceRolls([12]),
+  });
+  const enemyTurn = advanceEnemyTurns({
+    worldState: resolved.worldState,
+    characterSheet: rogueLevel2,
+    rollDie: sequenceRolls([18, 3]),
+    playerTurnNote: 'You end your turn.',
+  });
+
+  assert.equal(prompted.worldState.pending_roll.consumes, 'bonus_action');
+  assert.equal(prompted.worldState.combat_state.turn_resources.action_available, true);
+  assert.ok(playerFrom(resolved.worldState).conditions.includes('hidden'));
+  assert.match(enemyTurn.reply, /18\/3 with disadvantage, using 3/);
+  assert.match(enemyTurn.reply, /Hidden target/);
+});

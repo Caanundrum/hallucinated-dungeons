@@ -734,6 +734,117 @@ test('level 2 Rogue uses Cunning Action to Hide as a Bonus Action', () => {
   assert.match(result.reply, /Cunning Action/);
 });
 
+test('natural bonus-action hide wording routes to Cunning Action instead of object interaction', () => {
+  const result = adjudicate({
+    message: 'I use my bonus action to hide behind the bridge support.',
+    worldState: worldState({
+      scene_presence: {
+        exact_location: 'Lantern Bridge',
+        present_npcs: [],
+        present_objects: ['bridge support'],
+        available_exits: ['bridge span'],
+      },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Quickstep', hp: 10, max_hp: 10, ac: 15, is_player: true },
+          { name: 'Dark Shape', hp: 8, max_hp: 8, ac: 12, is_player: false },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      identity: { name: 'Quickstep', class: 'rogue', class_name: 'Rogue', level: 2 },
+    },
+    currentTurn: 5,
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.logType, 'referee_pending_roll');
+  assert.equal(result.worldState.pending_roll.skill, 'stealth');
+  assert.equal(result.worldState.pending_roll.consumes, 'bonus_action');
+  assert.equal(result.worldState.combat_state.turn_resources.action_available, true);
+  assert.equal(result.worldState.combat_state.turn_resources.bonus_action_available, false);
+  assert.match(result.reply, /Cunning Action/);
+  assert.doesNotMatch(result.reply, /Utilize/);
+});
+
+test('Cunning Action Hide wording wins over a same-message ready clause', () => {
+  const result = adjudicate({
+    message: 'I use Cunning Action to Hide behind the bridge support and ready my shortsword if anything approaches.',
+    worldState: worldState({
+      scene_presence: {
+        exact_location: 'Lantern Bridge',
+        present_npcs: [],
+        present_objects: ['bridge support'],
+        available_exits: ['bridge span'],
+      },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Quickstep', hp: 10, max_hp: 10, ac: 15, is_player: true },
+          { name: 'Dark Shape', hp: 8, max_hp: 8, ac: 12, is_player: false },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      identity: { name: 'Quickstep', class: 'rogue', class_name: 'Rogue', level: 2 },
+    },
+    currentTurn: 5,
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.logType, 'referee_pending_roll');
+  assert.equal(result.worldState.pending_roll.skill, 'stealth');
+  assert.equal(result.worldState.pending_roll.consumes, 'bonus_action');
+  assert.equal(result.worldState.combat_state.turn_resources.action_available, true);
+  assert.equal(result.worldState.combat_state.turn_resources.readied_action, undefined);
+  assert.match(result.reply, /Cunning Action/);
+});
+
+test('explicit Cunning Action Hide reports the Bonus Action as spent instead of the Action', () => {
+  const result = adjudicate({
+    message: 'I use Cunning Action to Hide again.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        turn_resources: {
+          actor: 'player',
+          action_available: false,
+          bonus_action_available: false,
+          reaction_available: true,
+          movement_remaining: 30,
+          used: [
+            { resource: 'bonus_action', label: 'Cunning Action: Dash' },
+            { resource: 'action', label: 'Disengage' },
+          ],
+        },
+        combatants: [
+          { name: 'Quickstep', hp: 10, max_hp: 10, ac: 15, is_player: true },
+          { name: 'Dark Shape', hp: 8, max_hp: 8, ac: 12, is_player: false },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      identity: { name: 'Quickstep', class: 'rogue', class_name: 'Rogue', level: 2 },
+    },
+    currentTurn: 5,
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.logType, 'referee_action_unavailable');
+  assert.match(result.reply, /Bonus Action is already spent/);
+  assert.doesNotMatch(result.reply, /Your Action is already spent/);
+});
+
 test('prompts deterministic saving throws with character save modifiers', () => {
   const result = adjudicate({
     message: 'I dive away from the falling rocks.',

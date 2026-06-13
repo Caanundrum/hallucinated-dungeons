@@ -40,7 +40,7 @@ function resolveDashAction({
     ? `You use **Cunning Action** to Dash as a Bonus Action and gain ${speed} feet of movement for this turn.`
     : `You take the **Dash** action and gain ${speed} feet of movement for this turn.`];
   if (!hasDeclaredMovement(message, destination)) {
-    lines.push(`${getRemainingMovement(granted.worldState)} feet of movement remain. You can move, use a Bonus Action, or end your turn.`);
+    lines.push(formatPostMovementOptions(granted.worldState, spent.cunningAction));
     return resolved('referee_combat_dash', granted.worldState, lines);
   }
 
@@ -72,7 +72,7 @@ function resolveDisengageAction({
     ? 'You use **Cunning Action** to Disengage as a Bonus Action. Your movement does not provoke Opportunity Attacks for the rest of this turn.'
     : 'You take the **Disengage** action. Your movement does not provoke Opportunity Attacks for the rest of this turn.'];
   if (!hasDeclaredMovement(message, destination)) {
-    lines.push(`${getRemainingMovement(disengaged)} feet of movement remain. You can move, use a Bonus Action, or end your turn.`);
+    lines.push(formatPostMovementOptions(disengaged, spent.cunningAction));
     return resolved('referee_combat_disengage', disengaged, lines);
   }
 
@@ -103,6 +103,20 @@ function spendActionOrCunningAction(worldState = {}, label = 'action', character
     ...spendTurnResource(worldState, 'action', label, characterSheet),
     cunningAction: false,
   };
+}
+
+function formatPostMovementOptions(worldState = {}, usedCunningAction = false) {
+  const options = ['move'];
+  if (worldState.combat_state?.turn_resources?.action_available) options.push('use your Action');
+  if (!usedCunningAction) options.push('use a Bonus Action');
+  options.push('end your turn');
+  return `${getRemainingMovement(worldState)} feet of movement remain. You can ${formatOptionList(options)}.`;
+}
+
+function formatOptionList(options = []) {
+  if (options.length <= 1) return options[0] || 'act';
+  if (options.length === 2) return `${options[0]} or ${options[1]}`;
+  return `${options.slice(0, -1).join(', ')}, or ${options.at(-1)}`;
 }
 
 function resolveCombatMovement({

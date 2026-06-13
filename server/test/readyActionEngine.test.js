@@ -85,6 +85,42 @@ test('Ready stores a weapon attack as a prepared Reaction while leaving the turn
   assert.match(result.reply, /Your turn remains open/);
 });
 
+test('Ready recognizes natural weapon phrasing without an explicit attack verb', () => {
+  const result = adjudicate({
+    message: 'I stay hidden, watch the dark water, and ready my shortsword for the next hostile shape that comes within reach.',
+    worldState: combatWorld({
+      player_stats: {
+        hp: 12,
+        max_hp: 12,
+        armor_class: 16,
+        hidden: { active: true, source: 'Hide', check_total: 18, dc: 15 },
+      },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Bran', initiative: 18, hp: 12, max_hp: 12, ac: 16, is_player: true, conditions: ['hidden'], position: { map_id: 'road', q: 0, r: 0 } },
+          creature('Skeleton', { position: { map_id: 'road', q: 3, r: 0 }, speed: 10 }),
+        ],
+      },
+    }),
+    characterSheet: {
+      ...fighterSheet,
+      equipped: { main_hand: 'shortsword', off_hand: null },
+    },
+  });
+  const resources = result.worldState.combat_state.turn_resources;
+  const player = result.worldState.combat_state.combatants.find((entry) => entry.is_player);
+
+  assert.equal(result.handled, true);
+  assert.equal(result.logType, 'referee_ready_action');
+  assert.equal(resources.action_available, false);
+  assert.equal(resources.readied_action.type, 'weapon_attack');
+  assert.ok(player.conditions.includes('hidden'));
+  assert.match(result.reply, /Ready/);
+});
+
 test('readied weapon attack triggers after a creature moves into reach before it attacks', () => {
   const ready = adjudicate({
     message: 'I ready an attack against the Skeleton if it comes close.',

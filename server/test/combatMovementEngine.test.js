@@ -76,6 +76,8 @@ test('level 2 Rogue uses Cunning Action to Dash as a Bonus Action', () => {
   assert.equal(result.worldState.combat_state.turn_resources.bonus_action_available, false);
   assert.equal(result.worldState.combat_state.turn_resources.movement_remaining, 60);
   assert.match(result.reply, /Cunning Action/);
+  assert.match(result.reply, /use your Action/);
+  assert.doesNotMatch(result.reply, /use a Bonus Action/);
 });
 
 test('Dash uses Exhaustion-reduced speed', () => {

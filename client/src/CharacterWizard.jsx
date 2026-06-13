@@ -11,6 +11,21 @@ const ABILITY_LABELS = {
 };
 const STANDARD_ARRAY = [15, 14, 13, 12, 10, 8];
 const POINT_BUY_COSTS = { 8: 0, 9: 1, 10: 2, 11: 3, 12: 4, 13: 5, 14: 7, 15: 9 };
+const DEFAULT_ABILITY_PRIORITY = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
+const CLASS_STANDARD_ARRAY_PRIORITIES = {
+  barbarian: ['str', 'con', 'dex', 'wis', 'cha', 'int'],
+  bard: ['cha', 'dex', 'con', 'wis', 'int', 'str'],
+  cleric: ['wis', 'con', 'str', 'cha', 'dex', 'int'],
+  druid: ['wis', 'con', 'dex', 'int', 'cha', 'str'],
+  fighter: ['str', 'con', 'dex', 'wis', 'cha', 'int'],
+  monk: ['dex', 'wis', 'con', 'str', 'int', 'cha'],
+  paladin: ['str', 'cha', 'con', 'wis', 'dex', 'int'],
+  ranger: ['dex', 'wis', 'con', 'str', 'int', 'cha'],
+  rogue: ['dex', 'con', 'int', 'cha', 'wis', 'str'],
+  sorcerer: ['cha', 'con', 'dex', 'wis', 'int', 'str'],
+  warlock: ['cha', 'con', 'dex', 'wis', 'int', 'str'],
+  wizard: ['int', 'con', 'dex', 'wis', 'cha', 'str'],
+};
 
 function mod(score) {
   return Math.floor((Number(score || 10) - 10) / 2);
@@ -27,6 +42,12 @@ function emptyScores(value = 10) {
 
 function emptyRolledAssignments() {
   return Object.fromEntries(ABILITIES.map((ability) => [ability, '']));
+}
+
+function standardArrayScoresForClass(classId = '') {
+  const priority = CLASS_STANDARD_ARRAY_PRIORITIES[classId] || DEFAULT_ABILITY_PRIORITY;
+  const orderedAbilities = [...priority, ...ABILITIES.filter((ability) => !priority.includes(ability))];
+  return Object.fromEntries(orderedAbilities.map((ability, index) => [ability, STANDARD_ARRAY[index]]));
 }
 
 function scoresFromRolledAssignments(rolledStats, rolledAssignment) {
@@ -49,7 +70,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
     backgroundId: '',
     backgroundToolChoices: [],
     abilityMethod: 'standard_array',
-    abilityScores: Object.fromEntries(ABILITIES.map((ability, index) => [ability, STANDARD_ARRAY[index]])),
+    abilityScores: standardArrayScoresForClass(),
     backgroundBonus: {},
     humanSkillId: '',
     humanOriginFeatId: '',
@@ -328,7 +349,7 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
       ...current,
       abilityMethod: method,
       abilityScores: method === 'standard_array'
-        ? Object.fromEntries(ABILITIES.map((ability, index) => [ability, STANDARD_ARRAY[index]]))
+        ? standardArrayScoresForClass(current.classId)
         : method === 'point_buy'
           ? emptyScores(8)
           : scoresFromRolledAssignments(current.rolledStats, current.rolledAssignment),
@@ -519,6 +540,9 @@ export default function CharacterWizard({ content, error, saving, rollingStats, 
                 setDraft((current) => ({
                   ...current,
                   classId: id,
+                  abilityScores: current.abilityMethod === 'standard_array'
+                    ? standardArrayScoresForClass(id)
+                    : current.abilityScores,
                   selectedSkills: [],
                   classChoices: {},
                   classChoiceDetails: {},
