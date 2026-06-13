@@ -88,6 +88,27 @@ async function getAccessibleCharacter(sessionId, characterId) {
   return characters.find((character) => character.id === characterId) || null;
 }
 
+async function getActiveQaCharacterByName(name) {
+  const trimmed = String(name || '').trim();
+  if (!/^qa\b/i.test(trimmed)) return null;
+
+  const { data, error } = await supabase
+    .from('characters')
+    .select('*')
+    .eq('campaign_id', DEFAULT_CAMPAIGN_ID)
+    .eq('status', 'active')
+    .ilike('name', trimmed)
+    .order('updated_at', { ascending: false })
+    .limit(10);
+  if (error) throw error;
+
+  const normalized = normalizeName(trimmed);
+  return (data || []).find((character) => (
+    normalizeName(character.name) === normalized
+    || normalizeName(character.character_sheet?.identity?.name) === normalized
+  )) || null;
+}
+
 async function setActiveCharacterForSession(sessionId, characterId) {
   const character = await getAccessibleCharacter(sessionId, characterId);
   if (!character) return null;
@@ -509,6 +530,10 @@ async function logDmCall({
   if (error) console.error('dm_logs insert error:', error.message);
 }
 
+function normalizeName(value = '') {
+  return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
 module.exports = {
   // sessions
   createSession,
@@ -519,6 +544,7 @@ module.exports = {
   getCharacterForSession,
   getAccessibleCharacters,
   getAccessibleCharacter,
+  getActiveQaCharacterByName,
   setActiveCharacterForSession,
   clearActiveCharacterForSession,
   saveCharacterForSession,

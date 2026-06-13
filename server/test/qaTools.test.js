@@ -10,6 +10,7 @@ const {
   getQaSecretFromRequest,
   hasValidQaToolsSecret,
   isQaToolsEnabled,
+  normalizeQaCharacterName,
 } = require('../src/qaTools');
 
 function request(headers = {}) {
@@ -87,4 +88,11 @@ test('buildLevelUpReadySheet never lowers an explicit high QA XP target', () => 
   assert.equal(result.ok, true);
   assert.equal(result.targetXp, 450);
   assert.equal(result.characterSheet.identity.experience_points, 450);
+});
+
+test('QA character-name targeting is restricted to explicit QA test characters', () => {
+  assert.equal(normalizeQaCharacterName('QA Smoke'), 'QA Smoke');
+  assert.equal(normalizeQaCharacterName('  QA   Leveler  '), 'QA Leveler');
+  assert.equal(normalizeQaCharacterName('Ari the Fighter'), null);
+  assert.equal(normalizeQaCharacterName('NotQA Smoke'), null);
 });

@@ -44,7 +44,7 @@ npm run dev
 - `PORT` — port to run on (Railway sets this automatically)
 - `CLIENT_URL` — the deployed Vercel frontend URL (for CORS)
 - `ALLOWED_ORIGINS` — optional comma-separated extra browser origins for CORS, such as local QA URLs
-- `QA_TOOLS_SECRET` — optional secret that enables locked production QA helpers, including the XP-ready level-up test endpoint
+- `QA_TOOLS_SECRET` — optional secret that enables locked production QA helpers, including the XP-ready level-up test endpoint for signed sessions or active `QA...` test characters
 
 ### Client
 - `VITE_SERVER_URL` — the deployed Railway backend URL

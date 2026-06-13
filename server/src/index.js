@@ -59,6 +59,7 @@ const {
   buildLevelUpReadySheet,
   hasValidQaToolsSecret,
   isQaToolsEnabled,
+  normalizeQaCharacterName,
 } = require('./qaTools');
 
 // ── Setup ──────────────────────────────────────────────────────────────────
@@ -1859,23 +1860,39 @@ app.post('/qa/level-up-ready', async (req, res) => {
     return;
   }
 
-  const { sessionId, sessionToken, xp } = req.body || {};
-  if (!isValidSessionToken(sessionId, sessionToken)) {
-    res.status(401).json({ ok: false, error: 'Session token is invalid.' });
-    return;
-  }
-
   try {
-    const character = await db.getCharacterForSession(sessionId);
+    const { sessionId, sessionToken, xp, characterName } = req.body || {};
+    const qaCharacterName = normalizeQaCharacterName(characterName);
+    let targetSessionId = sessionId || null;
+    let character = null;
+
+    if (targetSessionId || sessionToken) {
+      if (!isValidSessionToken(targetSessionId, sessionToken)) {
+        res.status(401).json({ ok: false, error: 'Session token is invalid.' });
+        return;
+      }
+      character = await db.getCharacterForSession(targetSessionId);
+    } else if (qaCharacterName) {
+      character = await db.getActiveQaCharacterByName(qaCharacterName);
+      targetSessionId = character?.session_id || null;
+      if (!targetSessionId || !hasLiveCharacterSocket(character?.id)) {
+        res.status(409).json({ ok: false, error: 'That QA character is not active in a visible session.' });
+        return;
+      }
+    } else {
+      res.status(400).json({ ok: false, error: 'Provide a signed session or an active QA character name.' });
+      return;
+    }
+
     if (!character?.character_sheet) {
-      res.status(404).json({ ok: false, error: 'No active character found for that session.' });
+      res.status(404).json({ ok: false, error: 'No matching active character found.' });
       return;
     }
 
     const ready = buildLevelUpReadySheet(character.character_sheet, {
       xp,
       sourceId: `qa:level_up_ready:${character.id}:level_${Number(character.character_sheet.identity?.level || 1) + 1}`,
-      metadata: { session_id: sessionId, character_id: character.id },
+      metadata: { session_id: targetSessionId, character_id: character.id },
     });
     if (!ready.ok) {
       res.status(400).json({ ok: false, error: ready.error });
@@ -1883,16 +1900,16 @@ app.post('/qa/level-up-ready', async (req, res) => {
     }
 
     const saved = await db.updateCharacterSheet(character.id, ready.characterSheet);
-    await syncCharacterToWorldState(sessionId, saved.character_sheet, saved.id).catch(console.error);
+    await syncCharacterToWorldState(targetSessionId, saved.character_sheet, saved.id).catch(console.error);
     const preview = getLevelUpPreview(saved.character_sheet, getContentBundle());
 
-    io.to(sessionId).emit('character_ready', {
+    io.to(targetSessionId).emit('character_ready', {
       characterId: saved.id,
       character: saved.character_sheet,
       shouldStartSession: false,
     });
     if (saved.character_sheet.progression?.level_up_available?.ready) {
-      io.to(sessionId).emit('level_up_available', {
+      io.to(targetSessionId).emit('level_up_available', {
         characterId: saved.id,
         character: saved.character_sheet,
         progression: saved.character_sheet.progression.level_up_available,
@@ -1902,6 +1919,7 @@ app.post('/qa/level-up-ready', async (req, res) => {
     res.json({
       ok: true,
       characterId: saved.id,
+      sessionId: targetSessionId,
       currentXp: preview.currentXp,
       threshold: preview.threshold,
       currentLevel: preview.currentLevel,

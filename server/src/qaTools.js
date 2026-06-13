@@ -60,6 +60,12 @@ function buildLevelUpReadySheet(characterSheet = {}, options = {}) {
   };
 }
 
+function normalizeQaCharacterName(value = '') {
+  const name = String(value || '').trim().replace(/\s+/g, ' ');
+  if (!/^qa\b/i.test(name)) return null;
+  return name;
+}
+
 function getHeader(req, name) {
   if (typeof req.get === 'function') return req.get(name);
   const headers = req.headers || {};
@@ -79,4 +85,5 @@ module.exports = {
   getQaSecretFromRequest,
   hasValidQaToolsSecret,
   isQaToolsEnabled,
+  normalizeQaCharacterName,
 };
