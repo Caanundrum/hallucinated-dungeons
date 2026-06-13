@@ -153,6 +153,47 @@ test('Action Surge grants an extra action and spends its level 2 resource', () =
   assert.match(result.reply, /extra action/);
 });
 
+test('Action Surge action wording is treated as the granted action slot, not a fresh feature use', () => {
+  const result = resolveFeatureAction({
+    message: 'I attack the dark shape again with my longsword using my Action Surge action.',
+    worldState: combatWorld({
+      player_stats: {
+        hp: 5,
+        max_hp: 12,
+        armor_class: 16,
+        resources: {
+          action_surge: { name: 'Action Surge', remaining: 0, max: 1, reset: 'short_rest' },
+        },
+      },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        turn_resources: {
+          action_available: false,
+          extra_action_available: true,
+          bonus_action_available: true,
+          reaction_available: true,
+          movement_remaining: 30,
+          used: [
+            { resource: 'action', label: 'Attack' },
+            { resource: 'action_surge', label: 'Action Surge' },
+          ],
+        },
+        combatants: [
+          { name: 'Ari', hp: 5, max_hp: 12, ac: 16, is_player: true },
+          { name: 'Goblin', hp: 8, max_hp: 8, ac: 12, is_player: false },
+        ],
+      },
+    }),
+    characterSheet: sheet('fighter', {
+      identity: { name: 'Ari', class: 'fighter', level: 2 },
+    }),
+  });
+
+  assert.equal(result, null);
+});
+
 
 test('Lay on Hands spends healing pool without exceeding missing HP', () => {
   const result = resolveFeatureAction({

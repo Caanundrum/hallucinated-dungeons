@@ -46,6 +46,7 @@ const {
   answerInventoryCountQuestion,
   formatCarriedInventoryForRules,
 } = require('./rulesInventoryAnswers');
+const { answerResourceCountQuestion } = require('./rulesResourceAnswers');
 const { shouldAllowModerationFalsePositive } = require('./safetyFalsePositive');
 const {
   applyProgressionAwards,
@@ -1641,7 +1642,8 @@ io.on('connection', (socket) => {
           await db.updateWorldState(sessionId, ws);
         }
         if (ws) {
-          deterministicRulesReply = answerInventoryCountQuestion(message, ws);
+          deterministicRulesReply = answerInventoryCountQuestion(message, ws)
+            || answerResourceCountQuestion(message, ws);
           const contextParts = [];
           if (ws.current_location) {
             contextParts.push(`Current location: ${ws.current_location}`);

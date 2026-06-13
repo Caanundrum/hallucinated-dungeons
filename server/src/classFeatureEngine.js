@@ -42,6 +42,7 @@ function resolveFeatureAction({ message = '', worldState = {}, characterSheet = 
 function getFeatureIntent(message = '') {
   const text = String(message || '').toLowerCase();
   if (/\b(?:enter|use|start|activate|go into)?\s*rage\b/.test(text)) return { id: 'rage' };
+  if (/\baction\s+surge\s+action\b/.test(text)) return null;
   if (/\baction\s+surge\b/.test(text)) return { id: 'action_surge' };
   if (/\bsecond\s+wind\b/.test(text)) return { id: 'second_wind' };
   if (/\blay\s+on\s+hands\b/.test(text)) return { id: 'lay_on_hands' };
