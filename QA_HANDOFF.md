@@ -5,7 +5,43 @@ QA thread role: read-only QA, no development changes.
 
 ## Summary
 
-Latest production ability pass confirms the core Fighter level 2 mechanics are mostly working in live gameplay: Tactical Mind prompts on failed ability checks, does not spend Second Wind when it still fails, supports decline, Action Surge can be spent in combat and grants a usable extra non-Magic action, and Second Wind does not waste a use at full HP. Two player-facing issues remain: DM2 can still infer a wrong Second Wind count from prior Tactical Mind text, and the granted Action Surge action false-blocks if the player phrases the follow-up as "using my Action Surge action."
+Latest production regression confirms `a65109f` fixed the two targeted Fighter ability issues: the granted Action Surge action now accepts the previously failing "using my Action Surge action" wording, and DM2 now answers the Tactical Mind / Second Wind follow-up from current sheet state. One new P3 Rules-panel issue remains: combined exact resource questions for both Action Surge and Second Wind can omit Action Surge while answering Second Wind.
+
+## Latest QA Pass - 2026-06-13 Fighter Ability Fix Retest `a65109f`
+
+Scope:
+
+- Verified latest app-code commit under test: `a65109f Fix Action Surge wording and resource answers`; current `HEAD` is `163b7fb Update QA_HANDOFF.md`.
+- Rechecked production frontend at `https://hallucinated-dungeons.vercel.app/` after reload.
+- Used visible `QA Smoke`, Level 2 Fighter, and continued natural production play from the previous ability-test session.
+- No app code changes were made by QA.
+
+Automated checks:
+
+- Client `npm.cmd run lint`: PASS.
+- Server `npm.cmd test`: PASS, `459/459`.
+- `git diff --check a65109f^ a65109f`: PASS.
+
+Verified fixed / passed in production:
+
+- Short rest restored Action Surge to `1/1`: PASS. GM response said Action Surge reset, and DM2 exact Action Surge query returned `Action Surge 1/1`.
+- Fresh combat setup: PASS. After moving toward/pressing around the dark water threat, combat began, enemy won initiative, hit QA Smoke for 3 damage, and the player turn opened normally.
+- Action Surge spend path: PASS. After a normal longsword attack used the regular action, `I use Action Surge.` spent Action Surge, returned `Uses left: 0`, and exposed `Action Surge action`.
+- Previously failing Action Surge wording: PASS/FIXED. `I attack the hostile shape again with my longsword using my Action Surge action.` now resolved as an attack instead of being rejected as a second Action Surge use. It rolled 19 vs AC 12, hit for 5 damage, applied Savage Attacker and Sap, and left only Bonus Action/Reaction/movement available.
+- DM2 Tactical Mind resource follow-up: PASS/FIXED. The formerly misleading question `How many Second Wind uses do I have left after that Tactical Mind attempt?` now answered from current sheet state: `Second Wind 2/2 uses left`, with the note that Tactical Mind only spends Second Wind if the d10 turns failure into success.
+
+New findings for DEV:
+
+- P3 combined exact resource query omits Action Surge. The exact combined question `What are my exact current Action Surge and Second Wind resource entries, remaining and max? Do not infer from prior text.` repeatedly answered only Second Wind (`Second Wind 1/2` before rest, `Second Wind 2/2` after rest / after Action Surge use) and omitted Action Surge. Asking Action Surge alone returned the correct value (`0/1` before rest, `1/1` after rest). This looks like the resource-answer shortcut handles Tactical Mind/Second Wind first and returns before also answering Action Surge.
+
+Other QA notes:
+
+- Scene discovery consistency is improved but still a little awkward: a successful search recorded a hostile-shape discovery in the dark water, but an immediate attack on "the hostile shape I just spotted" said the target was not here. Following the app prompt to move toward the sighting and press around the support did eventually establish combat. I would not block on this yet, but it is worth watching as discovery-to-target handoff gets more important.
+- Short rest narration said `Second Wind recovers 1 use` while DM2 says Second Wind resets on long rest. The resulting resource state became `2/2`. This may be correct for the intended 2024 Fighter resource model, but the Rules-panel reset wording should stay consistent with the actual resource engine.
+
+Current recommendation:
+
+- Treat the two targeted fixes as production-passed. DEV should clean up the new combined-resource omission before it becomes a recurring Rules-panel papercut. Core Fighter ability testing can continue; Tactical Mind success/spend remains the one branch not yet naturally proven in production.
 
 ## Latest QA Pass - 2026-06-13 Fighter Ability Production Gameplay `7ee9848`
 
