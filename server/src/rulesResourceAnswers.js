@@ -21,29 +21,38 @@ function answerResourceCountQuestion(message = '', worldState = {}) {
   if (!isResourceQuestion(text)) return '';
 
   const resources = worldState.player_stats?.resources || {};
-  const match = findRequestedResource(text, resources);
-  if (!match) return '';
+  const matches = findRequestedResources(text, resources);
+  if (!matches.length) return '';
 
-  const resource = resources[match.key] || {};
-  const name = resource.name || titleCase(match.key);
+  const entries = matches.map((match) => formatResourceEntry(match.key, resources[match.key], text));
+  if (entries.length > 1) {
+    return `Current sheet state:\n${entries.map((entry) => `- ${entry}`).join('\n')}`;
+  }
+
+  return `Current sheet state: ${entries[0]}`;
+}
+
+function formatResourceEntry(key, resource = {}, text = '') {
+  const name = resource.name || titleCase(key);
   const remaining = formatNumber(resource.remaining);
   const max = resource.max !== undefined && resource.max !== null
     ? `/${formatNumber(resource.max)}`
     : '';
   const unit = resource.unit ? ` ${resource.unit}` : ' uses';
   const reset = resource.reset ? ` It resets on ${humanize(resource.reset)}.` : '';
-  const tacticalMindNote = match.key === 'second_wind' && text.includes('tactical mind')
+  const tacticalMindNote = key === 'second_wind' && text.includes('tactical mind')
     ? ' Tactical Mind uses this same Second Wind resource only if its d10 turns the failed check into a success.'
     : '';
 
-  return `Current sheet state: **${name} ${remaining}${max}${unit} left.**${reset}${tacticalMindNote}`;
+  return `**${name} ${remaining}${max}${unit} left.**${reset}${tacticalMindNote}`;
 }
 
 function isResourceQuestion(text = '') {
   return /\b(?:how many|how much|uses?|left|remaining|available|resource|resources|spent|spend|after)\b/.test(text);
 }
 
-function findRequestedResource(text = '', resources = {}) {
+function findRequestedResources(text = '', resources = {}) {
+  const matches = [];
   for (const key of Object.keys(resources || {})) {
     if (key === 'spell_uses') continue;
     const aliases = [
@@ -52,20 +61,31 @@ function findRequestedResource(text = '', resources = {}) {
       resources[key]?.name,
       ...(RESOURCE_ALIASES[key] || []),
     ].filter(Boolean);
-    if (aliases.some((alias) => includesPhrase(text, alias))) {
-      return { key };
+    const index = firstAliasIndex(text, aliases);
+    if (index !== -1) {
+      matches.push({ key, index });
     }
   }
 
-  if (text.includes('tactical mind') && resources.second_wind) {
-    return { key: 'second_wind' };
+  if (text.includes('tactical mind') && resources.second_wind && !matches.some((match) => match.key === 'second_wind')) {
+    matches.push({ key: 'second_wind', index: text.indexOf('tactical mind') });
   }
-  return null;
+  return matches.sort((a, b) => a.index - b.index);
 }
 
-function includesPhrase(text, phrase) {
+function firstAliasIndex(text, aliases = []) {
+  return aliases.reduce((lowest, alias) => {
+    const index = phraseIndex(text, alias);
+    if (index === -1) return lowest;
+    return lowest === -1 ? index : Math.min(lowest, index);
+  }, -1);
+}
+
+function phraseIndex(text, phrase) {
   const normalized = normalizeText(phrase);
-  return normalized && new RegExp(`(?:^| )${escapeRegExp(normalized)}(?: |$)`).test(text);
+  if (!normalized) return -1;
+  const match = new RegExp(`(?:^| )${escapeRegExp(normalized)}(?: |$)`).exec(text);
+  return match ? match.index : -1;
 }
 
 function normalizeText(value = '') {

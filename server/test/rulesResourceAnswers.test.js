@@ -42,6 +42,17 @@ test('answers Action Surge and other named resource counts generically', () => {
   assert.match(luck, /Luck Points 2\/2 uses left/);
 });
 
+test('answers every named resource in a combined exact resource question', () => {
+  const reply = answerResourceCountQuestion(
+    'What are my exact current Action Surge and Second Wind resource entries, remaining and max? Do not infer from prior text.',
+    worldState
+  );
+
+  assert.match(reply, /Action Surge 0\/1 uses left/);
+  assert.match(reply, /Second Wind 1\/2 uses left/);
+  assert.ok(reply.indexOf('Action Surge') < reply.indexOf('Second Wind'));
+});
+
 test('ignores non-resource questions', () => {
   assert.equal(answerResourceCountQuestion('What is my AC?', worldState), '');
   assert.equal(answerResourceCountQuestion('How many doors are in the room?', worldState), '');
