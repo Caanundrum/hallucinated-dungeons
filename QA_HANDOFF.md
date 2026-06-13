@@ -1,11 +1,78 @@
 # Hallucinated Dungeons QA Handoff
 
-Date: 2026-06-12
+Date: 2026-06-13
 QA thread role: read-only QA, no development changes.
 
 ## Summary
 
-Latest production regression pass confirms the gated QA level-up readiness endpoint works in production when called with the configured secret. A fresh QA socket session created a Fighter, raised XP to the level 2 threshold, returned an apply-ready preview, and successfully applied Fighter level 2 with Action Surge and Tactical Mind. Player-facing `QA Smoke` remains stable at Level 1 with `25/300 XP`.
+Latest production ability pass confirms the core Fighter level 2 mechanics are mostly working in live gameplay: Tactical Mind prompts on failed ability checks, does not spend Second Wind when it still fails, supports decline, Action Surge can be spent in combat and grants a usable extra non-Magic action, and Second Wind does not waste a use at full HP. Two player-facing issues remain: DM2 can still infer a wrong Second Wind count from prior Tactical Mind text, and the granted Action Surge action false-blocks if the player phrases the follow-up as "using my Action Surge action."
+
+## Latest QA Pass - 2026-06-13 Fighter Ability Production Gameplay `7ee9848`
+
+Scope:
+
+- Continued production testing at `https://hallucinated-dungeons.vercel.app/` using visible `QA Smoke`, now a Level 2 Fighter.
+- Focused on player-realistic ability use before DEV adds more 4D mechanics.
+- Tested live GM and Rules panels through the in-app browser; no app code changes were made.
+
+Production verified / passed:
+
+- Tactical Mind failed-check prompt: PASS. A hazardous armored swim produced DC 30 Strength (Athletics), rolled 15 vs 30, and prompted Tactical Mind with the correct spend-on-success/no-spend-on-failure explanation.
+- Tactical Mind no-spend failure branch: PASS. Choosing `use Tactical Mind` rolled `1d10 = 7`, revised total 22 vs DC 30, still failed, and GM explicitly said no Second Wind use was spent.
+- Tactical Mind decline branch: PASS. A later failed DC 20 Wisdom (Perception) check prompted Tactical Mind; choosing `decline Tactical Mind` resolved the original failed check without spending the resource.
+- Exact Second Wind resource after failed Tactical Mind: PASS. DM2 exact-state query returned `Second Wind 1/2`, remaining 1, max 2.
+- Action Surge out-of-combat guard from previous pass still stands: PASS. Out-of-combat use was refused and did not spend the resource.
+- Action Surge combat spend: PASS. In combat, after a normal longsword attack, `I use Action Surge.` spent the resource, returned `Uses left: 0`, and opened `Action Surge action, Bonus Action, Reaction, 30 ft movement`.
+- Action Surge granted action usable with natural wording: PASS. `I attack again with my longsword.` consumed the granted action, rolled a critical hit, killed the target, ended combat, and awarded combat XP.
+- Post-combat resource state: PASS. DM2 exact-state query returned `Action Surge 0/1` and `Second Wind 1/2`.
+- Second Wind full-HP guard: PASS. At `24/24 HP`, `I use Second Wind to catch my breath.` refused to waste the heal and said no use was spent.
+- Second Wind resource after full-HP guard: PASS. DM2 exact-state query still returned `Second Wind 1/2`.
+
+New findings for DEV:
+
+- P2 Action Surge granted-action wording false-block. After Action Surge was already spent and the UI listed `Action Surge action` as available, the realistic command `I attack the dark shape again with my longsword using my Action Surge action.` was rejected with `Action Surge has no uses left until a Short or Long Rest restores it.` The extra action remained available and a follow-up `I attack again with my longsword.` worked. The parser/action economy appears to treat the phrase "Action Surge" in the follow-up as a second feature-use attempt instead of recognizing it as the already-granted action slot.
+- P3 DM2 Tactical Mind resource inference can contradict exact state. The question `How many Second Wind uses do I have left after that Tactical Mind attempt?` incorrectly answered `0 Second Wind uses left`, even though the GM had said no use was spent and an exact-state query immediately after returned `Second Wind 1/2`. This looks like Rules-panel context inference overriding authoritative sheet/resource state.
+
+Not yet production-proven:
+
+- Tactical Mind success/spend branch. Production random rolls covered still-fails/no-spend and decline. Need a controlled or lucky failed ability check where the Tactical Mind d10 turns failure into success, then verify Second Wind spends from `1/2` to `0/2`.
+
+Current recommendation:
+
+- Do not block the next 4D work on core ability functionality; the main mechanics are live and playable. DEV should fix the Action Surge follow-up wording trap before broad player testing, and tighten DM2 resource answers to prefer authoritative current resources over inferred transcript math. The fighter is swinging; it just trips over the label on its own extra action.
+
+## Latest QA Pass - 2026-06-13 Active QA Character Level-Up Visual E2E `7ee9848`
+
+Scope:
+
+- Verified latest app-code commit under test: `7ee9848 Allow QA level-up readiness by active test character`.
+- Inspected changed surface: `README.md`, `server/src/db.js`, `server/src/index.js`, `server/src/qaTools.js`, and `server/test/qaTools.test.js`.
+- Used the configured production QA tools secret provided by the user in chat. The secret was not written to this file.
+- Rechecked production frontend at `https://hallucinated-dungeons.vercel.app/`.
+- Exercised the new active QA-character targeting path against visible `QA Smoke`.
+- Completed the React Level Up modal and Apply flow visually in the in-app browser.
+
+Automated checks:
+
+- Client `npm.cmd run lint`: PASS.
+- Server `npm.cmd test`: PASS, `454/454`.
+- `git diff --check 7ee9848^ 7ee9848`: PASS.
+
+Verified fixed / passed in production:
+
+- Active QA character endpoint after visible reload: PASS. `POST /qa/level-up-ready` with `characterName: QA Smoke` returned `200 OK`, XP `300`, threshold `300`, current level `1`, next level `2`, `canApply: true`, blockers `[]`.
+- Guard behavior before visible reload: PASS/NOTE. The same endpoint initially returned `409 That QA character is not active in a visible session`, then succeeded after reloading the visible app. This confirms the live-socket guard works, but also means QA may need to reload/reselect before using name targeting.
+- Character Sheet readiness UI: PASS. Visible sheet showed `XP 300/300`, `Level Up Available`, and enabled `Level Up`.
+- React Level Up preview modal: PASS. Modal showed `Fighter Level 2`, status `Ready`, HP Gain `+10`, PB `+2 -> +2`, Apply `Unlocked`, features `Action Surge` and `Tactical Mind`, and no blockers.
+- Apply Level Up from UI: PASS. Clicking `Apply Level Up` closed the preview and updated the sheet to `Human Fighter - Level 2`, HP `24/24`, XP `300/900`.
+- New features on sheet: PASS. Sheet lists `Action Surge` and `Tactical Mind`.
+- Post-level Action Surge guard: PASS. `I use Action Surge.` outside combat returned the expected out-of-combat refusal.
+- Action Surge resource count after refusal: PASS. DM2 answered `Action Surge: 1/1 uses left`, so the out-of-combat refusal did not spend the resource.
+- Production console: PASS. No warn/error logs observed during this pass.
+
+Current recommendation:
+
+- Fighter level 2 readiness, visual modal, UI apply, and basic post-level Action Surge behavior are production-passed. No blocker for continuing the 4D build. Next QA target should be Tactical Mind in a real failed ability-check flow and Action Surge inside an actual combat turn, because the shiny button now works and naturally wants to be stress-tested.
 
 ## Latest QA Pass - 2026-06-12 QA Secret Follow-Up / Level-Up Apply E2E
 
