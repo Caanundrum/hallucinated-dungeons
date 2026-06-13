@@ -5,7 +5,52 @@ QA thread role: read-only QA, no development changes.
 
 ## Summary
 
-Latest production regression confirms `a65109f` fixed the two targeted Fighter ability issues: the granted Action Surge action now accepts the previously failing "using my Action Surge action" wording, and DM2 now answers the Tactical Mind / Second Wind follow-up from current sheet state. One new P3 Rules-panel issue remains: combined exact resource questions for both Action Surge and Second Wind can omit Action Surge while answering Second Wind.
+Latest production ability fishing finally proved the remaining Tactical Mind success/spend branch live: a failed Athletics check was raised from 23 to 29 by Tactical Mind, succeeded against DC 29, and spent Second Wind from `2/2` to `1/2`. Fighter level 2 Action Surge and Tactical Mind core production coverage is now complete for the branches QA has been tracking.
+
+## Latest QA Pass - 2026-06-13 Tactical Mind Success/Spend Production Proof
+
+Scope:
+
+- Continued production testing at `https://hallucinated-dungeons.vercel.app/` using visible `QA Smoke`, Level 2 Fighter.
+- No app code changes were made by QA.
+- Goal was to force the last unproven live branch: Tactical Mind turns a failed ability check into success and spends Second Wind.
+
+Production verified / passed:
+
+- Tactical Mind still-fails/no-spend rechecked: PASS. Climbing the slick bridge support produced DC 29 Strength (Athletics), rolled 18, Tactical Mind rolled `1d10 = 8`, revised total 26 still failed, and GM said no Second Wind use was spent.
+- Tactical Mind success/spend branch: PASS. A later climb using the safer boot placement produced DC 29 Strength (Athletics), rolled 23, Tactical Mind rolled `1d10 = 6`, revised total 29 met DC 29 and succeeded. GM explicitly said `Second Wind uses left: 1`.
+- Success consequence: PASS. GM resolved the hazard positively: secure grip, pulled through the hazard without losing position or gear, and no longer caught in the immediate hazard.
+- Exact resource verification after success: PASS. DM2 exact-state query returned `Second Wind 1/2` and `Action Surge 0/1`, confirming the successful Tactical Mind spent exactly one Second Wind use.
+
+Current recommendation:
+
+- Tactical Mind production coverage is now complete for prompt, decline, still-fails/no-spend, and success/spend. No blocker found in this pass. The dice made us work for it, but the branch finally confessed.
+
+## Latest QA Pass - 2026-06-13 Combined Resource Fix Retest `32ac1aa`
+
+Scope:
+
+- Verified latest app-code commit under test: `32ac1aa Answer combined resource queries`; current `HEAD` is `738cadb Update QA_HANDOFF.md`.
+- Rechecked production frontend at `https://hallucinated-dungeons.vercel.app/` after reload.
+- Used visible `QA Smoke`, Level 2 Fighter, in the existing combat state after Action Surge had been spent.
+- No app code changes were made by QA.
+
+Automated checks:
+
+- Client `npm.cmd run lint`: PASS.
+- Server `npm.cmd test`: PASS, `460/460`.
+- `git diff --check 32ac1aa^ 32ac1aa`: PASS.
+
+Verified fixed / passed in production:
+
+- Combined exact resource query: PASS/FIXED. The exact question `What are my exact current Action Surge and Second Wind resource entries, remaining and max? Do not infer from prior text.` now answers both resources in one response:
+  - `Action Surge 0/1 uses left. It resets on short rest.`
+  - `Second Wind 2/2 uses left. It resets on long rest.`
+- Regression context stayed intact: PASS. The production session still shows the prior Action Surge wording fix resolved correctly: `I attack the hostile shape again with my longsword using my Action Surge action.` resolved as a longsword attack and did not false-block as a second Action Surge activation.
+
+Current recommendation:
+
+- Treat the latest resource-answer fix as production-passed. No new blocker found in this retest. The main remaining Fighter-ability coverage gap is still Tactical Mind success/spend in production, because natural live rolls have not yet landed in the narrow "d10 turns failure into success" window. The dice continue to behave like tiny auditors with opinions.
 
 ## Latest QA Pass - 2026-06-13 Fighter Ability Fix Retest `a65109f`
 
