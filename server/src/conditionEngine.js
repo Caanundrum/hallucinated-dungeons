@@ -21,6 +21,7 @@ const TARGET_ADVANTAGE_CONDITIONS = new Set([
   'paralyzed',
   'petrified',
   'prone',
+  'reckless_attack',
   'restrained',
   'stunned',
   'unconscious',

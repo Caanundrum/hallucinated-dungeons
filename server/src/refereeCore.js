@@ -50,6 +50,7 @@ const {
   getD20ConditionMode,
   getD20ConditionSources,
   getSensoryCheckBlock,
+  hasCondition,
   getTurnBlockReason,
   resolveSavingThrow,
 } = require('./conditionEngine');
@@ -277,6 +278,7 @@ function parseRollRequest(message) {
 
 function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCombat }) {
   const check = intent.check;
+  const hideAction = isHideActionCheck({ rule_action: intent.ruleAction, skill: check.skill, intent: intent.raw });
   const conditionSubject = getPlayerConditionSubject(characterSheet, worldState);
   const sensoryBlock = getSensoryCheckBlock({
     subject: conditionSubject,
@@ -294,8 +296,10 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
   }
 
   let nextWorldState = worldState;
+  let combatConsumeText = '';
+  let combatConsumeKey = 'exploration';
   if (inCombat) {
-    const spent = spendTurnResource(worldState, 'action', `${check.label} check`, characterSheet);
+    const spent = spendCombatCheckResource({ worldState, characterSheet, check, hideAction });
     if (!spent.ok) {
       return {
         handled: true,
@@ -305,11 +309,14 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
       };
     }
     nextWorldState = spent.worldState;
+    combatConsumeText = spent.cunningAction
+      ? ' This uses your Bonus Action through Cunning Action.'
+      : ' This uses your Action.';
+    combatConsumeKey = spent.consumes;
   }
 
   const modifier = getCheckModifier(characterSheet, check, worldState);
   const bonus = getActiveBonusDice(worldState, 'check', { skill: check.skill })[0] || null;
-  const hideAction = isHideActionCheck({ rule_action: intent.ruleAction, skill: check.skill, intent: intent.raw });
   const dcAssessment = assessDc(intent.raw, check, worldState, inCombat, { hideAction, characterSheet });
   const dc = dcAssessment.dc;
   const conditionMode = getD20ConditionMode({
@@ -354,7 +361,7 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
     rule_action: hideAction ? 'hide' : intent.ruleAction || null,
     ...buildDiscoveryPendingMetadata({ intent, worldState }),
     ...buildSocialPendingMetadata({ intent, worldState }),
-    consumes: inCombat ? 'action' : 'exploration',
+    consumes: inCombat ? combatConsumeKey : 'exploration',
     combat: Boolean(inCombat),
     created_turn: currentTurn,
     success_result: successTextFor(check),
@@ -371,7 +378,26 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
       ...nextWorldState,
       pending_roll: pendingRoll,
     },
-    reply: `Make a DC ${dc} ${check.label}.${formatAdvantageModeText(pendingRoll.advantage_mode, pendingRoll.advantage_sources)}${bonus ? ` Add ${bonus.die} from ${bonus.label}.` : ''}${inCombat ? ' This uses your Action.' : ''} [CHECK: id=${pendingRoll.id}${check.skill ? ` skill=${check.skill}` : ''} ability=${check.ability} modifier=${modifier.total} breakdown="${sanitizeTagValue(modifier.breakdown)}"${formatBonusDieTag(bonus)}]`,
+    reply: `Make a DC ${dc} ${check.label}.${formatAdvantageModeText(pendingRoll.advantage_mode, pendingRoll.advantage_sources)}${bonus ? ` Add ${bonus.die} from ${bonus.label}.` : ''}${combatConsumeText} [CHECK: id=${pendingRoll.id}${check.skill ? ` skill=${check.skill}` : ''} ability=${check.ability} modifier=${modifier.total} breakdown="${sanitizeTagValue(modifier.breakdown)}"${formatBonusDieTag(bonus)}]`,
+  };
+}
+
+function spendCombatCheckResource({ worldState = {}, characterSheet = {}, check = {}, hideAction = false } = {}) {
+  if (hideAction && canUseCunningAction(characterSheet)) {
+    const bonus = spendTurnResource(worldState, 'bonus_action', 'Cunning Action: Hide', characterSheet);
+    if (bonus.ok) {
+      return {
+        ...bonus,
+        consumes: 'bonus_action',
+        cunningAction: true,
+      };
+    }
+  }
+
+  return {
+    ...spendTurnResource(worldState, 'action', `${check.label} check`, characterSheet),
+    consumes: 'action',
+    cunningAction: false,
   };
 }
 
@@ -402,8 +428,17 @@ function promptSavingThrow({ intent, worldState, characterSheet, currentTurn = 0
     ability: save.ability,
     reason: intent.raw,
   });
-  const advantageMode = combineAdvantageModes(conditionMode, [...activeAdvantageSources, ...speciesAdvantageSources].length ? 'advantage' : null);
-  const advantageSources = [...conditionSources, ...activeAdvantageSources, ...speciesAdvantageSources];
+  const classAdvantageSources = getClassD20AdvantageSources({
+    characterSheet,
+    subject: conditionSubject,
+    testType: 'saving_throw',
+    ability: save.ability,
+  });
+  const advantageMode = combineAdvantageModes(
+    conditionMode,
+    [...activeAdvantageSources, ...speciesAdvantageSources, ...classAdvantageSources].length ? 'advantage' : null,
+  );
+  const advantageSources = [...conditionSources, ...activeAdvantageSources, ...speciesAdvantageSources, ...classAdvantageSources];
   const pendingRoll = {
     id: `roll_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     kind: 'saving_throw',
@@ -1797,6 +1832,17 @@ function shouldPromptCombatCheck(intent) {
 }
 
 function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie }) {
+  const declaredAttack = getPrimaryAttack(characterSheet, message);
+  const reckless = getRecklessAttackUse({ message, characterSheet, attack: declaredAttack });
+  if (reckless.blocked) {
+    return {
+      handled: true,
+      logType: 'referee_reckless_attack_blocked',
+      worldState,
+      reply: reckless.reply,
+    };
+  }
+
   const spent = spendTurnResource(worldState, 'action', 'Attack', characterSheet);
   if (!spent.ok) {
     return {
@@ -1825,7 +1871,7 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
   }
 
   const preparedAttack = prepareWeaponAttack({
-    attack: getPrimaryAttack(characterSheet, message),
+    attack: declaredAttack,
     message,
     characterSheet,
     player,
@@ -1890,13 +1936,17 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
     target,
     spatialMode: preparedAttack.spatialMode,
   });
+  const attackModeBeforeHelp = combineAdvantageModes(
+    combineAdvantageModes(getAttackAdvantageMode(player, target, visionOptions), propertyMode),
+    reckless.advantageMode,
+  );
   const helped = applyHelpToAttack({
     worldState: thrownWeaponSpent.worldState,
     combat,
     attacker: player,
     target,
-    advantageMode: combineAdvantageModes(getAttackAdvantageMode(player, target, visionOptions), propertyMode),
-    sources: [...getAttackAdvantageSources(player, target, visionOptions), ...propertySources],
+    advantageMode: attackModeBeforeHelp,
+    sources: [...getAttackAdvantageSources(player, target, visionOptions), ...propertySources, ...reckless.sources],
   });
   combat = helped.combat;
   player = helped.attacker;
@@ -1910,6 +1960,12 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
   });
   let attackState = lucky.worldState;
   const advantageMode = lucky.advantageMode;
+  if (reckless.active) {
+    attackState = markPlayerReckless(attackState);
+    combat = cloneCombatState(attackState.combat_state);
+    player = combat.combatants.find((combatant) => combatant.is_player);
+    target = findCombatTarget(combat, target.name) || target;
+  }
   const activeAttackBonuses = getActiveAttackRollBonuses(attackState, { attack, characterSheet });
   const activeAttackBonusTotal = activeAttackBonuses.reduce((sum, bonus) => sum + Number(bonus.value || 0), 0);
   const conditionAttackModifier = getConditionD20Modifier(player);
@@ -1936,6 +1992,7 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
   if (attack.drawnByThrownWeaponFighting) lines.push(`**Thrown Weapon Fighting:** you draw ${attack.name} as part of the thrown attack.`);
   if (visionOptions.note) lines.push(visionOptions.note);
   if (advantageMode) lines.push(`Attack roll has ${advantageMode} from ${formatList(lucky.sources)}.`);
+  if (reckless.active) lines.push('**Reckless Attack:** attacks against you have Advantage until your next turn starts.');
   if (activeAttackBonuses.length) lines.push(`Active attack bonus: ${activeAttackBonuses.map((bonus) => `${bonus.label} ${formatSigned(bonus.value)}`).join(', ')}.`);
   if (conditionAttackModifier) lines.push(`Condition modifier: ${formatConditionD20Sources(player).join(', ')}.`);
   if (lucky.note) lines.push(lucky.note);
@@ -3139,7 +3196,7 @@ function buildAttackFromBreakdown(attack = {}) {
   return {
     name: attack?.name || 'weapon',
     weaponId,
-    ability: attack?.ability || weapon?.ability || null,
+    ability: attack?.ability || weapon?.ability || defaultAttackAbility(attack, weapon),
     properties: weapon?.properties || attack?.properties || [],
     weaponCategory: weapon?.weapon_category || attack?.weapon_category || null,
     attackKind: weapon?.attack_kind || attack?.attack_kind || 'melee',
@@ -3154,6 +3211,11 @@ function buildAttackFromBreakdown(attack = {}) {
     range: weapon?.range || attack?.range || null,
     isWeapon: true,
   };
+}
+
+function defaultAttackAbility(attack = {}, weapon = null) {
+  const attackKind = normalizeId(attack.attackKind || attack.attack_kind || weapon?.attack_kind);
+  return attackKind === 'ranged' ? 'dex' : 'str';
 }
 
 function buildAttackFromWeapon(weapon = {}, characterSheet = {}, options = {}) {
@@ -3303,6 +3365,73 @@ function getCurrentHp(characterSheet, worldState) {
 
 function isClass(characterSheet = {}, classId) {
   return normalizeId(characterSheet.identity?.class || characterSheet.identity?.class_name) === classId;
+}
+
+function canUseCunningAction(characterSheet = {}) {
+  return isClass(characterSheet, 'rogue') && getCharacterLevel(characterSheet) >= 2;
+}
+
+function getClassD20AdvantageSources({ characterSheet = {}, subject = {}, testType = '', ability = '' } = {}) {
+  const sources = [];
+  if (
+    testType === 'saving_throw'
+    && normalizeId(ability) === 'dex'
+    && isClass(characterSheet, 'barbarian')
+    && getCharacterLevel(characterSheet) >= 2
+    && !hasCondition(subject, ['incapacitated', 'paralyzed', 'petrified', 'sleep', 'asleep', 'stunned', 'unconscious'])
+  ) {
+    sources.push('Danger Sense');
+  }
+  return sources;
+}
+
+function getRecklessAttackUse({ message = '', characterSheet = {}, attack = {} } = {}) {
+  if (!wantsRecklessAttack(message)) {
+    return { active: false, advantageMode: null, sources: [] };
+  }
+  if (!isClass(characterSheet, 'barbarian')) {
+    return {
+      blocked: true,
+      reply: 'Reckless Attack is a Barbarian feature and is not on this character sheet. The referee admires the confidence and still checks the class list.',
+    };
+  }
+  if (getCharacterLevel(characterSheet) < 2) {
+    return {
+      blocked: true,
+      reply: 'Reckless Attack is a level 2 Barbarian feature. At level 1, you can attack boldly, but not with the rules-backed reckless switch flipped.',
+    };
+  }
+  if (normalizeId(attack?.ability) !== 'str') {
+    return {
+      blocked: true,
+      reply: 'Reckless Attack only works on Strength-based attacks. Choose a Strength attack, or attack normally.',
+    };
+  }
+  return {
+    active: true,
+    advantageMode: 'advantage',
+    sources: ['Reckless Attack'],
+  };
+}
+
+function wantsRecklessAttack(message = '') {
+  return /\breckless(?:ly)?\b|\breckless\s+attack\b/i.test(String(message || ''));
+}
+
+function markPlayerReckless(worldState = {}) {
+  if (!worldState.combat_state?.active) return worldState;
+  const combat = cloneCombatState(worldState.combat_state);
+  const playerIndex = combat.combatants.findIndex((combatant) => combatant.is_player);
+  if (playerIndex < 0) return worldState;
+  const player = combat.combatants[playerIndex];
+  combat.combatants[playerIndex] = {
+    ...player,
+    conditions: [...new Set([...(player.conditions || []), 'reckless_attack'])],
+  };
+  return {
+    ...worldState,
+    combat_state: combat,
+  };
 }
 
 function getCharacterLevel(characterSheet = {}) {

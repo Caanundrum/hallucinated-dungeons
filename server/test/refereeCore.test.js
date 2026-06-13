@@ -705,6 +705,35 @@ test('maps declared rule actions to the required check instead of asking the DM 
   assert.match(result.reply, /Dexterity \(Stealth\)/);
 });
 
+test('level 2 Rogue uses Cunning Action to Hide as a Bonus Action', () => {
+  const result = adjudicate({
+    message: 'I take the Hide action.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Quickstep', hp: 10, max_hp: 10, ac: 15, is_player: true },
+          { name: 'Goblin', hp: 8, max_hp: 8, ac: 12, is_player: false },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      identity: { name: 'Quickstep', class: 'rogue', class_name: 'Rogue', level: 2 },
+    },
+    currentTurn: 5,
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.pending_roll.skill, 'stealth');
+  assert.equal(result.worldState.pending_roll.consumes, 'bonus_action');
+  assert.equal(result.worldState.combat_state.turn_resources.action_available, true);
+  assert.equal(result.worldState.combat_state.turn_resources.bonus_action_available, false);
+  assert.match(result.reply, /Cunning Action/);
+});
+
 test('prompts deterministic saving throws with character save modifiers', () => {
   const result = adjudicate({
     message: 'I dive away from the falling rocks.',
@@ -719,6 +748,24 @@ test('prompts deterministic saving throws with character save modifiers', () => 
   assert.equal(result.worldState.pending_roll.modifier, 3);
   assert.match(result.reply, /DC 15 Dexterity Saving Throw/);
   assert.match(result.reply, /\[SAVE: id=.*ability=dex/);
+});
+
+test('level 2 Barbarian Danger Sense grants Dexterity saving throw advantage', () => {
+  const result = adjudicate({
+    message: 'I dive away from the falling rocks.',
+    worldState: worldState(),
+    characterSheet: {
+      ...characterSheet,
+      identity: { name: 'Ragna', class: 'barbarian', class_name: 'Barbarian', level: 2 },
+    },
+    currentTurn: 6,
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.pending_roll.kind, 'saving_throw');
+  assert.equal(result.worldState.pending_roll.advantage_mode, 'advantage');
+  assert(result.worldState.pending_roll.advantage_sources.includes('Danger Sense'));
+  assert.match(result.reply, /advantage from Danger Sense/);
 });
 
 test('active item bonuses change pending skill checks and saving throws', () => {
@@ -1323,6 +1370,46 @@ test('Attack leaves movement and Bonus Action available until the player ends th
   assert.equal(ended.worldState.combat_state.round, 2);
   assert.match(attacked.reply, /Your turn remains open/);
   assert.match(ended.reply, /Wolf uses bite/);
+});
+
+test('level 2 Barbarian Reckless Attack grants attack advantage and exposes return attacks', () => {
+  const barbarian = {
+    ...characterSheet,
+    identity: { name: 'Ragna', class: 'barbarian', class_name: 'Barbarian', level: 2 },
+    derived_stats: { ...characterSheet.derived_stats, hp: 16, max_hp: 16, armor_class: 14 },
+  };
+  const attacked = adjudicate({
+    message: 'I attack recklessly with my longsword.',
+    worldState: worldState({
+      player_stats: { hp: 16, max_hp: 16, armor_class: 14 },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ragna', hp: 16, max_hp: 16, ac: 14, is_player: true },
+          { name: 'Wolf', hp: 20, max_hp: 20, ac: 12, is_player: false, attack: { name: 'bite', attack_bonus: 4, damage_formula: '1d4+1' } },
+        ],
+      },
+    }),
+    characterSheet: barbarian,
+    rollDie: sequenceRolls([2, 15, 4]),
+  });
+  const recklessPlayer = attacked.worldState.combat_state.combatants.find((combatant) => combatant.is_player);
+  const ended = adjudicate({
+    message: 'End my turn.',
+    worldState: attacked.worldState,
+    characterSheet: barbarian,
+    rollDie: sequenceRolls([3, 16, 4]),
+  });
+  const nextPlayer = ended.worldState.combat_state.combatants.find((combatant) => combatant.is_player);
+
+  assert.match(attacked.reply, /advantage from Reckless Attack/);
+  assert.match(attacked.reply, /attacks against you have Advantage/);
+  assert(recklessPlayer.conditions.includes('reckless_attack'));
+  assert.match(ended.reply, /Wolf uses bite/);
+  assert.match(ended.reply, /advantage: Reckless Attack target/);
+  assert(!nextPlayer.conditions.includes('reckless_attack'));
 });
 
 test('a player can use a Bonus Action class feature after attacking', () => {

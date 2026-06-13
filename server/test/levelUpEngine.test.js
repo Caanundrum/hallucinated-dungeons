@@ -91,6 +91,72 @@ test('applying fighter level 2 updates level, HP, hit dice, and Action Surge res
   assert(result.characterSheet.features.some((feature) => feature.name === 'Tactical Mind'));
 });
 
+test('barbarian and rogue level 2 previews are apply-ready as a two-class package', () => {
+  const barbarianPreview = getLevelUpPreview(baseSheet({
+    identity: {
+      class: 'barbarian',
+      class_name: 'Barbarian',
+      experience_points: 300,
+      level_up_available: true,
+    },
+    progression: { experience_points: 300 },
+  }), getContentBundle());
+  const roguePreview = getLevelUpPreview(baseSheet({
+    identity: {
+      class: 'rogue',
+      class_name: 'Rogue',
+      experience_points: 300,
+      level_up_available: true,
+    },
+    progression: { experience_points: 300 },
+  }), getContentBundle());
+
+  assert.equal(barbarianPreview.canApply, true);
+  assert.deepEqual(barbarianPreview.features.map((feature) => feature.name), ['Danger Sense', 'Reckless Attack']);
+  assert.equal(barbarianPreview.hp.hitDie, 12);
+  assert.equal(barbarianPreview.hp.increase, 9);
+  assert.equal(roguePreview.canApply, true);
+  assert.deepEqual(roguePreview.features.map((feature) => feature.name), ['Cunning Action']);
+  assert.equal(roguePreview.hp.hitDie, 8);
+  assert.equal(roguePreview.hp.increase, 7);
+});
+
+test('applying barbarian and rogue level 2 records their runtime features', () => {
+  const barbarian = applyLevelUp({
+    characterSheet: baseSheet({
+      identity: {
+        class: 'barbarian',
+        class_name: 'Barbarian',
+        experience_points: 300,
+        level_up_available: true,
+      },
+      progression: { experience_points: 300 },
+    }),
+    content: getContentBundle(),
+  });
+  const rogue = applyLevelUp({
+    characterSheet: baseSheet({
+      identity: {
+        class: 'rogue',
+        class_name: 'Rogue',
+        experience_points: 300,
+        level_up_available: true,
+      },
+      progression: { experience_points: 300 },
+    }),
+    content: getContentBundle(),
+  });
+
+  assert.equal(barbarian.ok, true);
+  assert.equal(barbarian.characterSheet.identity.level, 2);
+  assert.equal(barbarian.characterSheet.resources.rage.recover_on_short_rest, 1);
+  assert(barbarian.characterSheet.features.some((feature) => feature.name === 'Danger Sense'));
+  assert(barbarian.characterSheet.features.some((feature) => feature.name === 'Reckless Attack'));
+  assert.equal(rogue.ok, true);
+  assert.equal(rogue.characterSheet.identity.level, 2);
+  assert(rogue.characterSheet.features.some((feature) => feature.name === 'Cunning Action'));
+});
+
 test('applying a blocked choice-heavy level returns a preview and does not mutate the sheet', () => {
   const sheet = baseSheet({
     identity: {

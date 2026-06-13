@@ -3,6 +3,9 @@ const { abilityMod } = require('./characterValidator');
 
 const SUPPORTED_LEVEL_UP_MECHANICS = new Set([
   'action_surge',
+  'cunning_action',
+  'danger_sense',
+  'reckless_attack',
   'tactical_mind',
 ]);
 

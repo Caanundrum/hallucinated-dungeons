@@ -31,12 +31,14 @@ function resolveDashAction({
   rollDie = defaultRollDie,
   destination = null,
 } = {}) {
-  const spent = spendTurnResource(worldState, 'action', 'Dash', characterSheet);
+  const spent = spendActionOrCunningAction(worldState, 'Dash', characterSheet);
   if (!spent.ok) return blocked(spent.worldState, spent.reply);
 
   const speed = getSpeed(characterSheet, spent.worldState);
   const granted = grantMovement(spent.worldState, speed, 'Dash', characterSheet);
-  const lines = [`You take the **Dash** action and gain ${speed} feet of movement for this turn.`];
+  const lines = [spent.cunningAction
+    ? `You use **Cunning Action** to Dash as a Bonus Action and gain ${speed} feet of movement for this turn.`
+    : `You take the **Dash** action and gain ${speed} feet of movement for this turn.`];
   if (!hasDeclaredMovement(message, destination)) {
     lines.push(`${getRemainingMovement(granted.worldState)} feet of movement remain. You can move, use a Bonus Action, or end your turn.`);
     return resolved('referee_combat_dash', granted.worldState, lines);
@@ -62,11 +64,13 @@ function resolveDisengageAction({
   rollDie = defaultRollDie,
   destination = null,
 } = {}) {
-  const spent = spendTurnResource(worldState, 'action', 'Disengage', characterSheet);
+  const spent = spendActionOrCunningAction(worldState, 'Disengage', characterSheet);
   if (!spent.ok) return blocked(spent.worldState, spent.reply);
 
   const disengaged = markDisengaged(spent.worldState);
-  const lines = ['You take the **Disengage** action. Your movement does not provoke Opportunity Attacks for the rest of this turn.'];
+  const lines = [spent.cunningAction
+    ? 'You use **Cunning Action** to Disengage as a Bonus Action. Your movement does not provoke Opportunity Attacks for the rest of this turn.'
+    : 'You take the **Disengage** action. Your movement does not provoke Opportunity Attacks for the rest of this turn.'];
   if (!hasDeclaredMovement(message, destination)) {
     lines.push(`${getRemainingMovement(disengaged)} feet of movement remain. You can move, use a Bonus Action, or end your turn.`);
     return resolved('referee_combat_disengage', disengaged, lines);
@@ -83,6 +87,22 @@ function resolveDisengageAction({
       destination,
     }),
   });
+}
+
+function spendActionOrCunningAction(worldState = {}, label = 'action', characterSheet = {}) {
+  if (canUseCunningAction(characterSheet)) {
+    const bonus = spendTurnResource(worldState, 'bonus_action', `Cunning Action: ${label}`, characterSheet);
+    if (bonus.ok) {
+      return {
+        ...bonus,
+        cunningAction: true,
+      };
+    }
+  }
+  return {
+    ...spendTurnResource(worldState, 'action', label, characterSheet),
+    cunningAction: false,
+  };
 }
 
 function resolveCombatMovement({
@@ -559,6 +579,11 @@ function blocked(worldState, reply) {
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value || {}));
+}
+
+function canUseCunningAction(characterSheet = {}) {
+  return normalizeId(characterSheet.identity?.class || characterSheet.identity?.class_name) === 'rogue'
+    && Number(characterSheet.identity?.level || characterSheet.derived_stats?.level || 1) >= 2;
 }
 
 function normalizeId(value) {

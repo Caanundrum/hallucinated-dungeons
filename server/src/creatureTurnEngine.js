@@ -605,7 +605,7 @@ function getActingIndexes(combatants, turnIndex, playerIndex, advanceRound) {
 }
 
 function clearPlayerTurnConditions(conditions = []) {
-  return (conditions || []).filter((condition) => !/^dodg/i.test(String(condition)));
+  return (conditions || []).filter((condition) => !/^(dodg|reckless[_ -]?attack)/i.test(String(condition)));
 }
 
 function clearCreatureTurnConditions(conditions = []) {

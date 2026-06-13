@@ -62,6 +62,22 @@ test('Dash spends an Action and grants extra movement equal to Speed', () => {
   assert.match(result.reply, /gain 30 feet of movement/);
 });
 
+test('level 2 Rogue uses Cunning Action to Dash as a Bonus Action', () => {
+  const result = resolveDashAction({
+    message: 'I Dash.',
+    worldState: combatWorld(),
+    characterSheet: {
+      ...characterSheet,
+      identity: { class: 'rogue', class_name: 'Rogue', level: 2 },
+    },
+  });
+
+  assert.equal(result.worldState.combat_state.turn_resources.action_available, true);
+  assert.equal(result.worldState.combat_state.turn_resources.bonus_action_available, false);
+  assert.equal(result.worldState.combat_state.turn_resources.movement_remaining, 60);
+  assert.match(result.reply, /Cunning Action/);
+});
+
 test('Dash uses Exhaustion-reduced speed', () => {
   const result = resolveDashAction({
     message: 'I Dash.',
@@ -73,6 +89,23 @@ test('Dash uses Exhaustion-reduced speed', () => {
 
   assert.equal(result.worldState.combat_state.turn_resources.movement_remaining, 40);
   assert.match(result.reply, /gain 20 feet of movement/);
+});
+
+test('level 2 Rogue uses Cunning Action to Disengage as a Bonus Action', () => {
+  const result = resolveDisengageAction({
+    message: 'I Disengage and move 20 feet away.',
+    worldState: combatWorld(),
+    characterSheet: {
+      ...characterSheet,
+      identity: { class: 'rogue', class_name: 'Rogue', level: 2 },
+    },
+    rollDie: sequenceRolls([20, 4]),
+  });
+
+  assert.equal(result.worldState.combat_state.turn_resources.action_available, true);
+  assert.equal(result.worldState.combat_state.turn_resources.bonus_action_available, false);
+  assert.equal(result.worldState.combat_state.turn_resources.disengaged, true);
+  assert.match(result.reply, /Cunning Action/);
 });
 
 test('Disengage suppresses a scene-zone Opportunity Attack while moving away', () => {
