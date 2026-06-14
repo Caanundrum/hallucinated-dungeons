@@ -5,7 +5,40 @@ QA thread role: read-only QA, no development changes.
 
 ## Summary
 
-Latest production retest of `eb5efde Repair runtime armor class from equipment` fixed the fresh Rules-panel AC math for `QA Rogue`: exact AC now returns `14` from Leather Armor `11` + DEX `+3`. However the existing combat scene now errors on `I end my turn.`, so QA could not verify creature attack AC after the fix. Automated checks pass, but the new production blocker is the GM error on end-turn continuation in the active Rogue combat.
+Latest production retest of `9ce63c5 Fix equipment AC during effect ticks` passes the prior P1 blockers for `QA Rogue`: fresh Rules-panel AC returns `14` from Leather Armor `11` + DEX `+3`, `I end my turn.` no longer causes a GM error, and the live creature attack now uses `vs AC 14` with `disadvantage: Hidden target`. Automated checks pass. No active blocker remains from the Rogue AC/end-turn regression path.
+
+## Latest QA Pass - 2026-06-14 Equipment AC Tick Retest `9ce63c5`
+
+Scope:
+
+- Verified latest app-code commit under test: `9ce63c5 Fix equipment AC during effect ticks`.
+- Rechecked production frontend at `https://hallucinated-dungeons.vercel.app/` after reload.
+- Continued with visible `QA Rogue`, Level 2 Human Rogue, in the existing combat scene.
+- No app code changes were made by QA.
+
+Automated checks:
+
+- Server `npm.cmd test`: PASS, `478/478`.
+- Client `npm.cmd run lint`: PASS.
+- `git diff --check 9ce63c5^ 9ce63c5`: PASS.
+
+Verified fixed / passed in production:
+
+- P1 Rules-panel AC math remains fixed. Fresh query `What is my exact current AC right now? Show the formula and equipped armor.` returned `Your exact current AC right now: 14`, with `AC = Leather Armor base AC (11) + Dex modifier (+3)` and `AC = 11 + 3 = 14`.
+- P1 end-turn continuation is fixed. Fresh player-style typed action `I end my turn.` produced a normal GM response instead of `The Game Master encountered an error. Please try again.`
+- P1 live combat AC now uses Rogue AC 14. Creature attack after the fresh end-turn command: `First Hostile Shape That Comes Close uses weapon attack: rolls 5/6 with disadvantage, using 5+3 = 8 vs AC 14 (disadvantage: Hidden target). Miss.`
+- Hidden disadvantage is still visible/applied in the live roll.
+- Visible sheet still shows `QA Rogue`, `Human Rogue - Level 2`, no active effects, and `Equipped Defenses: Leather Armor`.
+- Browser console/warn/error log check returned no entries.
+
+Notes for DEV:
+
+- The old transcript still contains earlier stale Fighter AC / AC 19 answers, but fresh current Rules and live combat checks now use Rogue AC 14. That history may look confusing in the scrollback, but the current behavior passed.
+- Automation note only: Playwright-style direct `fill()` did not enable the ACT button, but player-like typing did. This looks like a QA automation quirk rather than a player-facing issue; the visible UI enabled ACT normally when typed into.
+
+Current recommendation:
+
+- Treat the Rogue AC/end-turn regression path as production-passed. Good moment to continue broader gameplay QA or move DEV to the next feature slice. The math is no longer doing stage magic.
 
 ## Latest QA Pass - 2026-06-14 Runtime AC Repair Retest `eb5efde`
 
