@@ -5,7 +5,42 @@ QA thread role: read-only QA, no development changes.
 
 ## Summary
 
-Latest production retest of `acfc493 Fix stale active character defenses` partially passed. Hidden disadvantage is now shown/applied, and the post-Disengage turn summary no longer advertises Bonus Action after it is spent. The stale AC/equipment defect is improved but not fixed: Rules now names Rogue sources, but still reports `Leather Armor 11 + DEX +3 = 19`, and creature attacks still resolve against AC 19 instead of the Rogue's expected leather armor AC.
+Latest production retest of `eb5efde Repair runtime armor class from equipment` fixed the fresh Rules-panel AC math for `QA Rogue`: exact AC now returns `14` from Leather Armor `11` + DEX `+3`. However the existing combat scene now errors on `I end my turn.`, so QA could not verify creature attack AC after the fix. Automated checks pass, but the new production blocker is the GM error on end-turn continuation in the active Rogue combat.
+
+## Latest QA Pass - 2026-06-14 Runtime AC Repair Retest `eb5efde`
+
+Scope:
+
+- Verified latest app-code commit under test: `eb5efde Repair runtime armor class from equipment`.
+- Rechecked production frontend at `https://hallucinated-dungeons.vercel.app/` after reload.
+- Continued with visible `QA Rogue`, Level 2 Human Rogue, in the existing combat scene.
+- No app code changes were made by QA.
+
+Automated checks:
+
+- Server `npm.cmd test`: PASS, `477/477`.
+- Client `npm.cmd run lint`: PASS.
+- `git diff --check eb5efde^ eb5efde`: PASS.
+
+Verified fixed / passed in production:
+
+- P1 Rules-panel AC math: PASS/FIXED for fresh exact query. `What is my exact current AC and what are the exact AC sources? Do not infer from prior text.` returned:
+  - `Your exact current AC is 14.`
+  - `Leather Armor: AC 11`
+  - `Dexterity modifier: +3 (from DEX 16)`
+  - `Total: 11 + 3 = 14`
+- Active sheet still correctly shows `QA Rogue`, `Human Rogue - Level 2`, no active effects, and Leather Armor.
+- Automated regression suite now includes local AC repair coverage and passes.
+
+Still failing / new findings for DEV:
+
+- P1 existing Rogue combat cannot advance after the AC repair. Fresh production command `I end my turn.` returned `The Game Master encountered an error. Please try again.` Browser console/error logs were empty. This blocks QA from verifying whether creature attacks now use AC 14 in live combat.
+- Not yet production-verified after this fix: creature attack AC value. The Rules panel is fixed, but the combat loop did not reach the creature attack because end-turn continuation errored.
+- Old transcript lines still contain previous AC 19 answers and Fighter gear explanations, but fresh exact Rules query is now correct. The active blocker is the end-turn GM error, not the Rules AC answer.
+
+Current recommendation:
+
+- Treat Rules-panel AC math as production-passed. DEV should investigate the end-turn GM error in the current Rogue combat continuation next, then QA should re-run the enemy attack to confirm live combat uses AC 14. The calculator learned arithmetic; now the turn engine dropped its pencil.
 
 ## Latest QA Pass - 2026-06-14 Stale Defense Fix Retest `acfc493`
 

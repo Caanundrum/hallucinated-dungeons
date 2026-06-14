@@ -1055,16 +1055,27 @@ function getStaticArmorClassFromEffects(effects = [], characterSheet = {}, fallb
   const normalizedEffects = normalizeEffects(effects);
   const formulaBase = getArmorFormulaBase(normalizedEffects, characterSheet);
   if (!formulaBase) return Number(fallbackBase || 10);
+  if (hasEquipmentArmorFormula(normalizedEffects) && !hasCharacterArmorContext(characterSheet)) {
+    return Number(fallbackBase || 10);
+  }
 
   const wearingArmor = hasEquipmentArmorFormula(normalizedEffects);
   const shieldBonus = sumRuleValues(normalizedEffects, 'shield_bonus');
   const staticArmorBonus = sumStaticArmorBonusEffects(normalizedEffects);
   const fightingStyleBonus = getFightingStyleArmorBonus({
-    styleId: characterSheet.class_choices?.fighting_style,
+    styleId: characterSheet?.class_choices?.fighting_style,
     wearingArmor,
   });
 
   return formulaBase + shieldBonus + staticArmorBonus + fightingStyleBonus;
+}
+
+function hasCharacterArmorContext(characterSheet = null) {
+  return Boolean(characterSheet && (
+    characterSheet.equipped
+    || characterSheet.abilities?.modifiers
+    || characterSheet.class_choices
+  ));
 }
 
 function sumStaticArmorBonusEffects(effects = []) {

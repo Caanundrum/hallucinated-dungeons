@@ -9,7 +9,10 @@ const {
   buildEquipmentActiveEffects,
   syncEquipmentEffectsToWorldState,
 } = require('../src/equipmentEffectEngine');
-const { applyActiveEffectsToCharacterSheet } = require('../src/spellEffectEngine');
+const {
+  applyActiveEffectsToCharacterSheet,
+  tickActiveEffects,
+} = require('../src/spellEffectEngine');
 
 test('builds passive effects for equipped and attuned items only', () => {
   const effects = buildEquipmentActiveEffects({
@@ -158,6 +161,31 @@ test('current armor formula preserves shield and Defense style bonuses', () => {
     { label: 'Shield', value: 2 },
     { label: 'Defense Fighting Style', value: 1 },
   ]);
+});
+
+test('round ticking without a character sheet preserves current equipment AC', () => {
+  const ticked = tickActiveEffects({
+    player_stats: {
+      armor_class: 14,
+      base_armor_class: 14,
+      natural_base_armor_class: 14,
+    },
+    active_effects: buildEquipmentActiveEffects({
+      equipped: { armor: 'leather_armor' },
+    }),
+    combat_state: {
+      active: true,
+      round: 2,
+      turn_index: 0,
+      combatants: [
+        { name: 'QA Rogue', hp: 9, max_hp: 17, ac: 14, is_player: true },
+        { name: 'Hostile Shape', hp: 8, max_hp: 8, ac: 12, is_player: false },
+      ],
+    },
+  }, { rounds: 1 });
+
+  assert.equal(ticked.worldState.player_stats.armor_class, 14);
+  assert.equal(ticked.worldState.combat_state.combatants.find((entry) => entry.is_player).ac, 14);
 });
 
 test('equipment effects do not populate active spell effects on character sheet', () => {
