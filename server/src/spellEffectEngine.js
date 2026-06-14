@@ -990,10 +990,10 @@ function applyActiveEffectsToWorldState(worldState = {}, effects = [], character
   const currentSpellArmorBonus = sumArmorBonusEffects(worldState.active_effects || []);
   const sheetArmor = characterSheet?.derived_stats?.armor_class;
   const naturalBaseArmorClass = Number(
-    stats.natural_base_armor_class
-      ?? characterSheet?.derived_stats?.natural_base_armor_class
-      ?? stats.base_armor_class
+    characterSheet?.derived_stats?.natural_base_armor_class
       ?? characterSheet?.derived_stats?.base_armor_class
+      ?? stats.natural_base_armor_class
+      ?? stats.base_armor_class
       ?? ((stats.armor_class ?? sheetArmor ?? 10) - currentSpellArmorBonus),
   );
   const baseArmorClass = Math.max(naturalBaseArmorClass, getArmorFormulaBase(normalizedEffects, characterSheet));

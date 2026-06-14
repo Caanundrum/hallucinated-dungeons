@@ -622,6 +622,11 @@ function buildPlayerCombatant(characterSheet, worldState) {
     armorClass: stats.armor_class ?? derived.armor_class ?? 10,
     defenseApplied: Boolean(stats.defense_fighting_style_applied),
   });
+  const conditions = uniqueValues([
+    ...(derived.conditions || []),
+    ...(stats.conditions || []),
+    ...(stats.hidden?.active ? ['hidden'] : []),
+  ]);
   return {
     character_id: stats.character_id || derived.character_id || null,
     name: identity.name || stats.name || 'You',
@@ -631,7 +636,7 @@ function buildPlayerCombatant(characterSheet, worldState) {
     temp_hp: Number(stats.temp_hp ?? derived.temp_hp ?? 0),
     ac: armor.armorClass,
     defense_fighting_style_applied: armor.defenseApplied,
-    conditions: uniqueValues([...(derived.conditions || []), ...(stats.conditions || [])]),
+    conditions,
     resistances: uniqueValues([...(characterSheet.resistances || []), ...(stats.resistances || []), ...getActiveDamageResistances(worldState)]),
     vulnerabilities: uniqueValues([...(characterSheet.vulnerabilities || []), ...(stats.vulnerabilities || [])]),
     immunities: uniqueValues([...(characterSheet.immunities || []), ...(stats.immunities || [])]),
@@ -646,7 +651,11 @@ function mergeActivePlayerDefenses(player = {}, characterSheet = {}, worldState 
     ac: activePlayer.ac,
     defense_fighting_style_applied: activePlayer.defense_fighting_style_applied,
     temp_hp: player.temp_hp ?? activePlayer.temp_hp,
-    conditions: uniqueValues([...(activePlayer.conditions || []), ...(player.conditions || [])]),
+    conditions: uniqueValues([
+      ...(activePlayer.conditions || []),
+      ...(player.conditions || []),
+      ...(worldState.player_stats?.hidden?.active ? ['hidden'] : []),
+    ]),
     resistances: uniqueValues([...(activePlayer.resistances || []), ...(player.resistances || [])]),
     vulnerabilities: uniqueValues([...(activePlayer.vulnerabilities || []), ...(player.vulnerabilities || [])]),
     immunities: uniqueValues([...(activePlayer.immunities || []), ...(player.immunities || [])]),

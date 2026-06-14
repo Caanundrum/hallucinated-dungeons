@@ -5,7 +5,39 @@ QA thread role: read-only QA, no development changes.
 
 ## Summary
 
-Latest production Rogue pass verified creation, QA level-up readiness, level-up apply, and explicit Cunning Action behavior live for `QA Rogue`. New blockers are around player-natural Cunning Action phrasing and action-economy messaging: explicit `I use Cunning Action to Hide/Dash` works, but normal player phrasing like `bonus action to hide` does not route to Cunning Action.
+Latest production retest of `c0b801b Fix rogue Cunning Action routing` shows the main natural-language Rogue fixes are working: natural bonus-action Hide and Dash now route to Cunning Action, and the exhausted Cunning Action blocker correctly names Bonus Action. Remaining blockers: QA Rogue combat is using stale Fighter AC 19 despite the Rogue sheet showing Leather Armor/no active effects, Hidden disadvantage is still not shown on enemy attacks, and a follow-up after normal Action Disengage still incorrectly advertises Bonus Action availability.
+
+## Latest QA Pass - 2026-06-13 Rogue Cunning Action Fix Retest `c0b801b`
+
+Scope:
+
+- Verified latest app-code commit under test: `c0b801b Fix rogue Cunning Action routing`.
+- Rechecked production frontend at `https://hallucinated-dungeons.vercel.app/` after reload.
+- Continued with visible `QA Rogue`, Level 2 Human Rogue, in the existing combat scene.
+- No app code changes were made by QA.
+
+Automated checks:
+
+- Server `npm.cmd test`: PASS, `472/472`.
+- Client `npm.cmd run lint`: PASS.
+- `git diff --check c0b801b^ c0b801b`: PASS.
+
+Verified fixed / passed in production:
+
+- P1 natural Cunning Action Hide: PASS/FIXED. `I use my bonus action to hide behind the bridge support.` now prompts `Make a DC 15 Dexterity (Stealth). This uses your Bonus Action through Cunning Action.` It rolls at `1d20+7`.
+- Natural Hide post-roll action economy: PASS. After a successful 26 vs DC 15 Stealth check, the turn summary listed `Action, Reaction, 30 ft movement`; Bonus Action was correctly spent.
+- P2 natural Cunning Action Dash summary: PASS/FIXED. `I use my bonus action to dash away from the hostile shape.` now says Cunning Action Dash uses Bonus Action and follows with `60 feet of movement remain. You can move, use your Action, or end your turn.` It no longer says Bonus Action remains available immediately after Dash.
+- P2 exhausted Cunning Action blocker: PASS/FIXED. After Cunning Action Dash plus normal Action Disengage, `I use Cunning Action to Hide again.` now blocks with `Your Bonus Action is already spent this turn, so Cunning Action: Hide has to wait.`
+
+Still failing / new findings for DEV:
+
+- P1 QA Rogue combat is using stale Fighter AC/equipment state. The visible character sheet shows `QA Rogue`, `Human Rogue - Level 2`, no active effects, and `Equipped Defenses: Leather Armor` (`Base AC 11 + full DEX modifier`). However creature attacks against QA Rogue are resolving against AC 19: `First Hostile Shape That Comes Close uses weapon attack: rolls 20+3 = 23 vs AC 19... QA Rogue: (17 -> 9 HP)`. Rules-panel text also explains AC 19 using Fighter gear: Chain Mail + Shield + Defense. HP and name are Rogue, but AC/equipment context appears stale from `QA Smoke`.
+- P2 Hidden disadvantage still not shown/applied in production. After natural Cunning Action Hide succeeded and the GM said attacks against QA Rogue have Disadvantage, ending the turn produced `First Hostile Shape That Comes Close uses weapon attack: rolls 2+3 = 5 vs AC 19. Miss.` There was no disadvantage wording or paired roll shown.
+- P2 follow-up after Action Disengage still advertises Bonus Action availability. After Cunning Action Dash spent Bonus Action, `I use Cunning Action to Disengage too.` resolved as normal `Disengage action`, then summarized `60 feet of movement remain. You can move, use a Bonus Action, or end your turn.` A later Cunning Action attempt correctly says Bonus Action is already spent, so this is likely stale summary text after normal Action Disengage.
+
+Current recommendation:
+
+- Treat the targeted Cunning Action routing fixes as partially production-passed. DEV should prioritize the stale active-character AC/equipment context next because it affects core combat math and Rules answers for switched characters. The Cunning Action fixes are mostly in; the character-state blender is the louder smoke alarm.
 
 ## Latest QA Pass - 2026-06-13 Rogue Level 2 Production Gameplay `ab63e08`
 

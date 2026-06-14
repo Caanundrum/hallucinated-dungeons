@@ -61,6 +61,43 @@ test('syncs equipment effects while preserving non-equipment active effects', ()
   assert.equal(synced.active_effects.some((effect) => effect.id === 'equipment_old_boots'), false);
 });
 
+test('syncing new character equipment ignores stale armor baselines from a prior sheet', () => {
+  const synced = syncEquipmentEffectsToWorldState({
+    player_stats: {
+      armor_class: 19,
+      base_armor_class: 19,
+      natural_base_armor_class: 19,
+      defense_fighting_style_applied: true,
+    },
+    active_effects: [
+      { id: 'equipment_chain_mail', name: 'Chain Mail', source_type: 'equipment', rules_effects: [{ target: 'armor_formula', base: 16, dex_cap: 0, label: 'Chain Mail' }] },
+      { id: 'equipment_shield', name: 'Shield', source_type: 'equipment', rules_effects: [{ target: 'shield_bonus', value: 2, label: 'Shield' }] },
+    ],
+    combat_state: {
+      active: true,
+      combatants: [
+        { name: 'QA Rogue', hp: 17, max_hp: 17, ac: 19, is_player: true },
+        { name: 'Hostile Shape', hp: 8, max_hp: 8, ac: 12, is_player: false },
+      ],
+    },
+  }, {
+    identity: { name: 'QA Rogue', class: 'rogue', class_name: 'Rogue', level: 2 },
+    abilities: { modifiers: { dex: 3 } },
+    equipped: { armor: 'leather_armor', off_hand: null },
+    derived_stats: {
+      armor_class: 14,
+      base_armor_class: 14,
+      natural_base_armor_class: 14,
+    },
+  });
+
+  assert.equal(synced.player_stats.armor_class, 14);
+  assert.equal(synced.player_stats.base_armor_class, 14);
+  assert.equal(synced.player_stats.natural_base_armor_class, 14);
+  assert.equal(synced.combat_state.combatants.find((entry) => entry.is_player).ac, 14);
+  assert.deepEqual(synced.active_effects.map((effect) => effect.id), ['equipment_leather_armor']);
+});
+
 test('equipment effects do not populate active spell effects on character sheet', () => {
   const equipmentEffect = {
     id: 'equipment_shield',

@@ -297,6 +297,8 @@ function characterSheetToWorldStats(characterSheet, characterId = null) {
     temp_hp: stats.temp_hp || 0,
     armor_class: stats.armor_class || 10,
     base_armor_class: stats.base_armor_class ?? stats.armor_class ?? 10,
+    natural_base_armor_class: stats.natural_base_armor_class ?? stats.base_armor_class ?? stats.armor_class ?? 10,
+    defense_fighting_style_applied: Boolean(stats.defense_fighting_style_applied),
     speed: stats.speed || 30,
     alignment: details.alignment || '',
     appearance: details.appearance || '',
@@ -550,7 +552,6 @@ async function syncCharacterFromWorldState(socket, sessionId, { forceEmit = fals
     ['hp', 'hp'],
     ['max_hp', 'max_hp'],
     ['temp_hp', 'temp_hp'],
-    ['armor_class', 'armor_class'],
     ['speed', 'speed'],
     ['exhaustion_level', 'exhaustion_level'],
   ]) {
@@ -718,11 +719,14 @@ function alignCombatPlayerToCharacter(combatState, characterSheet, playerStats) 
             character_id: playerStats.character_id || combatant.character_id || null,
             name: identity.name || playerStats.name || combatant.name || 'You',
             initiative: Number(combatant.initiative ?? derived.initiative ?? 0),
-            hp: Number(derived.hp ?? derived.max_hp ?? playerStats.hp ?? combatant.hp ?? 10),
-            max_hp: Number(derived.max_hp ?? playerStats.max_hp ?? combatant.max_hp ?? 10),
-            temp_hp: Number(derived.temp_hp ?? playerStats.temp_hp ?? combatant.temp_hp ?? 0),
-            ac: Number(derived.armor_class ?? playerStats.armor_class ?? combatant.ac ?? 10),
-            conditions: derived.conditions || playerStats.conditions || combatant.conditions || [],
+            hp: Number(playerStats.hp ?? derived.hp ?? derived.max_hp ?? combatant.hp ?? 10),
+            max_hp: Number(playerStats.max_hp ?? derived.max_hp ?? combatant.max_hp ?? 10),
+            temp_hp: Number(playerStats.temp_hp ?? derived.temp_hp ?? combatant.temp_hp ?? 0),
+            ac: Number(playerStats.armor_class ?? derived.armor_class ?? combatant.ac ?? 10),
+            conditions: getAlignedPlayerConditions({ combatant, characterSheet, playerStats }),
+            hidden_state: playerStats.hidden?.active
+              ? playerStats.hidden
+              : sameCombatCharacter(combatant, playerStats) ? combatant.hidden_state : undefined,
             exhaustion_level: playerStats.exhaustion_level ?? derived.exhaustion_level ?? combatant.exhaustion_level ?? null,
           }
         : combatant
@@ -731,6 +735,36 @@ function alignCombatPlayerToCharacter(combatState, characterSheet, playerStats) 
   const enemiesAlive = (aligned.combatants || [])
     .some((combatant) => !combatant.is_player && Number(combatant.hp || 0) > 0);
   return enemiesAlive ? aligned : null;
+}
+
+function getAlignedPlayerConditions({ combatant = {}, characterSheet = {}, playerStats = {} } = {}) {
+  const derived = characterSheet.derived_stats || {};
+  const carryCombatantConditions = sameCombatCharacter(combatant, playerStats);
+  const conditions = uniqueList([
+    ...(Array.isArray(derived.conditions) ? derived.conditions : []),
+    ...(Array.isArray(playerStats.conditions) ? playerStats.conditions : []),
+    ...(carryCombatantConditions && Array.isArray(combatant.conditions) ? combatant.conditions : []),
+  ]);
+  if (playerStats.hidden?.active && !conditions.some((condition) => normalizeConditionName(condition) === 'hidden')) {
+    conditions.push('hidden');
+  }
+  return conditions;
+}
+
+function sameCombatCharacter(combatant = {}, playerStats = {}) {
+  if (combatant.character_id && playerStats.character_id) return combatant.character_id === playerStats.character_id;
+  if (playerStats.character_id && combatant.name && playerStats.name) {
+    return String(combatant.name).toLowerCase() === String(playerStats.name).toLowerCase();
+  }
+  return true;
+}
+
+function uniqueList(values = []) {
+  return [...new Set((values || []).filter(Boolean))];
+}
+
+function normalizeConditionName(value = '') {
+  return String(value || '').toLowerCase().trim().replace(/[\s-]+/g, '_');
 }
 
 function formatObjectStateForRules(objectStates = {}) {

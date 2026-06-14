@@ -271,6 +271,34 @@ test('primed Lucky defense imposes disadvantage on one creature attack and is co
   assert.match(result.lines[0], /disadvantage: Lucky/);
 });
 
+test('player_stats hidden flag imposes disadvantage even if combatant conditions were stale', () => {
+  const result = resolveCreatureTurns({
+    worldState: {
+      player_stats: {
+        hp: 12,
+        max_hp: 12,
+        armor_class: 16,
+        hidden: { active: true, source: 'Hide', check_total: 24, dc: 15 },
+      },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 1,
+        combatants: [
+          { name: 'Ari', initiative: 18, hp: 12, max_hp: 12, ac: 16, is_player: true, conditions: [] },
+          combatant('Cultist', 8),
+        ],
+      },
+    },
+    characterSheet,
+    rollDie: sequenceRolls([18, 3]),
+  });
+
+  assert.equal(result.player.hp, 12);
+  assert.match(result.lines[0], /18\/3 with disadvantage, using 3/);
+  assert.match(result.lines[0], /Hidden target/);
+});
+
 test("primed Stone's Endurance reduces creature damage through the Reaction pipeline", () => {
   const result = resolveCreatureTurns({
     worldState: {

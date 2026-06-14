@@ -106,9 +106,10 @@ function spendActionOrCunningAction(worldState = {}, label = 'action', character
 }
 
 function formatPostMovementOptions(worldState = {}, usedCunningAction = false) {
+  const resources = worldState.combat_state?.turn_resources || {};
   const options = ['move'];
-  if (worldState.combat_state?.turn_resources?.action_available) options.push('use your Action');
-  if (!usedCunningAction) options.push('use a Bonus Action');
+  if (resources.action_available) options.push('use your Action');
+  if (!usedCunningAction && resources.bonus_action_available) options.push('use a Bonus Action');
   options.push('end your turn');
   return `${getRemainingMovement(worldState)} feet of movement remain. You can ${formatOptionList(options)}.`;
 }

@@ -110,6 +110,31 @@ test('level 2 Rogue uses Cunning Action to Disengage as a Bonus Action', () => {
   assert.match(result.reply, /Cunning Action/);
 });
 
+test('Rogue Disengage paid with Action does not advertise an already-spent Bonus Action', () => {
+  const state = combatWorld();
+  state.combat_state.turn_resources = {
+    actor: 'player',
+    action_available: true,
+    bonus_action_available: false,
+    reaction_available: true,
+    movement_remaining: 60,
+    used: [{ resource: 'bonus_action', label: 'Cunning Action: Dash' }],
+  };
+  const result = resolveDisengageAction({
+    message: 'I use Cunning Action to Disengage too.',
+    worldState: state,
+    characterSheet: {
+      ...characterSheet,
+      identity: { class: 'rogue', class_name: 'Rogue', level: 2 },
+    },
+  });
+
+  assert.equal(result.worldState.combat_state.turn_resources.action_available, false);
+  assert.equal(result.worldState.combat_state.turn_resources.bonus_action_available, false);
+  assert.match(result.reply, /Disengage/);
+  assert.doesNotMatch(result.reply, /use a Bonus Action/);
+});
+
 test('Disengage suppresses a scene-zone Opportunity Attack while moving away', () => {
   const result = resolveDisengageAction({
     message: 'I Disengage and move 20 feet away.',
