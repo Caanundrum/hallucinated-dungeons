@@ -28,6 +28,7 @@ const {
   applyActiveEffectsToCharacterSheet,
 } = require('./spellEffectEngine');
 const {
+  buildEquipmentActiveEffects,
   syncEquipmentEffectsToWorldState,
   isEquipmentEffect,
 } = require('./equipmentEffectEngine');
@@ -281,7 +282,49 @@ function isValidSessionToken(sessionId, token) {
   return crypto.timingSafeEqual(expectedBuffer, tokenBuffer);
 }
 
+function repairCharacterSheetForRuntime(characterSheet) {
+  if (!characterSheet) return characterSheet;
+  const equipmentEffects = buildEquipmentActiveEffects(characterSheet, getContentBundle());
+  const activeSpellEffects = Array.isArray(characterSheet.derived_stats?.active_spell_effects)
+    ? characterSheet.derived_stats.active_spell_effects
+    : [];
+  return applyActiveEffectsToCharacterSheet(
+    {
+      ...characterSheet,
+      active_effects: equipmentEffects,
+    },
+    [...activeSpellEffects, ...equipmentEffects],
+  );
+}
+
+async function repairCharacterRowForRuntime(character) {
+  if (!character?.character_sheet) return character;
+  const repairedSheet = repairCharacterSheetForRuntime(character.character_sheet);
+  if (!hasRuntimeSheetRepair(character.character_sheet, repairedSheet)) {
+    return character;
+  }
+  const saved = await db.updateCharacterSheet(character.id, repairedSheet);
+  return saved || { ...character, character_sheet: repairedSheet };
+}
+
+function hasRuntimeSheetRepair(before = {}, after = {}) {
+  return JSON.stringify(getRuntimeRepairSnapshot(before)) !== JSON.stringify(getRuntimeRepairSnapshot(after));
+}
+
+function getRuntimeRepairSnapshot(characterSheet = {}) {
+  const derived = characterSheet.derived_stats || {};
+  return {
+    armor_class: derived.armor_class,
+    base_armor_class: derived.base_armor_class,
+    natural_base_armor_class: derived.natural_base_armor_class,
+    armor_class_breakdown: derived.armor_class_breakdown || [],
+    active_spell_effects: derived.active_spell_effects || [],
+    active_effects: characterSheet.active_effects || [],
+  };
+}
+
 function characterSheetToWorldStats(characterSheet, characterId = null) {
+  characterSheet = repairCharacterSheetForRuntime(characterSheet);
   const stats = characterSheet.derived_stats || {};
   const identity = characterSheet.identity || {};
   const details = characterSheet.character_details || {};
@@ -409,7 +452,7 @@ function buildCharacterFlavorCue(className, details = {}) {
 async function handleDeterministicSpellAction(socket, sessionId, message) {
   const content = getContentBundle();
 
-  const character = await db.getCharacterForSession(sessionId);
+  const character = await repairCharacterRowForRuntime(await db.getCharacterForSession(sessionId));
   const sheet = character?.character_sheet;
   if (!character || !sheet) return { matched: false };
 
@@ -538,12 +581,13 @@ async function syncCharacterFromWorldState(socket, sessionId, { forceEmit = fals
     db.getCharacterForSession(sessionId),
     db.getWorldState(sessionId),
   ]);
-  const sheet = character?.character_sheet;
+  const repairedCharacter = await repairCharacterRowForRuntime(character);
+  const sheet = repairedCharacter?.character_sheet;
   const worldState = worldStateRow?.state;
-  if (!character || !sheet || !worldState?.player_stats) return;
+  if (!repairedCharacter || !sheet || !worldState?.player_stats) return;
 
   const stats = worldState.player_stats;
-  if (stats.character_id && stats.character_id !== character.id) return;
+  if (stats.character_id && stats.character_id !== repairedCharacter.id) return;
   const derived = sheet.derived_stats || {};
   const nextDerived = { ...derived };
   let changed = false;
@@ -627,14 +671,14 @@ async function syncCharacterFromWorldState(socket, sessionId, { forceEmit = fals
   if (!changed) {
     if (forceEmit) {
       socket.emit('character_ready', {
-        characterId: character.id,
+        characterId: repairedCharacter.id,
         character: sheet,
         shouldStartSession: false,
       });
     }
     return;
   }
-  const saved = await db.updateCharacterSheet(character.id, nextSheet);
+  const saved = await db.updateCharacterSheet(repairedCharacter.id, nextSheet);
   socket.emit('character_ready', {
     characterId: saved.id,
     character: saved.character_sheet,
@@ -664,13 +708,14 @@ async function syncCharacterToWorldState(sessionId, characterSheet, characterId 
 }
 
 function normalizeActiveCharacterWorldState(worldState, characterSheet, characterId = null) {
-  const stats = characterSheetToWorldStats(characterSheet, characterId);
+  const runtimeSheet = repairCharacterSheetForRuntime(characterSheet);
+  const stats = characterSheetToWorldStats(runtimeSheet, characterId);
   const currentPlayerStats = worldState.player_stats || db.DEFAULT_WORLD_STATE.player_stats;
   const sameCharacter = Boolean(stats.character_id && currentPlayerStats.character_id === stats.character_id);
   const currentResourceWorld = sameCharacter
     ? { ...worldState, player_stats: currentPlayerStats }
     : { player_stats: {} };
-  const resources = buildResourceState(characterSheet, currentResourceWorld);
+  const resources = buildResourceState(runtimeSheet, currentResourceWorld);
   const nextPlayerStats = {
     ...currentPlayerStats,
     ...stats,
@@ -684,13 +729,13 @@ function normalizeActiveCharacterWorldState(worldState, characterSheet, characte
   };
   const baseWorldState = {
     ...worldState,
-    active_effects: characterSheet.derived_stats?.active_spell_effects || worldState.active_effects || [],
+    active_effects: runtimeSheet.derived_stats?.active_spell_effects || worldState.active_effects || [],
     player_stats: nextPlayerStats,
-    combat_state: alignCombatPlayerToCharacter(worldState.combat_state, characterSheet, nextPlayerStats),
+    combat_state: alignCombatPlayerToCharacter(worldState.combat_state, runtimeSheet, nextPlayerStats),
   };
   return syncInventoryStateFromCharacterSheet(
-    syncEquipmentEffectsToWorldState(baseWorldState, characterSheet),
-    characterSheet,
+    syncEquipmentEffectsToWorldState(baseWorldState, runtimeSheet),
+    runtimeSheet,
     getContentBundle(),
     { characterId: stats.character_id, resetCarriedObjects: !sameCharacter }
   );
@@ -1075,7 +1120,7 @@ io.on('connection', (socket) => {
 
     try {
       const campaign = await db.getOrCreateDefaultCampaign();
-      const character = await db.getCharacterForSession(sessionId);
+      const character = await repairCharacterRowForRuntime(await db.getCharacterForSession(sessionId));
       const characters = await db.getAccessibleCharacters(sessionId);
       if (character) {
         trackSocketCharacter(socket, character.id);
@@ -1291,7 +1336,7 @@ io.on('connection', (socket) => {
     try {
       const campaign = await db.getOrCreateDefaultCampaign();
       const previousCharacter = await db.getCharacterForSession(sessionId).catch(() => null);
-      const character = await db.setActiveCharacterForSession(sessionId, characterId);
+      const character = await repairCharacterRowForRuntime(await db.setActiveCharacterForSession(sessionId, characterId));
       if (!character) {
         socket.emit('character_error', {
           step: 'select',
@@ -1405,7 +1450,8 @@ io.on('connection', (socket) => {
       // Get pre-increment session_turn — both messages for this exchange share it
       const worldStateRow = await db.getWorldState(sessionId);
       const currentTurn   = worldStateRow?.state?.session_turn ?? 0;
-      const activeCharacter = await db.getCharacterForSession(sessionId).catch(() => null);
+      let activeCharacter = await db.getCharacterForSession(sessionId).catch(() => null);
+      activeCharacter = await repairCharacterRowForRuntime(activeCharacter).catch(() => activeCharacter);
       let activeWorldState = worldStateRow?.state || db.DEFAULT_WORLD_STATE;
       if (activeCharacter?.character_sheet) {
         trackSocketCharacter(socket, activeCharacter.id);
@@ -1671,6 +1717,7 @@ io.on('connection', (socket) => {
         const worldStateRow = await db.getWorldState(sessionId);
         let ws = worldStateRow?.state;
         activeCharacter = await db.getCharacterForSession(sessionId).catch(() => null);
+        activeCharacter = await repairCharacterRowForRuntime(activeCharacter).catch(() => activeCharacter);
         if (ws && activeCharacter?.character_sheet) {
           ws = normalizeActiveCharacterWorldState(ws, activeCharacter.character_sheet, activeCharacter.id);
           await db.updateWorldState(sessionId, ws);
@@ -1757,6 +1804,7 @@ io.on('connection', (socket) => {
         }
 
         activeCharacter ||= await db.getCharacterForSession(sessionId).catch(() => null);
+        activeCharacter = await repairCharacterRowForRuntime(activeCharacter).catch(() => activeCharacter);
         if (activeCharacter?.id) {
           trackSocketCharacter(socket, activeCharacter.id);
           await db.upsertCharacterPresence({

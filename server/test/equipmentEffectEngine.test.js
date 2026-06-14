@@ -98,6 +98,68 @@ test('syncing new character equipment ignores stale armor baselines from a prior
   assert.deepEqual(synced.active_effects.map((effect) => effect.id), ['equipment_leather_armor']);
 });
 
+test('current armor formula repairs stale derived armor on the active sheet', () => {
+  const leatherEffect = buildEquipmentActiveEffects({
+    equipped: { armor: 'leather_armor' },
+  });
+  const sheet = applyActiveEffectsToCharacterSheet({
+    identity: { name: 'QA Rogue', class: 'rogue', class_name: 'Rogue', level: 2 },
+    abilities: { modifiers: { dex: 3 } },
+    equipped: { armor: 'leather_armor' },
+    derived_stats: {
+      armor_class: 19,
+      base_armor_class: 19,
+      natural_base_armor_class: 19,
+      armor_class_breakdown: [
+        { label: 'Leather Armor', value: 11 },
+        { label: 'DEX modifier', value: 3 },
+      ],
+      active_spell_effects: [],
+    },
+  }, leatherEffect);
+
+  assert.equal(sheet.derived_stats.armor_class, 14);
+  assert.equal(sheet.derived_stats.base_armor_class, 14);
+  assert.equal(sheet.derived_stats.natural_base_armor_class, 14);
+  assert.deepEqual(sheet.derived_stats.armor_class_breakdown, [
+    { label: 'Leather Armor', value: 11 },
+    { label: 'DEX modifier', value: 3 },
+  ]);
+});
+
+test('current armor formula preserves shield and Defense style bonuses', () => {
+  const effects = buildEquipmentActiveEffects({
+    equipped: { armor: 'chain_mail', off_hand: 'shield' },
+  });
+  const sheet = applyActiveEffectsToCharacterSheet({
+    identity: { name: 'QA Fighter', class: 'fighter', class_name: 'Fighter', level: 2 },
+    abilities: { modifiers: { dex: 3 } },
+    class_choices: { fighting_style: 'defense' },
+    equipped: { armor: 'chain_mail', off_hand: 'shield' },
+    derived_stats: {
+      armor_class: 19,
+      base_armor_class: 19,
+      natural_base_armor_class: 19,
+      armor_class_breakdown: [
+        { label: 'Chain Mail', value: 16 },
+        { label: 'Shield', value: 2 },
+        { label: 'Defense Fighting Style', value: 1 },
+      ],
+      active_spell_effects: [],
+    },
+  }, effects);
+
+  assert.equal(sheet.derived_stats.armor_class, 19);
+  assert.equal(sheet.derived_stats.base_armor_class, 19);
+  assert.equal(sheet.derived_stats.natural_base_armor_class, 19);
+  assert.deepEqual(sheet.derived_stats.armor_class_breakdown, [
+    { label: 'Chain Mail', value: 16 },
+    { label: 'DEX modifier (cap 0)', value: 0 },
+    { label: 'Shield', value: 2 },
+    { label: 'Defense Fighting Style', value: 1 },
+  ]);
+});
+
 test('equipment effects do not populate active spell effects on character sheet', () => {
   const equipmentEffect = {
     id: 'equipment_shield',

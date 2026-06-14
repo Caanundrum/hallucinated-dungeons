@@ -26,6 +26,7 @@ const {
 const { applyGiantAncestryOnHit } = require('./giantAncestryEngine');
 const { clearPlayerHidden } = require('./hiddenStateEngine');
 const { assertValidRulesEffects } = require('./refereeContracts');
+const { getFightingStyleArmorBonus } = require('./fightingStyleEngine');
 
 const CONCENTRATION_DURATIONS = {
   bless: 'Concentration, up to 1 minute',
@@ -961,17 +962,21 @@ function applyActiveEffectsToCharacterSheet(characterSheet = {}, effects = []) {
       ?? derived.base_armor_class
       ?? (Number(derived.armor_class || 10) - currentSpellArmorBonus),
   );
-  const baseArmorClass = Math.max(naturalBaseArmorClass, getArmorFormulaBase(normalizedEffects, characterSheet));
-  const spellArmorBonus = sumArmorBonusEffects(normalizedEffects);
+  const baseArmorClass = getStaticArmorClassFromEffects(normalizedEffects, characterSheet, naturalBaseArmorClass);
+  const nextNaturalBaseArmorClass = hasEquipmentArmorFormula(normalizedEffects)
+    ? baseArmorClass
+    : naturalBaseArmorClass;
+  const spellArmorBonus = sumTemporaryArmorBonusEffects(normalizedEffects);
+  const staticArmorBreakdown = buildStaticArmorBreakdown(normalizedEffects, characterSheet);
   return {
     ...characterSheet,
     derived_stats: {
       ...derived,
-      natural_base_armor_class: naturalBaseArmorClass,
+      natural_base_armor_class: nextNaturalBaseArmorClass,
       base_armor_class: baseArmorClass,
       armor_class: baseArmorClass + spellArmorBonus,
       armor_class_breakdown: [
-        ...currentBreakdown.filter((part) => !isSpellArmorBreakdown(part)),
+        ...(staticArmorBreakdown || currentBreakdown.filter((part) => !isSpellArmorBreakdown(part))),
         ...buildSpellArmorBreakdown(normalizedEffects),
       ],
       active_spell_effects: visibleActiveEffects,
@@ -987,7 +992,7 @@ function isEquipmentEffect(effect = {}) {
 function applyActiveEffectsToWorldState(worldState = {}, effects = [], characterSheet = null) {
   const normalizedEffects = normalizeEffects(effects);
   const stats = worldState.player_stats || {};
-  const currentSpellArmorBonus = sumArmorBonusEffects(worldState.active_effects || []);
+  const currentSpellArmorBonus = sumTemporaryArmorBonusEffects(worldState.active_effects || []);
   const sheetArmor = characterSheet?.derived_stats?.armor_class;
   const naturalBaseArmorClass = Number(
     characterSheet?.derived_stats?.natural_base_armor_class
@@ -996,8 +1001,11 @@ function applyActiveEffectsToWorldState(worldState = {}, effects = [], character
       ?? stats.base_armor_class
       ?? ((stats.armor_class ?? sheetArmor ?? 10) - currentSpellArmorBonus),
   );
-  const baseArmorClass = Math.max(naturalBaseArmorClass, getArmorFormulaBase(normalizedEffects, characterSheet));
-  const spellArmorBonus = sumArmorBonusEffects(normalizedEffects);
+  const baseArmorClass = getStaticArmorClassFromEffects(normalizedEffects, characterSheet, naturalBaseArmorClass);
+  const nextNaturalBaseArmorClass = hasEquipmentArmorFormula(normalizedEffects)
+    ? baseArmorClass
+    : naturalBaseArmorClass;
+  const spellArmorBonus = sumTemporaryArmorBonusEffects(normalizedEffects);
   const nextArmorClass = baseArmorClass + spellArmorBonus;
   const previousEffectIds = new Set((worldState.active_effects || []).map((effect) => effect.id).filter(Boolean));
   const newlyAppliedEffects = normalizedEffects.filter((effect) => !previousEffectIds.has(effect.id));
@@ -1020,7 +1028,7 @@ function applyActiveEffectsToWorldState(worldState = {}, effects = [], character
     combat_state: nextCombatState,
     player_stats: {
       ...stats,
-      natural_base_armor_class: naturalBaseArmorClass,
+      natural_base_armor_class: nextNaturalBaseArmorClass,
       base_armor_class: baseArmorClass,
       armor_class: nextArmorClass,
       temp_hp: nextTempHp,
@@ -1036,25 +1044,108 @@ function normalizeEffects(effects = []) {
   }));
 }
 
-function sumArmorBonusEffects(effects = []) {
+function sumTemporaryArmorBonusEffects(effects = []) {
+  return normalizeEffects(effects)
+    .flatMap((effect) => (effect.rules_effects || []).map((rule) => ({ effect, rule })))
+    .filter(({ effect, rule }) => !isEquipmentEffect(effect) && rule.target === 'armor_class_bonus')
+    .reduce((sum, { rule }) => sum + Number(rule.value || 0), 0);
+}
+
+function getStaticArmorClassFromEffects(effects = [], characterSheet = {}, fallbackBase = 10) {
+  const normalizedEffects = normalizeEffects(effects);
+  const formulaBase = getArmorFormulaBase(normalizedEffects, characterSheet);
+  if (!formulaBase) return Number(fallbackBase || 10);
+
+  const wearingArmor = hasEquipmentArmorFormula(normalizedEffects);
+  const shieldBonus = sumRuleValues(normalizedEffects, 'shield_bonus');
+  const staticArmorBonus = sumStaticArmorBonusEffects(normalizedEffects);
+  const fightingStyleBonus = getFightingStyleArmorBonus({
+    styleId: characterSheet.class_choices?.fighting_style,
+    wearingArmor,
+  });
+
+  return formulaBase + shieldBonus + staticArmorBonus + fightingStyleBonus;
+}
+
+function sumStaticArmorBonusEffects(effects = []) {
+  return normalizeEffects(effects)
+    .flatMap((effect) => (effect.rules_effects || []).map((rule) => ({ effect, rule })))
+    .filter(({ effect, rule }) => isEquipmentEffect(effect) && rule.target === 'armor_class_bonus')
+    .reduce((sum, { rule }) => sum + Number(rule.value || 0), 0);
+}
+
+function sumRuleValues(effects = [], target) {
   return normalizeEffects(effects)
     .flatMap((effect) => effect.rules_effects || [])
-    .filter((effect) => effect.target === 'armor_class_bonus')
+    .filter((effect) => effect.target === target)
     .reduce((sum, effect) => sum + Number(effect.value || 0), 0);
 }
 
+function hasEquipmentArmorFormula(effects = []) {
+  return normalizeEffects(effects)
+    .some((effect) => isEquipmentEffect(effect)
+      && (effect.rules_effects || []).some((rule) => rule.target === 'armor_formula'));
+}
+
 function getArmorFormulaBase(effects = [], characterSheet = {}) {
+  return getBestArmorFormula(normalizeEffects(effects), characterSheet)?.total || 0;
+}
+
+function getBestArmorFormula(effects = [], characterSheet = {}) {
   const formulas = normalizeEffects(effects)
-    .flatMap((effect) => effect.rules_effects || [])
-    .filter((effect) => effect.target === 'armor_formula');
-  if (formulas.length === 0) return 0;
+    .flatMap((effect) => (effect.rules_effects || [])
+      .filter((rule) => rule.target === 'armor_formula')
+      .map((rule) => ({ effect, rule })));
+  if (formulas.length === 0) return null;
 
   const dexMod = Number(characterSheet?.abilities?.modifiers?.dex || 0);
-  return formulas.reduce((best, formula) => {
-    const dexCap = formula.dex_cap;
+  return formulas.reduce((best, { effect, rule }) => {
+    const dexCap = rule.dex_cap;
     const dexApplied = dexCap === null || dexCap === undefined ? dexMod : Math.min(dexMod, Number(dexCap));
-    return Math.max(best, Number(formula.base || 10) + dexApplied);
-  }, 0);
+    const total = Number(rule.base || 10) + dexApplied;
+    if (!best || total > best.total) {
+      return { effect, rule, dexApplied, total };
+    }
+    return best;
+  }, null);
+}
+
+function buildStaticArmorBreakdown(effects = [], characterSheet = {}) {
+  const normalizedEffects = normalizeEffects(effects);
+  const formula = getBestArmorFormula(normalizedEffects, characterSheet);
+  if (!formula || !isEquipmentEffect(formula.effect)) return null;
+
+  const dexCap = formula.rule.dex_cap;
+  const shieldBonus = sumRuleValues(normalizedEffects, 'shield_bonus');
+  const staticArmorBonuses = buildStaticArmorBonusBreakdown(normalizedEffects);
+  const fightingStyleBonus = getFightingStyleArmorBonus({
+    styleId: characterSheet.class_choices?.fighting_style,
+    wearingArmor: true,
+  });
+
+  return [
+    {
+      label: formula.rule.label || formula.effect.name || 'Armor',
+      value: Number(formula.rule.base || 10),
+    },
+    {
+      label: dexCap === null || dexCap === undefined ? 'DEX modifier' : `DEX modifier (cap ${dexCap})`,
+      value: formula.dexApplied,
+    },
+    ...(shieldBonus ? [{ label: 'Shield', value: shieldBonus }] : []),
+    ...staticArmorBonuses,
+    ...(fightingStyleBonus ? [{ label: 'Defense Fighting Style', value: fightingStyleBonus }] : []),
+  ];
+}
+
+function buildStaticArmorBonusBreakdown(effects = []) {
+  return normalizeEffects(effects)
+    .flatMap((effect) => (effect.rules_effects || [])
+      .filter((rule) => isEquipmentEffect(effect) && rule.target === 'armor_class_bonus')
+      .map((rule) => ({
+        label: rule.label || effect.name || 'Armor bonus',
+        value: Number(rule.value || 0),
+      })));
 }
 
 function getTempHpFromEffects(effects = []) {
@@ -1071,6 +1162,7 @@ function resolveRuleValue(value, effect = {}) {
 
 function buildSpellArmorBreakdown(effects = []) {
   return normalizeEffects(effects)
+    .filter((effect) => !isEquipmentEffect(effect))
     .flatMap((effect) => (effect.rules_effects || [])
       .filter((rule) => rule.target === 'armor_class_bonus')
       .map((rule) => ({

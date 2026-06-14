@@ -1,11 +1,42 @@
 # Hallucinated Dungeons QA Handoff
 
-Date: 2026-06-13
+Date: 2026-06-14
 QA thread role: read-only QA, no development changes.
 
 ## Summary
 
-Latest production retest of `c0b801b Fix rogue Cunning Action routing` shows the main natural-language Rogue fixes are working: natural bonus-action Hide and Dash now route to Cunning Action, and the exhausted Cunning Action blocker correctly names Bonus Action. Remaining blockers: QA Rogue combat is using stale Fighter AC 19 despite the Rogue sheet showing Leather Armor/no active effects, Hidden disadvantage is still not shown on enemy attacks, and a follow-up after normal Action Disengage still incorrectly advertises Bonus Action availability.
+Latest production retest of `acfc493 Fix stale active character defenses` partially passed. Hidden disadvantage is now shown/applied, and the post-Disengage turn summary no longer advertises Bonus Action after it is spent. The stale AC/equipment defect is improved but not fixed: Rules now names Rogue sources, but still reports `Leather Armor 11 + DEX +3 = 19`, and creature attacks still resolve against AC 19 instead of the Rogue's expected leather armor AC.
+
+## Latest QA Pass - 2026-06-14 Stale Defense Fix Retest `acfc493`
+
+Scope:
+
+- Verified latest app-code commit under test: `acfc493 Fix stale active character defenses`.
+- Rechecked production frontend at `https://hallucinated-dungeons.vercel.app/` after reload.
+- Continued with visible `QA Rogue`, Level 2 Human Rogue, in the existing combat scene.
+- No app code changes were made by QA.
+
+Automated checks:
+
+- Server `npm.cmd test`: PASS, `475/475`.
+- Client `npm.cmd run lint`: PASS.
+- `git diff --check acfc493^ acfc493`: PASS.
+
+Verified fixed / passed in production:
+
+- P2 Hidden disadvantage display/application: PASS/FIXED. After successful Cunning Action Hide, the enemy attack now displayed `rolls 20/20 with disadvantage, using 20+3 = 23 vs AC 19 (disadvantage: Hidden target)`.
+- P2 post-Disengage action summary: PASS/FIXED. After Cunning Action Dash spent Bonus Action, then `I use Cunning Action to Disengage too.` resolved as normal Action Disengage, the summary now says `60 feet of movement remain. You can move or end your turn.` It no longer advertises Bonus Action.
+- Natural Cunning Action Dash regression stayed fixed: PASS. `I use my bonus action to dash away from the hostile shape.` still routes to Cunning Action Dash and says `use your Action`.
+
+Still failing / new findings for DEV:
+
+- P1 Rogue AC/equipment context is still wrong in production. Active sheet shows `QA Rogue`, `Human Rogue - Level 2`, no active effects, and `Equipped Defenses: Leather Armor` (`Base AC 11 + full DEX modifier`). But exact Rules query answered `Your exact current AC is 19` with sources `Leather Armor: base AC 11`, `DEX modifier: +3`, `Total AC: 11 + 3 = 19`. This is now using Rogue source labels, but the arithmetic/result are still impossible.
+- P1 creature attacks still resolve against AC 19. Fresh enemy attack after reload: `First Hostile Shape That Comes Close uses weapon attack: rolls 20/20 with disadvantage, using 20+3 = 23 vs AC 19 (disadvantage: Hidden target). Critical hit. Hit for 4 damage. QA Rogue: (9 -> 5 HP).`
+- P2 old Rules-panel history still shows stale Fighter AC explanations in the transcript, but the fresh exact query is more important: current answer uses Rogue source labels with wrong total. The old transcript pollution may remain confusing for players, but the active bug is the current AC value/math.
+
+Current recommendation:
+
+- Treat Hidden disadvantage and Disengage summary as production-passed. Keep `QA Rogue` AC as the active blocker. The fix appears to have changed source selection from Fighter gear to Rogue gear, but the derived AC value is still stuck at 19. The math is wearing a fake mustache: `11 + 3` should not equal `19`.
 
 ## Latest QA Pass - 2026-06-13 Rogue Cunning Action Fix Retest `c0b801b`
 
