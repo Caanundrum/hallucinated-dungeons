@@ -880,6 +880,16 @@ function CharacterSheetModal({ character, content, levelUpBusy, onClose, onLevel
     cantrips: (choice.cantrips || []).map(spellName),
     spell: choice.spell ? spellName(choice.spell) : '',
   }));
+  const resourceRows = Object.entries(resources)
+    .filter(([key, value]) => (
+      key !== 'spell_uses'
+      && key !== 'hit_dice'
+      && value
+      && typeof value === 'object'
+      && !Array.isArray(value)
+      && value.remaining !== undefined
+      && value.max !== undefined
+    ));
 
   return (
     <div className="sheet-backdrop" role="dialog" aria-modal="true" aria-label="Character sheet">
@@ -1083,6 +1093,18 @@ function CharacterSheetModal({ character, content, levelUpBusy, onClose, onLevel
                     row.cantrips.length ? `Cantrips: ${(magicInitiate[row.source]?.cantrips || []).map(spellSummary).join(' | ')}` : null,
                     row.spell ? `Level 1: ${spellSummary(magicInitiate[row.source]?.spell)}` : null,
                   ].filter(Boolean).join('; ')}</span>
+                </div>
+              ))}
+            </section>
+          )}
+
+          {resourceRows.length > 0 && (
+            <section className="sheet-section">
+              <h3>Resources</h3>
+              {resourceRows.map(([key, resource]) => (
+                <div key={key} className="sheet-line">
+                  <strong>{resource.name || titleCase(key)}</strong>
+                  <span>{resource.remaining}/{resource.max} until {String(resource.reset || 'rest').replaceAll('_', ' ')}</span>
                 </div>
               ))}
             </section>

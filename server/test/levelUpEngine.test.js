@@ -287,6 +287,99 @@ test('applying monk level 2 adds Focus resources and unarmored movement speed', 
   assert(result.characterSheet.features.some((feature) => feature.name === "Monk's Focus"));
 });
 
+test('cleric and druid level 2 previews are apply-ready with their class resources', () => {
+  const clericPreview = getLevelUpPreview(baseSheet({
+    identity: {
+      class: 'cleric',
+      class_name: 'Cleric',
+      experience_points: 300,
+      level_up_available: true,
+    },
+    spellcasting: {
+      ability: 'wis',
+      cantrips_known: ['guidance', 'sacred_flame', 'thaumaturgy'],
+      spells_prepared: ['bless', 'cure_wounds', 'detect_magic', 'guiding_bolt'],
+      slots: { 1: 2 },
+    },
+    progression: { experience_points: 300 },
+  }), getContentBundle());
+  const druidPreview = getLevelUpPreview(baseSheet({
+    identity: {
+      class: 'druid',
+      class_name: 'Druid',
+      experience_points: 300,
+      level_up_available: true,
+    },
+    spellcasting: {
+      ability: 'wis',
+      cantrips_known: ['druidcraft', 'produce_flame'],
+      spells_prepared: ['cure_wounds', 'entangle', 'faerie_fire', 'thunderwave'],
+      always_prepared_spells: ['speak_with_animals'],
+      slots: { 1: 2 },
+    },
+    progression: { experience_points: 300 },
+  }), getContentBundle());
+
+  assert.equal(clericPreview.canApply, true);
+  assert.deepEqual(clericPreview.features.map((feature) => feature.name), ['Channel Divinity']);
+  assert.equal(clericPreview.resources.channel_divinity.max, 2);
+  assert.equal(clericPreview.spellcasting.slots[1], 3);
+  assert.equal(druidPreview.canApply, true);
+  assert.deepEqual(druidPreview.features.map((feature) => feature.name), ['Wild Shape', 'Wild Companion']);
+  assert.equal(druidPreview.resources.wild_shape.max, 2);
+  assert.equal(druidPreview.spellcasting.slots[1], 3);
+});
+
+test('applying cleric and druid level 2 records Channel Divinity and Wild Shape resources', () => {
+  const cleric = applyLevelUp({
+    characterSheet: baseSheet({
+      identity: {
+        class: 'cleric',
+        class_name: 'Cleric',
+        experience_points: 300,
+        level_up_available: true,
+      },
+      spellcasting: {
+        ability: 'wis',
+        cantrips_known: ['guidance', 'sacred_flame', 'thaumaturgy'],
+        spells_prepared: ['bless', 'cure_wounds', 'detect_magic', 'guiding_bolt'],
+        slots: { 1: 2 },
+      },
+      progression: { experience_points: 300 },
+    }),
+    content: getContentBundle(),
+  });
+  const druid = applyLevelUp({
+    characterSheet: baseSheet({
+      identity: {
+        class: 'druid',
+        class_name: 'Druid',
+        experience_points: 300,
+        level_up_available: true,
+      },
+      spellcasting: {
+        ability: 'wis',
+        cantrips_known: ['druidcraft', 'produce_flame'],
+        spells_prepared: ['cure_wounds', 'entangle', 'faerie_fire', 'thunderwave'],
+        always_prepared_spells: ['speak_with_animals'],
+        slots: { 1: 2 },
+      },
+      progression: { experience_points: 300 },
+    }),
+    content: getContentBundle(),
+  });
+
+  assert.equal(cleric.ok, true);
+  assert.equal(cleric.characterSheet.resources.channel_divinity.remaining, 2);
+  assert.equal(cleric.characterSheet.spellcasting.prepared_spells_count, 5);
+  assert(cleric.characterSheet.features.some((feature) => feature.name === 'Channel Divinity'));
+  assert.equal(druid.ok, true);
+  assert.equal(druid.characterSheet.resources.wild_shape.remaining, 2);
+  assert.equal(druid.characterSheet.spellcasting.prepared_spells_count, 5);
+  assert(druid.characterSheet.features.some((feature) => feature.name === 'Wild Shape'));
+  assert(druid.characterSheet.features.some((feature) => feature.name === 'Wild Companion'));
+});
+
 test('fixed HP increase includes per-level HP bonuses', () => {
   const hp = getFixedHpIncrease(baseSheet({
     active_effects: [{ target: 'max_hp_per_level_bonus', value: 2 }],

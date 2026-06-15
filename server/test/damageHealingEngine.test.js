@@ -51,6 +51,17 @@ test('applies resistance, vulnerability, immunity, and temporary HP in one place
   assert.equal(immune.target.hp, 12);
 });
 
+test('damage clears conditions that end when the target is damaged', () => {
+  const result = applyDamage({
+    target: { hp: 12, max_hp: 12, conditions: ['turn_undead', 'poisoned'] },
+    amount: 4,
+    damageType: 'radiant',
+  });
+
+  assert.equal(result.target.hp, 8);
+  assert.deepEqual(result.target.conditions, ['poisoned']);
+});
+
 test('healing caps at max HP and temporary HP keeps the higher value', () => {
   const healed = applyHealing({ target: { hp: 3, max_hp: 10 }, amount: 12 });
   const temp = applyTemporaryHp({ target: { hp: 10, max_hp: 10, temp_hp: 4 }, amount: 2 });

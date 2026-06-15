@@ -184,6 +184,22 @@ test('builds Fighter Action Surge resource starting at level 2', () => {
   assert.equal(fighter.action_surge.reset, 'short_rest');
 });
 
+test('builds Cleric Channel Divinity and Druid Wild Shape resources starting at level 2', () => {
+  const cleric = buildResourceState({
+    identity: { class: 'cleric', level: 2 },
+    derived_stats: { proficiency_bonus: 2 },
+  });
+  const druid = buildResourceState({
+    identity: { class: 'druid', level: 2 },
+    derived_stats: { proficiency_bonus: 2 },
+  });
+
+  assert.equal(cleric.channel_divinity.remaining, 2);
+  assert.equal(cleric.channel_divinity.reset, 'short_rest');
+  assert.equal(druid.wild_shape.remaining, 2);
+  assert.equal(druid.wild_shape.reset, 'short_rest');
+});
+
 test('builds level 2 Monk Focus resources and restores Focus Points on short rest', () => {
   const monk = {
     identity: { class: 'monk', level: 2 },

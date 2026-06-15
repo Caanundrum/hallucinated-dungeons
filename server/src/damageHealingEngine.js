@@ -1,5 +1,7 @@
 const { rollDie } = require('./dice');
 
+const DAMAGE_BREAKS_CONDITIONS = new Set(['turn_undead', 'sleep', 'asleep']);
+
 function rollDamageFormula(formula = '1d6', rollDie = defaultRollDie, { crit = false, spellMod = 0, rerollOnes = false, minimumDieRoll = null } = {}) {
   const normalized = String(formula || '1')
     .replace(/\s+/g, '')
@@ -46,6 +48,7 @@ function applyDamage({ target = {}, amount = 0, damageType = null, source = null
     ...target,
     temp_hp: Math.max(0, beforeTempHp - absorbed),
     hp: Math.max(0, beforeHp - hpDamage),
+    conditions: adjustedAmount > 0 ? removeDamageBrokenConditions(target.conditions) : target.conditions,
   };
   return {
     target: nextTarget,
@@ -61,6 +64,17 @@ function applyDamage({ target = {}, amount = 0, damageType = null, source = null
     source,
     adjustment,
   };
+}
+
+function removeDamageBrokenConditions(conditions = []) {
+  return (conditions || []).filter((condition) => !DAMAGE_BREAKS_CONDITIONS.has(normalizeDamageBreakCondition(condition)));
+}
+
+function normalizeDamageBreakCondition(condition = '') {
+  if (condition && typeof condition === 'object' && !Array.isArray(condition)) {
+    return normalizeDamageBreakCondition(condition.id || condition.condition || condition.name);
+  }
+  return String(condition || '').toLowerCase().trim().replace(/[\s:=-]+/g, '_');
 }
 
 function applyHealing({ target = {}, amount = 0, maxHp = null } = {}) {

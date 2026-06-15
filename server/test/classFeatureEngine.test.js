@@ -10,8 +10,9 @@ const { resolveFeatureAction } = require('../src/classFeatureEngine');
 function sheet(classId, overrides = {}) {
   return {
     identity: { name: 'Ari', class: classId, level: 1 },
-    abilities: { modifiers: { str: 3, dex: 1, con: 2, cha: 3 } },
-    derived_stats: { hp: 12, max_hp: 12, armor_class: 16, proficiency_bonus: 2 },
+    abilities: { modifiers: { str: 3, dex: 1, con: 2, wis: 3, cha: 3 } },
+    spellcasting: { ability: 'wis' },
+    derived_stats: { hp: 12, max_hp: 12, armor_class: 16, proficiency_bonus: 2, spell_save_dc: 13 },
     ...overrides,
   };
 }
@@ -220,6 +221,176 @@ test('Innate Sorcery creates spell DC and spell attack advantage effects', () =>
   assert.equal(result.worldState.player_stats.resources.innate_sorcery.remaining, 1);
   assert.equal(rules.some((rule) => rule.target === 'spell_save_dc_bonus'), true);
   assert.equal(rules.some((rule) => rule.target === 'spell_attack_advantage'), true);
+});
+
+test('Divine Spark healing spends Channel Divinity and restores HP', () => {
+  const result = resolveFeatureAction({
+    message: 'I use Divine Spark to heal myself.',
+    worldState: combatWorld({
+      player_stats: {
+        hp: 4,
+        max_hp: 12,
+        resources: {
+          channel_divinity: { name: 'Channel Divinity', remaining: 2, max: 2, reset: 'short_rest' },
+        },
+      },
+    }),
+    characterSheet: sheet('cleric', {
+      identity: { name: 'Ari', class: 'cleric', level: 2 },
+    }),
+    rollDie: sequenceRolls([5]),
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.player_stats.resources.channel_divinity.remaining, 1);
+  assert.equal(result.worldState.player_stats.hp, 12);
+  assert.equal(result.worldState.combat_state.turn_resources.action_available, false);
+  assert.match(result.reply, /Divine Spark/);
+});
+
+test('Divine Spark damage blocks explicit absent targets instead of retargeting', () => {
+  const result = resolveFeatureAction({
+    message: 'I use Divine Spark to blast the dragon.',
+    worldState: combatWorld({
+      player_stats: {
+        hp: 12,
+        max_hp: 12,
+        resources: {
+          channel_divinity: { name: 'Channel Divinity', remaining: 2, max: 2, reset: 'short_rest' },
+        },
+      },
+    }),
+    characterSheet: sheet('cleric', {
+      identity: { name: 'Ari', class: 'cleric', level: 2 },
+    }),
+    rollDie: sequenceRolls([3, 5]),
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.player_stats.resources.channel_divinity.remaining, 2);
+  assert.equal(result.worldState.combat_state.turn_resources, undefined);
+  assert.equal(result.worldState.combat_state.combatants[1].hp, 8);
+  assert.match(result.reply, /valid creature target/);
+});
+
+test('Divine Spark damages an established combat target after a failed CON save', () => {
+  const result = resolveFeatureAction({
+    message: 'I use Divine Spark to blast the Goblin with radiant energy.',
+    worldState: combatWorld({
+      player_stats: {
+        hp: 12,
+        max_hp: 12,
+        resources: {
+          channel_divinity: { name: 'Channel Divinity', remaining: 2, max: 2, reset: 'short_rest' },
+        },
+      },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', hp: 12, max_hp: 12, ac: 16, is_player: true },
+          { name: 'Goblin', hp: 12, max_hp: 12, ac: 12, is_player: false },
+        ],
+      },
+    }),
+    characterSheet: sheet('cleric', {
+      identity: { name: 'Ari', class: 'cleric', level: 2 },
+    }),
+    rollDie: sequenceRolls([3, 5]),
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.player_stats.resources.channel_divinity.remaining, 1);
+  assert.equal(result.worldState.combat_state.combatants[1].hp, 4);
+  assert.match(result.reply, /Save fails/);
+});
+
+test('Turn Undead applies turn_undead condition to failed undead saves', () => {
+  const result = resolveFeatureAction({
+    message: 'I use Turn Undead.',
+    worldState: combatWorld({
+      player_stats: {
+        hp: 12,
+        max_hp: 12,
+        resources: {
+          channel_divinity: { name: 'Channel Divinity', remaining: 2, max: 2, reset: 'short_rest' },
+        },
+      },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', hp: 12, max_hp: 12, ac: 16, is_player: true },
+          { name: 'Skeleton', creature_type: 'undead', hp: 8, max_hp: 8, ac: 13, saves: { wis: 0 }, is_player: false },
+        ],
+      },
+    }),
+    characterSheet: sheet('cleric', {
+      identity: { name: 'Ari', class: 'cleric', level: 2 },
+    }),
+    rollDie: sequenceRolls([4]),
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.player_stats.resources.channel_divinity.remaining, 1);
+  assert(result.worldState.combat_state.combatants[1].conditions.includes('turn_undead'));
+  assert(result.worldState.active_effects.some((effect) => effect.id === 'turn_undead'));
+});
+
+test('Wild Shape spends Wild Shape, adds temp HP, and tracks the beast form', () => {
+  const result = resolveFeatureAction({
+    message: 'I turn into a wolf.',
+    worldState: combatWorld({
+      player_stats: {
+        hp: 12,
+        max_hp: 12,
+        resources: {
+          wild_shape: { name: 'Wild Shape', remaining: 2, max: 2, reset: 'short_rest' },
+        },
+      },
+    }),
+    characterSheet: sheet('druid', {
+      identity: { name: 'Ari', class: 'druid', level: 2 },
+    }),
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.player_stats.resources.wild_shape.remaining, 1);
+  assert.equal(result.worldState.player_stats.temp_hp, 2);
+  assert.equal(result.worldState.player_stats.wild_shape.form, 'wolf');
+  assert.equal(result.worldState.combat_state.turn_resources.bonus_action_available, false);
+  assert(result.worldState.active_effects.some((effect) => effect.id === 'wild_shape'));
+});
+
+test('Wild Companion spends a Wild Shape use and adds a familiar to scene state', () => {
+  const result = resolveFeatureAction({
+    message: 'I use Wild Companion to cast Find Familiar.',
+    worldState: combatWorld({
+      player_stats: {
+        hp: 12,
+        max_hp: 12,
+        resources: {
+          wild_shape: { name: 'Wild Shape', remaining: 2, max: 2, reset: 'short_rest' },
+        },
+      },
+      scene_presence: {
+        exact_location: 'Lantern Bridge',
+        present_npcs: [],
+        present_objects: [],
+      },
+    }),
+    characterSheet: sheet('druid', {
+      identity: { name: 'Ari', class: 'druid', level: 2 },
+    }),
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.player_stats.resources.wild_shape.remaining, 1);
+  assert(result.worldState.player_stats.companions.some((companion) => companion.id === 'wild_companion_familiar'));
+  assert(result.worldState.scene_presence.present_npcs.includes('familiar'));
+  assert.equal(result.worldState.combat_state.turn_resources.action_available, false);
 });
 
 test('Bardic Inspiration requires another present creature target', () => {

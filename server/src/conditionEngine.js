@@ -5,6 +5,7 @@ const TURN_BLOCKING_CONDITIONS = new Set([
   'sleep',
   'asleep',
   'stunned',
+  'turn_undead',
   'unconscious',
 ]);
 

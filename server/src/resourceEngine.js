@@ -37,6 +37,18 @@ const RESOURCE_DEFINITIONS = {
     reset: 'long_rest',
     die: '1d6',
   },
+  channel_divinity: {
+    name: 'Channel Divinity',
+    remaining: 2,
+    max: 2,
+    reset: 'short_rest',
+  },
+  wild_shape: {
+    name: 'Wild Shape',
+    remaining: 2,
+    max: 2,
+    reset: 'short_rest',
+  },
   focus_points: {
     name: 'Focus Points',
     reset: 'short_rest',
@@ -349,6 +361,8 @@ function applyClassResourceDefaults(resources, characterSheet = {}, worldResourc
     const max = Math.max(1, Number(abilityMods.cha || 0));
     defaults.bardic_inspiration = { ...RESOURCE_DEFINITIONS.bardic_inspiration, remaining: max, max };
   }
+  if (classId === 'cleric' && level >= 2) defaults.channel_divinity = RESOURCE_DEFINITIONS.channel_divinity;
+  if (classId === 'druid' && level >= 2) defaults.wild_shape = RESOURCE_DEFINITIONS.wild_shape;
   if (classId === 'monk' && level >= 2) {
     defaults.focus_points = { ...RESOURCE_DEFINITIONS.focus_points, remaining: level, max: level };
     defaults.uncanny_metabolism = RESOURCE_DEFINITIONS.uncanny_metabolism;

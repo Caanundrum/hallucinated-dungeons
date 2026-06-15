@@ -3,15 +3,20 @@ const { abilityMod } = require('./characterValidator');
 
 const SUPPORTED_LEVEL_UP_MECHANICS = new Set([
   'action_surge',
+  'channel_divinity',
   'cunning_action',
   'danger_sense',
+  'divine_spark',
   'expertise_level_2',
   'focus_points',
   'jack_of_all_trades',
   'reckless_attack',
   'tactical_mind',
+  'turn_undead',
   'unarmored_movement',
   'uncanny_metabolism',
+  'wild_companion',
+  'wild_shape',
 ]);
 
 function getLevelUpPreview(characterSheet = {}, content = getContentBundle(), options = {}) {
