@@ -2932,6 +2932,63 @@ test('declared paired Light weapons resolve a Nick extra attack inside the Attac
   assert.match(result.reply, /extra attack.*Dagger/i);
 });
 
+test('level 2 Monk spends Focus for Flurry of Blows without consuming the Action', () => {
+  const monkSheet = {
+    identity: { name: 'QA Monk', class: 'monk', class_name: 'Monk', level: 2 },
+    abilities: {
+      modifiers: { str: 1, dex: 4, con: 2, wis: 2 },
+    },
+    derived_stats: {
+      hp: 20,
+      max_hp: 20,
+      armor_class: 16,
+      proficiency_bonus: 2,
+      speed: 40,
+    },
+    resources: {
+      focus_points: { name: 'Focus Points', remaining: 2, max: 2, reset: 'short_rest' },
+    },
+  };
+  const result = adjudicate({
+    message: 'I use Flurry of Blows on the Goblin.',
+    worldState: worldState({
+      player_stats: {
+        hp: 20,
+        max_hp: 20,
+        armor_class: 16,
+        resources: {
+          focus_points: { name: 'Focus Points', remaining: 2, max: 2, reset: 'short_rest' },
+        },
+      },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        turn_resources: {
+          action_available: true,
+          bonus_action_available: true,
+          reaction_available: true,
+          movement_remaining: 40,
+          used: [],
+        },
+        combatants: [
+          { name: 'QA Monk', hp: 20, max_hp: 20, ac: 16, is_player: true },
+          { name: 'Goblin', hp: 20, max_hp: 20, ac: 12, is_player: false },
+        ],
+      },
+    }),
+    characterSheet: monkSheet,
+    rollDie: sequenceRolls([12, 4, 13, 5]),
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.player_stats.resources.focus_points.remaining, 1);
+  assert.equal(result.worldState.combat_state.turn_resources.action_available, true);
+  assert.equal(result.worldState.combat_state.turn_resources.bonus_action_available, false);
+  assert.match(result.reply, /Flurry strike 1/);
+  assert.match(result.reply, /Flurry strike 2/);
+});
+
 test('Two-Weapon Fighting restores the ability modifier and spends the Light extra attack Bonus Action', () => {
   const result = adjudicate({
     message: 'Attack the Cultist with both weapons.',

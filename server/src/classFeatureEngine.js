@@ -1,5 +1,7 @@
 const {
+  grantMovement,
   grantActionSurgeAction,
+  setTurnFlag,
   spendTurnResource,
 } = require('./actionEconomy');
 const { rollDie } = require('./dice');
@@ -27,6 +29,9 @@ function resolveFeatureAction({ message = '', worldState = {}, characterSheet = 
   if (intent.id === 'lay_on_hands') return resolveLayOnHands({ message, worldState, characterSheet });
   if (intent.id === 'innate_sorcery') return resolveInnateSorcery({ worldState, characterSheet });
   if (intent.id === 'bardic_inspiration') return resolveBardicInspiration({ message, worldState, characterSheet });
+  if (intent.id === 'patient_defense') return resolvePatientDefense({ worldState, characterSheet });
+  if (intent.id === 'step_of_the_wind') return resolveStepOfTheWind({ worldState, characterSheet });
+  if (intent.id === 'uncanny_metabolism') return resolveUncannyMetabolism({ worldState, characterSheet, rollDie });
   if (intent.id === 'arcane_recovery') {
     return {
       handled: true,
@@ -48,6 +53,9 @@ function getFeatureIntent(message = '') {
   if (/\blay\s+on\s+hands\b/.test(text)) return { id: 'lay_on_hands' };
   if (/\binnate\s+sorcery\b/.test(text)) return { id: 'innate_sorcery' };
   if (/\bbardic\s+inspiration\b/.test(text)) return { id: 'bardic_inspiration' };
+  if (/\bpatient\s+defense\b|\bfocus(?:ed)?\s+dodge\b/.test(text)) return { id: 'patient_defense' };
+  if (/\bstep\s+of\s+the\s+wind\b|\bfocus(?:ed)?\s+(?:dash|disengage)\b/.test(text)) return { id: 'step_of_the_wind' };
+  if (/\buncanny\s+metabolism\b/.test(text)) return { id: 'uncanny_metabolism' };
   if (/\barcane\s+recovery\b/.test(text)) return { id: 'arcane_recovery' };
   return null;
 }
@@ -277,6 +285,122 @@ function resolveBardicInspiration({ message = '', worldState = {}, characterShee
     worldState: nextState,
     reply: `You grant **Bardic Inspiration** to ${target} as a Bonus Action. They carry a d6 that can help a failed d20 test if it is enough to matter. Uses left: ${remainingResourceText(nextState, characterSheet, 'bardic_inspiration')}.`,
   };
+}
+
+function resolvePatientDefense({ worldState = {}, characterSheet = {} } = {}) {
+  const requirement = requireMonkFocus('Patient Defense', worldState, characterSheet);
+  if (requirement) return requirement;
+
+  const spent = spendFeatureCost({
+    worldState,
+    characterSheet,
+    actionResource: 'bonus_action',
+    actionLabel: 'Patient Defense',
+    resource: 'focus_points',
+  });
+  if (!spent.ok) return spent.result;
+
+  const dodging = setTurnFlag(spent.worldState, 'dodging', true, characterSheet);
+  return {
+    handled: true,
+    logType: 'feature_patient_defense',
+    worldState: dodging,
+    reply: `You spend 1 Focus Point for **Patient Defense** and take the Dodge action as a Bonus Action. Focus Points left: ${remainingResourceText(dodging, characterSheet, 'focus_points')}.`,
+  };
+}
+
+function resolveStepOfTheWind({ worldState = {}, characterSheet = {} } = {}) {
+  const requirement = requireMonkFocus('Step of the Wind', worldState, characterSheet);
+  if (requirement) return requirement;
+
+  const spent = spendFeatureCost({
+    worldState,
+    characterSheet,
+    actionResource: 'bonus_action',
+    actionLabel: 'Step of the Wind',
+    resource: 'focus_points',
+  });
+  if (!spent.ok) return spent.result;
+
+  const speed = Number(characterSheet.derived_stats?.speed || spent.worldState.player_stats?.speed || 30);
+  const disengaged = setTurnFlag(spent.worldState, 'disengaged', true, characterSheet);
+  const dashed = grantMovement(disengaged, speed, 'Step of the Wind', characterSheet);
+  return {
+    handled: true,
+    logType: 'feature_step_of_the_wind',
+    worldState: dashed.worldState,
+    reply: `You spend 1 Focus Point for **Step of the Wind**. As a Bonus Action, you Dash and Disengage; your jump distance is doubled for the turn. Focus Points left: ${remainingResourceText(dashed.worldState, characterSheet, 'focus_points')}.`,
+  };
+}
+
+function resolveUncannyMetabolism({ worldState = {}, characterSheet = {}, rollDie = defaultRollDie } = {}) {
+  if (!isClass(characterSheet, 'monk')) return wrongClass('Uncanny Metabolism', 'Monk', worldState);
+  if (getCharacterLevel(characterSheet) < 2) {
+    return {
+      handled: true,
+      logType: 'feature_uncanny_metabolism_level_required',
+      worldState,
+      reply: 'Uncanny Metabolism is a level 2 Monk feature. The body has not learned that particular impossible trick yet.',
+    };
+  }
+  if (!worldState.combat_state?.active) {
+    return {
+      handled: true,
+      logType: 'feature_uncanny_metabolism_combat_required',
+      worldState,
+      reply: 'Uncanny Metabolism triggers when a fight begins. Start or enter combat first, then the monk engine can do its unsettlingly healthy thing.',
+    };
+  }
+
+  const resources = buildResourceState(characterSheet, worldState);
+  if (Number(resources.uncanny_metabolism?.remaining || 0) <= 0) {
+    return {
+      handled: true,
+      logType: 'feature_uncanny_metabolism_unavailable',
+      worldState: mergeWorldResources(worldState, resources),
+      reply: 'Uncanny Metabolism has already been used and returns after a Long Rest.',
+    };
+  }
+
+  const spent = spendResource({ worldState, characterSheet, resource: 'uncanny_metabolism' });
+  const refreshedResources = buildResourceState(characterSheet, spent.worldState);
+  if (refreshedResources.focus_points) {
+    refreshedResources.focus_points = {
+      ...refreshedResources.focus_points,
+      remaining: Number(refreshedResources.focus_points.max || 0),
+    };
+  }
+  const refreshedState = mergeWorldResources(spent.worldState, refreshedResources);
+  const level = getCharacterLevel(characterSheet);
+  const healingRoll = rollDamageFormula(`1d6+${level}`, rollDie);
+  const healed = healActiveCharacter(refreshedState, characterSheet, healingRoll.total);
+  return {
+    handled: true,
+    logType: 'feature_uncanny_metabolism',
+    worldState: healed.worldState,
+    reply: `You use **Uncanny Metabolism**. Your Focus Points refill to ${Number(refreshedResources.focus_points?.remaining || 0)}/${Number(refreshedResources.focus_points?.max || 0)}, and you regain ${healed.applied} HP (${healingRoll.rolls.join(' + ')} + ${level}). Uses left: ${remainingResourceText(healed.worldState, characterSheet, 'uncanny_metabolism')}.`,
+  };
+}
+
+function requireMonkFocus(feature, worldState = {}, characterSheet = {}) {
+  if (!isClass(characterSheet, 'monk')) return wrongClass(feature, 'Monk', worldState);
+  if (getCharacterLevel(characterSheet) < 2) {
+    return {
+      handled: true,
+      logType: 'feature_monk_focus_level_required',
+      worldState,
+      reply: `${feature} requires Monk level 2. At level 1, Focus Points are still politely waiting offstage.`,
+    };
+  }
+  if (!worldState.combat_state?.active) {
+    return {
+      handled: true,
+      logType: 'feature_monk_focus_combat_required',
+      worldState,
+      reply: `${feature} matters during combat turns. Outside combat, move and act normally unless the scene creates a specific challenge.`,
+    };
+  }
+  return null;
 }
 
 function spendFeatureCost({ worldState = {}, characterSheet = {}, actionResource, actionLabel, resource, amount = 1 } = {}) {

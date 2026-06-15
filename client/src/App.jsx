@@ -543,11 +543,11 @@ function App() {
     socket.emit('get_level_up_preview', { sessionId, sessionToken });
   }, [sessionId, sessionToken]);
 
-  const handleConfirmLevelUp = useCallback(() => {
-    if (!sessionId || !sessionToken || !levelUpPreview?.canApply) return;
+  const handleConfirmLevelUp = useCallback((payload = {}) => {
+    if (!sessionId || !sessionToken || !levelUpPreview?.canLevelUp) return;
     setLevelUpBusy(true);
     setLevelUpError(null);
-    socket.emit('level_up_character', { sessionId, sessionToken, payload: { hpMethod: 'fixed' } });
+    socket.emit('level_up_character', { sessionId, sessionToken, payload: { hpMethod: 'fixed', ...payload } });
   }, [levelUpPreview, sessionId, sessionToken]);
 
   const handleCloseLevelUp = useCallback(() => {
@@ -827,6 +827,7 @@ function App() {
       )}
       {(levelUpPreview || levelUpError) && (
         <LevelUpModal
+          key={`${levelUpPreview?.classId || 'error'}-${levelUpPreview?.currentLevel || 0}-${levelUpPreview?.nextLevel || 0}`}
           preview={levelUpPreview}
           error={levelUpError}
           busy={levelUpBusy}
@@ -1124,10 +1125,45 @@ function CharacterSheetModal({ character, content, levelUpBusy, onClose, onLevel
   );
 }
 
+function buildInitialLevelUpChoices(preview) {
+  const initialSelections = {};
+  for (const choice of preview?.requiredChoices || []) {
+    initialSelections[choice.id] = choice.selected || [];
+  }
+  return initialSelections;
+}
+
 function LevelUpModal({ preview, error, busy, onClose, onConfirm }) {
   const blockers = preview?.blockers || [];
-  const canApply = Boolean(preview?.canApply);
   const canLevelUp = Boolean(preview?.canLevelUp);
+  const requiredChoices = preview?.requiredChoices || [];
+  const [choiceSelections, setChoiceSelections] = useState(() => buildInitialLevelUpChoices(preview));
+  const choiceBlockerTypes = new Set(['required_choice', 'invalid_choice']);
+  const hardBlockers = blockers.filter((entry) => !choiceBlockerTypes.has(entry.type));
+  const choicesComplete = requiredChoices.every((choice) => {
+    const selected = choiceSelections[choice.id] || [];
+    return selected.length === Number(choice.count || 0);
+  });
+  const canApply = Boolean(preview?.canApply || (canLevelUp && hardBlockers.length === 0 && choicesComplete));
+
+  const toggleChoice = (choice, optionId) => {
+    setChoiceSelections((current) => {
+      const selected = current[choice.id] || [];
+      const exists = selected.includes(optionId);
+      const count = Number(choice.count || 0);
+      const nextSelected = exists
+        ? selected.filter((id) => id !== optionId)
+        : [...selected, optionId].slice(Math.max(0, selected.length + 1 - count));
+      return {
+        ...current,
+        [choice.id]: nextSelected,
+      };
+    });
+  };
+
+  const submitLevelUp = () => {
+    onConfirm({ choices: choiceSelections });
+  };
 
   return (
     <div className="sheet-backdrop" role="dialog" aria-modal="true" aria-label="Level up preview">
@@ -1174,6 +1210,37 @@ function LevelUpModal({ preview, error, busy, onClose, onConfirm }) {
               )) : <p className="muted-text">No new feature data for this level.</p>}
             </section>
 
+            {requiredChoices.length > 0 && (
+              <section className="sheet-section">
+                <h3>Level Choices</h3>
+                {requiredChoices.map((choice) => (
+                  <div key={choice.id} className="level-up-choice">
+                    <div className="sheet-line">
+                      <strong>{choice.label || titleCase(choice.id)}</strong>
+                      <span>Choose {choice.count}</span>
+                    </div>
+                    <div className="level-up-choice-grid">
+                      {(choice.options || []).map((option) => {
+                        const selected = (choiceSelections[choice.id] || []).includes(option.id);
+                        return (
+                          <button
+                            type="button"
+                            key={option.id}
+                            className={`choice-card level-up-option${selected ? ' selected' : ''}`}
+                            onClick={() => toggleChoice(choice, option.id)}
+                          >
+                            <strong>{option.name || titleCase(option.id)}</strong>
+                            {option.meta && <small>{option.meta}</small>}
+                            {option.description && <span>{option.description}</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </section>
+            )}
+
             {preview.spellcasting && (
               <section className="sheet-section">
                 <h3>Spellcasting</h3>
@@ -1193,7 +1260,7 @@ function LevelUpModal({ preview, error, busy, onClose, onConfirm }) {
 
             <div className="level-up-actions">
               <button type="button" className="secondary-btn" onClick={onClose}>Not Now</button>
-              <button type="button" className="primary-btn" onClick={onConfirm} disabled={!canApply || busy}>
+              <button type="button" className="primary-btn" onClick={submitLevelUp} disabled={!canApply || busy}>
                 {busy ? 'Applying...' : canApply ? 'Apply Level Up' : 'Rules Work Needed'}
               </button>
             </div>

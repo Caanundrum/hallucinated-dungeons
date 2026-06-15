@@ -50,6 +50,14 @@
             "label": "Expertise Skills",
             "type": "skill",
             "count": 2
+          },
+          {
+            "id": "prepared_spells",
+            "label": "Prepared Spell",
+            "type": "spell",
+            "count": 1,
+            "class_id": "bard",
+            "max_level": 1
           }
         ],
         "spellcasting": {

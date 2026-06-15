@@ -184,6 +184,30 @@ test('builds Fighter Action Surge resource starting at level 2', () => {
   assert.equal(fighter.action_surge.reset, 'short_rest');
 });
 
+test('builds level 2 Monk Focus resources and restores Focus Points on short rest', () => {
+  const monk = {
+    identity: { class: 'monk', level: 2 },
+    derived_stats: { proficiency_bonus: 2 },
+  };
+  const resources = buildResourceState(monk);
+  const rested = completeShortRestResources({
+    characterSheet: monk,
+    worldState: {
+      player_stats: {
+        resources: {
+          focus_points: { name: 'Focus Points', remaining: 0, max: 2, reset: 'short_rest' },
+          uncanny_metabolism: { name: 'Uncanny Metabolism', remaining: 0, max: 1, reset: 'long_rest' },
+        },
+      },
+    },
+  });
+
+  assert.equal(resources.focus_points.remaining, 2);
+  assert.equal(resources.uncanny_metabolism.remaining, 1);
+  assert.equal(rested.resources.focus_points.remaining, 2);
+  assert.equal(rested.resources.uncanny_metabolism.remaining, 0);
+});
+
 test('short and long rests recover class feature resources', () => {
   const shortRest = completeShortRestResources({
     characterSheet: { identity: { class: 'fighter', level: 1 } },

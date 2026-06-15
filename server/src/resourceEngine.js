@@ -37,6 +37,16 @@ const RESOURCE_DEFINITIONS = {
     reset: 'long_rest',
     die: '1d6',
   },
+  focus_points: {
+    name: 'Focus Points',
+    reset: 'short_rest',
+  },
+  uncanny_metabolism: {
+    name: 'Uncanny Metabolism',
+    remaining: 1,
+    max: 1,
+    reset: 'long_rest',
+  },
   innate_sorcery: {
     name: 'Innate Sorcery',
     remaining: 2,
@@ -338,6 +348,10 @@ function applyClassResourceDefaults(resources, characterSheet = {}, worldResourc
   if (classId === 'bard') {
     const max = Math.max(1, Number(abilityMods.cha || 0));
     defaults.bardic_inspiration = { ...RESOURCE_DEFINITIONS.bardic_inspiration, remaining: max, max };
+  }
+  if (classId === 'monk' && level >= 2) {
+    defaults.focus_points = { ...RESOURCE_DEFINITIONS.focus_points, remaining: level, max: level };
+    defaults.uncanny_metabolism = RESOURCE_DEFINITIONS.uncanny_metabolism;
   }
   if (classId === 'sorcerer') defaults.innate_sorcery = RESOURCE_DEFINITIONS.innate_sorcery;
   if (classId === 'wizard') defaults.arcane_recovery = RESOURCE_DEFINITIONS.arcane_recovery;

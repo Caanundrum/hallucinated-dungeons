@@ -30,9 +30,19 @@ function baseSheet(overrides = {}) {
       modifiers: { str: 3, dex: 0, con: 2, int: -1, wis: 1, cha: 0 },
       ...overrides.abilities,
     },
+    proficiencies: {
+      saving_throws: ['str', 'con'],
+      skills: ['athletics', 'perception', 'persuasion'],
+      tools: [],
+      languages: [],
+      armor: [],
+      weapons: [],
+      ...(overrides.proficiencies || {}),
+    },
     active_effects: overrides.active_effects || [],
     features: overrides.features || [],
     resources: overrides.resources || {},
+    spellcasting: overrides.spellcasting,
     progression: {
       experience_points: overrides.identity?.experience_points ?? 0,
       next_level_xp: 300,
@@ -157,7 +167,7 @@ test('applying barbarian and rogue level 2 records their runtime features', () =
   assert(rogue.characterSheet.features.some((feature) => feature.name === 'Cunning Action'));
 });
 
-test('applying a blocked choice-heavy level returns a preview and does not mutate the sheet', () => {
+test('bard level 2 requires Expertise and prepared spell choices before apply', () => {
   const sheet = baseSheet({
     identity: {
       class: 'bard',
@@ -165,15 +175,116 @@ test('applying a blocked choice-heavy level returns a preview and does not mutat
       experience_points: 300,
       level_up_available: true,
     },
+    abilities: {
+      modifiers: { str: 0, dex: 2, con: 1, int: 0, wis: 1, cha: 3 },
+      final_scores: { str: 10, dex: 14, con: 12, int: 10, wis: 12, cha: 16 },
+    },
+    proficiencies: { skills: ['persuasion', 'performance', 'insight'] },
+    derived_stats: {
+      skill_modifiers: {
+        persuasion: { ability: 'cha', proficient: true, total: 5 },
+        performance: { ability: 'cha', proficient: true, total: 5 },
+        insight: { ability: 'wis', proficient: true, total: 3 },
+        athletics: { ability: 'str', proficient: false, total: 0 },
+      },
+    },
+    spellcasting: {
+      ability: 'cha',
+      cantrips_known: ['minor_illusion', 'vicious_mockery'],
+      prepared_from_choices: ['charm_person', 'cure_wounds', 'dissonant_whispers', 'healing_word'],
+      spells_prepared: ['charm_person', 'cure_wounds', 'dissonant_whispers', 'healing_word'],
+      always_prepared_spells: [],
+      slots: { 1: 2 },
+    },
     progression: { experience_points: 300 },
   });
+  const preview = getLevelUpPreview(sheet, getContentBundle());
   const result = applyLevelUp({ characterSheet: sheet, content: getContentBundle() });
 
+  assert.equal(preview.canLevelUp, true);
+  assert.equal(preview.canApply, false);
+  assert.equal(preview.requiredChoices.length, 2);
+  assert.equal(preview.requiredChoices.find((choice) => choice.id === 'expertise_skills').options.length, 3);
+  assert(preview.requiredChoices.find((choice) => choice.id === 'prepared_spells').options.some((option) => option.id === 'faerie_fire'));
   assert.equal(result.ok, false);
-  assert.equal(result.preview.canLevelUp, true);
-  assert.equal(result.preview.canApply, false);
   assert(result.preview.blockers.some((entry) => entry.type === 'required_choice'));
   assert.equal(sheet.identity.level, 1);
+});
+
+test('applying bard level 2 records Expertise, Jack of All Trades, spell preparation, and slots', () => {
+  const sheet = baseSheet({
+    identity: {
+      class: 'bard',
+      class_name: 'Bard',
+      experience_points: 300,
+      level_up_available: true,
+    },
+    abilities: {
+      modifiers: { str: 0, dex: 2, con: 1, int: 0, wis: 1, cha: 3 },
+      final_scores: { str: 10, dex: 14, con: 12, int: 10, wis: 12, cha: 16 },
+    },
+    proficiencies: { skills: ['persuasion', 'performance', 'insight'] },
+    derived_stats: {
+      skill_modifiers: {
+        persuasion: { ability: 'cha', proficient: true, total: 5 },
+        performance: { ability: 'cha', proficient: true, total: 5 },
+        insight: { ability: 'wis', proficient: true, total: 3 },
+        athletics: { ability: 'str', proficient: false, total: 0 },
+      },
+    },
+    spellcasting: {
+      ability: 'cha',
+      cantrips_known: ['minor_illusion', 'vicious_mockery'],
+      prepared_from_choices: ['charm_person', 'cure_wounds', 'dissonant_whispers', 'healing_word'],
+      spells_prepared: ['charm_person', 'cure_wounds', 'dissonant_whispers', 'healing_word'],
+      always_prepared_spells: [],
+      slots: { 1: 2 },
+    },
+    progression: { experience_points: 300 },
+  });
+  const result = applyLevelUp({
+    characterSheet: sheet,
+    content: getContentBundle(),
+    payload: {
+      choices: {
+        expertise_skills: ['persuasion', 'performance'],
+        prepared_spells: ['faerie_fire'],
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.characterSheet.identity.level, 2);
+  assert.deepEqual(result.characterSheet.expertise_skills, ['persuasion', 'performance']);
+  assert.equal(result.characterSheet.derived_stats.skill_modifiers.persuasion.expertise, true);
+  assert.equal(result.characterSheet.derived_stats.skill_modifiers.persuasion.total, 7);
+  assert.equal(result.characterSheet.derived_stats.skill_modifiers.athletics.jack_of_all_trades, true);
+  assert.equal(result.characterSheet.derived_stats.skill_modifiers.athletics.total, 1);
+  assert.equal(result.characterSheet.spellcasting.prepared_spells_count, 5);
+  assert.equal(result.characterSheet.spellcasting.slots[1], 3);
+  assert(result.characterSheet.spellcasting.spells_prepared.includes('faerie_fire'));
+});
+
+test('applying monk level 2 adds Focus resources and unarmored movement speed', () => {
+  const result = applyLevelUp({
+    characterSheet: baseSheet({
+      identity: {
+        class: 'monk',
+        class_name: 'Monk',
+        experience_points: 300,
+        level_up_available: true,
+      },
+      progression: { experience_points: 300 },
+    }),
+    content: getContentBundle(),
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.characterSheet.identity.level, 2);
+  assert.equal(result.characterSheet.resources.focus_points.remaining, 2);
+  assert.equal(result.characterSheet.resources.uncanny_metabolism.remaining, 1);
+  assert.equal(result.characterSheet.derived_stats.speed, 40);
+  assert(result.characterSheet.features.some((feature) => feature.name === "Monk's Focus"));
 });
 
 test('fixed HP increase includes per-level HP bonuses', () => {

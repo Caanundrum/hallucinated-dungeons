@@ -1588,6 +1588,10 @@ function resolveCombatAction({ message, intent, worldState, characterSheet, curr
     return promptCheck({ intent, worldState, characterSheet, currentTurn, inCombat: true });
   }
 
+  if (isMonkFlurryIntent(message)) {
+    return resolveMonkFlurryOfBlows({ message, worldState, characterSheet, rollDie });
+  }
+
   const readyAction = resolveReadyAction({ message, worldState, characterSheet });
   if (readyAction) return readyAction;
 
@@ -1845,6 +1849,120 @@ function shouldPromptCombatCheck(intent) {
 function shouldPrioritizeCombatCheck(intent = {}) {
   if (!intent.check || !shouldPromptCombatCheck(intent)) return false;
   return isHideActionCheck({ rule_action: intent.ruleAction, skill: intent.check.skill, intent: intent.raw });
+}
+
+function resolveMonkFlurryOfBlows({ message = '', worldState, characterSheet, rollDie }) {
+  if (!isCharacterClass(characterSheet, 'monk')) {
+    return {
+      handled: true,
+      logType: 'referee_monk_flurry_wrong_class',
+      worldState,
+      reply: 'Flurry of Blows is a Monk feature and is not on this character sheet. The referee checked the training montage.',
+    };
+  }
+  if (Number(characterSheet.identity?.level || characterSheet.derived_stats?.level || 1) < 2) {
+    return {
+      handled: true,
+      logType: 'referee_monk_flurry_level_required',
+      worldState,
+      reply: 'Flurry of Blows requires Monk level 2 and Focus Points. Level 1 elbows remain respectable, but less theatrical.',
+    };
+  }
+
+  let combat = cloneCombatState(worldState.combat_state);
+  let target = findCombatTarget(combat, message) || getLivingEnemy(combat);
+  if (!target) {
+    return endCombat(worldState, 'There is no active enemy left for Flurry of Blows. Combat ends before the footwork needs a permit.');
+  }
+
+  const resources = buildResourceState(characterSheet, worldState);
+  if (Number(resources.focus_points?.remaining || 0) <= 0) {
+    return {
+      handled: true,
+      logType: 'referee_monk_flurry_no_focus',
+      worldState: mergeWorldResources(worldState, resources),
+      reply: 'Flurry of Blows needs 1 Focus Point, and you have none left until a Short or Long Rest.',
+    };
+  }
+
+  const spentAction = spendTurnResource(worldState, 'bonus_action', 'Flurry of Blows', characterSheet);
+  if (!spentAction.ok) {
+    return {
+      handled: true,
+      logType: 'referee_action_unavailable',
+      worldState: spentAction.worldState,
+      reply: spentAction.reply,
+    };
+  }
+
+  const spentFocus = spendResource({ worldState: spentAction.worldState, characterSheet, resource: 'focus_points' });
+  let attackState = spentFocus.worldState;
+  combat = cloneCombatState(attackState.combat_state);
+  target = findCombatTarget(combat, message) || getLivingEnemy(combat);
+  const attack = buildUnarmedAttack({ characterSheet, message: `${message} unarmed strike` });
+  if (!attack) {
+    return {
+      handled: true,
+      logType: 'referee_monk_flurry_unavailable',
+      worldState,
+      reply: 'Flurry of Blows needs a valid Unarmed Strike profile, but this character sheet does not currently expose one.',
+    };
+  }
+  const lines = [
+    `You spend 1 Focus Point for **Flurry of Blows** and make two Unarmed Strikes as a Bonus Action. Focus Points left: ${Number(spentFocus.resources.focus_points?.remaining || 0)}.`,
+  ];
+  const consumeEffectIds = [];
+
+  for (let index = 1; index <= 2 && target && Number(target.hp || 0) > 0; index += 1) {
+    const result = resolveExtraWeaponAttackRoll({
+      attack,
+      target,
+      combat,
+      worldState: attackState,
+      characterSheet,
+      message,
+      rollDie,
+      attackLabel: `Flurry strike ${index}`,
+      resultLabel: `Flurry strike ${index}`,
+      actionResource: 'bonus_action',
+      sneakAttackAvailable: false,
+      savageAttackerAvailable: index === 1,
+      applyMastery: false,
+    });
+    combat = result.combat;
+    attackState = result.worldState;
+    lines.push(...result.lines);
+    consumeEffectIds.push(...result.consumeEffectIds);
+    target = findCombatTarget(combat, target.name) || getLivingEnemy(combat);
+  }
+
+  let nextState = {
+    ...attackState,
+    combat_state: combat,
+  };
+  if (consumeEffectIds.length) {
+    nextState = consumeActiveEffects(nextState, consumeEffectIds, characterSheet);
+  }
+  if (!getLivingEnemy(combat)) {
+    return {
+      handled: true,
+      logType: 'referee_monk_flurry',
+      worldState: {
+        ...nextState,
+        combat_state: null,
+        pending_roll: null,
+      },
+      reply: `${lines.join('\n\n')}\n\n**Combat ends.**`,
+    };
+  }
+
+  const continued = continuePlayerTurn(nextState, lines.join('\n\n'), characterSheet);
+  return {
+    handled: true,
+    logType: 'referee_monk_flurry',
+    worldState: continued.worldState,
+    reply: continued.reply,
+  };
 }
 
 function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie }) {
@@ -2353,7 +2471,7 @@ function resolveExtraWeaponAttackRoll({
     const before = Number(target.hp || 0);
     target.hp = Math.max(0, before - totalDamage);
     const damageParts = [
-      `${damage.total} weapon`,
+      `${damage.total} ${attack.isWeapon ? 'weapon' : 'unarmed'}`,
       bonusDamage.total ? bonusDamage.summary : '',
       flatBonuses.length ? flatBonuses.map((bonus) => `${bonus.label} ${formatSigned(bonus.value)}`).join(' + ') : '',
       fightingStyleBonus.total ? `${fightingStyleBonus.label} ${formatSigned(fightingStyleBonus.total)}` : '',
@@ -2868,7 +2986,14 @@ function getCheckModifier(characterSheet, check, worldState = {}) {
   if (skillData) {
     const baseTotal = Number(skillData.total || 0);
     const total = baseTotal + activeTotal + conditionModifier;
-    const baseBreakdown = `${String(skillData.ability || check.ability).toUpperCase()} ${skillData.proficient ? '+ proficiency' : 'only'} = ${formatSigned(baseTotal)}`;
+    const skillBonusLabel = skillData.expertise
+      ? '+ Expertise'
+      : skillData.proficient
+        ? '+ proficiency'
+        : skillData.jack_of_all_trades
+          ? `+ Jack of All Trades ${formatSigned(skillData.jack_bonus)}`
+          : 'only';
+    const baseBreakdown = `${String(skillData.ability || check.ability).toUpperCase()} ${skillBonusLabel} = ${formatSigned(baseTotal)}`;
     return {
       total,
       breakdown: activeBonuses.length || conditionModifier ? `${baseBreakdown}${activeBreakdown}${conditionBreakdown} = ${formatSigned(total)}` : baseBreakdown,
@@ -3532,6 +3657,14 @@ function estimateNarrativeElapsed(message = '', dmReply = '') {
     return { rounds: 1, label: 'moments later' };
   }
   return { rounds: 1, label: 'moments later' };
+}
+
+function isMonkFlurryIntent(message = '') {
+  return /\bflurry\s+of\s+blows\b|\bflurry\s+(?:strike|attack|kick|punch|elbow)\b/i.test(String(message || ''));
+}
+
+function isCharacterClass(characterSheet = {}, classId) {
+  return normalizeId(characterSheet.identity?.class || characterSheet.identity?.class_name) === normalizeId(classId);
 }
 
 function formatSigned(value) {

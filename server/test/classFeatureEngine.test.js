@@ -242,3 +242,91 @@ test('Bardic Inspiration requires another present creature target', () => {
   assert.equal(targeted.worldState.player_stats.resources.bardic_inspiration.remaining, 2);
   assert.equal(targeted.worldState.active_effects[0].target, 'guard');
 });
+
+test('Patient Defense spends Focus and marks the Monk as dodging', () => {
+  const result = resolveFeatureAction({
+    message: 'I use Patient Defense.',
+    worldState: combatWorld({
+      player_stats: {
+        hp: 12,
+        max_hp: 12,
+        resources: {
+          focus_points: { name: 'Focus Points', remaining: 2, max: 2, reset: 'short_rest' },
+        },
+      },
+    }),
+    characterSheet: sheet('monk', {
+      identity: { name: 'Ari', class: 'monk', level: 2 },
+      derived_stats: { hp: 12, max_hp: 12, armor_class: 16, proficiency_bonus: 2, speed: 40 },
+    }),
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.player_stats.resources.focus_points.remaining, 1);
+  assert.equal(result.worldState.combat_state.turn_resources.bonus_action_available, false);
+  assert.equal(result.worldState.combat_state.turn_resources.dodging, true);
+  assert.match(result.reply, /Dodge action as a Bonus Action/);
+});
+
+test('Step of the Wind spends Focus, marks Disengage, and grants movement', () => {
+  const result = resolveFeatureAction({
+    message: 'I use Step of the Wind.',
+    worldState: combatWorld({
+      player_stats: {
+        hp: 12,
+        max_hp: 12,
+        speed: 40,
+        resources: {
+          focus_points: { name: 'Focus Points', remaining: 2, max: 2, reset: 'short_rest' },
+        },
+      },
+    }),
+    characterSheet: sheet('monk', {
+      identity: { name: 'Ari', class: 'monk', level: 2 },
+      derived_stats: { hp: 12, max_hp: 12, armor_class: 16, proficiency_bonus: 2, speed: 40 },
+    }),
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.player_stats.resources.focus_points.remaining, 1);
+  assert.equal(result.worldState.combat_state.turn_resources.bonus_action_available, false);
+  assert.equal(result.worldState.combat_state.turn_resources.disengaged, true);
+  assert.equal(result.worldState.combat_state.turn_resources.movement_remaining, 80);
+  assert.match(result.reply, /Dash and Disengage/);
+});
+
+test('Uncanny Metabolism refills Monk Focus and heals once per long rest', () => {
+  const result = resolveFeatureAction({
+    message: 'I use Uncanny Metabolism.',
+    worldState: combatWorld({
+      player_stats: {
+        hp: 5,
+        max_hp: 20,
+        resources: {
+          focus_points: { name: 'Focus Points', remaining: 0, max: 2, reset: 'short_rest' },
+          uncanny_metabolism: { name: 'Uncanny Metabolism', remaining: 1, max: 1, reset: 'long_rest' },
+        },
+      },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', hp: 5, max_hp: 20, ac: 16, is_player: true },
+          { name: 'Goblin', hp: 8, max_hp: 8, ac: 12, is_player: false },
+        ],
+      },
+    }),
+    characterSheet: sheet('monk', {
+      identity: { name: 'Ari', class: 'monk', level: 2 },
+      derived_stats: { hp: 5, max_hp: 20, armor_class: 16, proficiency_bonus: 2, speed: 40 },
+    }),
+    rollDie: sequenceRolls([4]),
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.player_stats.resources.focus_points.remaining, 2);
+  assert.equal(result.worldState.player_stats.resources.uncanny_metabolism.remaining, 0);
+  assert.equal(result.worldState.player_stats.hp, 11);
+  assert.match(result.reply, /Focus Points refill/);
+});
