@@ -5,7 +5,59 @@ QA thread role: read-only QA, no development changes.
 
 ## Summary
 
-Latest production retest of `9ce63c5 Fix equipment AC during effect ticks` passes the prior P1 blockers for `QA Rogue`: fresh Rules-panel AC returns `14` from Leather Armor `11` + DEX `+3`, `I end my turn.` no longer causes a GM error, and the live creature attack now uses `vs AC 14` with `disadvantage: Hidden target`. Automated checks pass. No active blocker remains from the Rogue AC/end-turn regression path.
+Latest production QA of `6347b65 Add Bard and Monk level 2 mechanics` mostly passes for the new Bard and Monk paths. Automated checks pass, Monk level 2 mechanics pass in production, Bard level 2 creation/choices/apply/resources/spellcasting mostly pass in production. Active DEV attention needed: switching active characters during an open combat turn can carry the previous character's spent action economy into the new active character. Smaller notes: visible sheet resource counters are still not surfaced for new class resources, and old transcript/RULES history can make current character state look stale or contradictory.
+
+## Latest QA Pass - 2026-06-15 Bard/Monk Level 2 Production QA `6347b65`
+
+Scope:
+
+- Verified latest app-code commit under test: `6347b65 Add Bard and Monk level 2 mechanics`.
+- Rechecked production frontend at `https://hallucinated-dungeons.vercel.app/`.
+- Created and tested fresh production characters `QA Monk` and `QA Bard`.
+- Used the QA-only backend test hook to make each new character level-up-ready; no app code changes were made by QA.
+
+Automated checks:
+
+- Server `npm.cmd test`: PASS, `485/485`.
+- Client `npm.cmd run lint`: PASS.
+- `git diff --check 6347b65^ 6347b65`: PASS.
+
+Verified passed in production - Monk:
+
+- `QA Monk` creation passed with Orc Monk / Guide, Magic Initiate Druid choices, expected level 1 sheet values: HP `9/9`, AC `15`, speed `30 ft`, Unarmored Defense from DEX/WIS.
+- Level-up gate showed expected level 2 readiness after XP bump and applied through the visible sheet UI.
+- Level 2 sheet passed: `Orc Monk - Level 2`, HP `15/15`, AC `15`, speed `40 ft`, XP `300/900`, features `Monk's Focus`, `Unarmored Movement`, and `Uncanny Metabolism`.
+- Rules query confirmed `Focus Points 2/2` and `Uncanny Metabolism 1/1`.
+- `I use Patient Defense.` spent 1 Focus Point, applied Dodge as Bonus Action, and left Focus at `1/2`.
+- Enemy attack after end turn used live AC `15` and included Dodge disadvantage: `rolls 11/9 with disadvantage, using 9+3 = 12 vs AC 15`.
+- `I use Uncanny Metabolism.` refilled Focus to `2/2`, spent Uncanny Metabolism to `0/1`, and did not over-heal at full HP.
+- `I use Step of the Wind.` spent Focus, applied Dash + Disengage, doubled jump, and updated movement to `80 ft`.
+- `I use Flurry of Blows...` spent the last Focus, made two Unarmed Strike attacks, handled advantage/Hidden ending, and left Focus at `0/2`.
+- Browser console/warn/error logs were empty during these checks.
+
+Verified passed in production - Bard:
+
+- `QA Bard` creation passed with Orc Bard / Wayfarer, Lucky origin feat, expected level 1 sheet values: HP `9/9`, AC `13`, Bard spellcasting CHA attack `+5`, DC `13`, Bardic Inspiration feature present.
+- Level-up gate correctly blocked application until Bard selected exactly 2 Expertise skills and 1 prepared spell.
+- Level-up UI showed expected Expertise options from proficient skills and prepared spell options. Selected `Persuasion`, `Performance`, and `Bane`.
+- `Apply Level Up` stayed disabled until required choices were complete, then enabled and applied.
+- Level 2 sheet passed: `Orc Bard - Level 2`, HP `15/15`, AC `13`, XP `300/900`, Expertise choices recorded, `Bane` added to prepared Level 1 spells, `Expertise` and `Jack of All Trades` features present.
+- Skill math passed after level-up: `Persuasion +7 Expertise`, `Performance +7 Expertise`, and non-proficient skills received Jack of All Trades half-proficiency bump, for example `Arcana +1`, `Athletics +0`, `Acrobatics +3`.
+- Rules query confirmed `Bardic Inspiration 3/3`, `Luck Points 2/2`, and Level 1 Bard spell slots `3/3` before casting.
+- After ending the inherited combat turn, `I give Bardic Inspiration to QA Monk.` worked as a Bonus Action and reduced Bardic Inspiration to `2/3`.
+- `I cast Bane on First Hostile Shape That Comes Close.` worked as an Action, created an active Bane concentration effect, and reduced Level 1 spell slots from `3/3` to `2/2`.
+- Browser console/warn/error logs were empty during Bard checks.
+
+Findings for DEV:
+
+- P2: Active character switch can inherit prior character combat action economy. After switching from `QA Monk` to `QA Bard` while Monk's turn still had Bonus Action spent from Flurry of Blows, the Bard's first `I give Bardic Inspiration to QA Monk.` was rejected with `Your Bonus Action is already spent this turn` and showed Monk movement state `40 ft movement`. Ending the turn reset correctly and Bardic Inspiration then worked. Expected: changing active character in combat should not let the new active character inherit another character's spent Bonus Action/movement state, or the UI should clearly prevent/scope combat actions to the actual current turn actor.
+- P3: Character Sheet does not visibly show new resource counters for class resources like Monk Focus Points, Uncanny Metabolism, Bardic Inspiration, Lucky, or spell slots in the main sheet summary. Rules queries and mechanics can read/use them, but players do not get an obvious current counter on the sheet. This is a UX gap, not a mechanics blocker.
+- P3: Old transcript/RULES history remains easy to misread after character switching. The page still shows stale older Fighter/Rogue AC and resource answers in the long transcript, even while fresh sheet/query state is correct. This is not currently breaking fresh mechanics, but it is confusing enough that QA has to keep saying "fresh query only" like a haunted parrot.
+- P3: After Bane is active, the sheet's `Equipped Defenses` section shows `Leather Armor` followed by `Effect active`. AC stayed correct at `13`, but the label placement makes it look like leather armor itself is an active effect. Likely display-only.
+
+Current recommendation:
+
+- Treat Bard and Monk level 2 mechanics as broadly production-passed, with the action-economy carryover as the main fix candidate before piling on more combat/class complexity. The new classes are playing music and doing flips; the turn-state ledger just needs to stop sharing sticky notes between characters.
 
 ## Latest QA Pass - 2026-06-14 Equipment AC Tick Retest `9ce63c5`
 
