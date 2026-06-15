@@ -8,6 +8,7 @@ const assert = require('node:assert/strict');
 const {
   beginPlayerTurn,
   continuePlayerTurn,
+  ensureTurnResources,
   grantActionSurgeAction,
   grantMovement,
   setTurnFlag,
@@ -66,6 +67,40 @@ test('bonus action and action are tracked separately', () => {
   assert.equal(action.ok, true);
   assert.equal(action.worldState.combat_state.turn_resources.bonus_action_available, false);
   assert.equal(action.worldState.combat_state.turn_resources.action_available, false);
+});
+
+test('turn resources reset when the active combat character changes', () => {
+  const staleMonkTurn = combatWorld({
+    player_stats: { speed: 30, character_id: 'char_bard', name: 'QA Bard' },
+    combat_state: {
+      active: true,
+      round: 1,
+      turn_index: 0,
+      combatants: [],
+      turn_resources: {
+        actor: 'player',
+        character_id: 'char_monk',
+        character_name: 'QA Monk',
+        action_available: true,
+        bonus_action_available: false,
+        reaction_available: true,
+        movement_remaining: 40,
+        used: [{ resource: 'bonus_action', label: 'Flurry of Blows' }],
+      },
+    },
+  });
+  const bardSheet = {
+    identity: { name: 'QA Bard', character_id: 'char_bard' },
+    derived_stats: { character_id: 'char_bard', speed: 30 },
+  };
+
+  const reset = ensureTurnResources(staleMonkTurn, bardSheet);
+  const resources = reset.combat_state.turn_resources;
+
+  assert.equal(resources.character_id, 'char_bard');
+  assert.equal(resources.bonus_action_available, true);
+  assert.equal(resources.movement_remaining, 30);
+  assert.deepEqual(resources.used, []);
 });
 
 test('Action Surge grants one extra non-Magic action after the regular action is spent', () => {

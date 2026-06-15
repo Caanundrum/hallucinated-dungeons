@@ -38,6 +38,7 @@ const {
   summarizeCharacterSheetForRules,
 } = require('./rulesSheetSummary');
 const {
+  beginPlayerTurn,
   spendTurnResource,
   getSpellActionResource,
 } = require('./actionEconomy');
@@ -727,18 +728,27 @@ function normalizeActiveCharacterWorldState(worldState, characterSheet, characte
       : {},
     resources,
   };
-  const baseWorldState = {
-    ...worldState,
-    active_effects: runtimeSheet.derived_stats?.active_spell_effects || worldState.active_effects || [],
-    player_stats: nextPlayerStats,
-    combat_state: alignCombatPlayerToCharacter(worldState.combat_state, runtimeSheet, nextPlayerStats),
-  };
+  const baseWorldState = resetCombatTurnForCharacterSwitch({
+    worldState: {
+      ...worldState,
+      active_effects: runtimeSheet.derived_stats?.active_spell_effects || worldState.active_effects || [],
+      player_stats: nextPlayerStats,
+      combat_state: alignCombatPlayerToCharacter(worldState.combat_state, runtimeSheet, nextPlayerStats),
+    },
+    characterSheet: runtimeSheet,
+    sameCharacter,
+  });
   return syncInventoryStateFromCharacterSheet(
     syncEquipmentEffectsToWorldState(baseWorldState, runtimeSheet),
     runtimeSheet,
     getContentBundle(),
     { characterId: stats.character_id, resetCarriedObjects: !sameCharacter }
   );
+}
+
+function resetCombatTurnForCharacterSwitch({ worldState = {}, characterSheet = {}, sameCharacter = true } = {}) {
+  if (sameCharacter || !worldState.combat_state?.active) return worldState;
+  return beginPlayerTurn(worldState, characterSheet);
 }
 
 function buildCharacterAmmunitionState(characterSheet = {}) {

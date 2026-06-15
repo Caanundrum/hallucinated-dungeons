@@ -18,15 +18,18 @@ function ensureTurnResources(worldState = {}, characterSheet = {}) {
 
   const existing = combat.turn_resources || {};
   const fresh = buildFreshTurnResources(characterSheet, worldState);
+  const shouldReset = turnResourcesBelongToDifferentCharacter(existing, fresh);
   return {
     ...worldState,
     combat_state: {
       ...combat,
-      turn_resources: {
-        ...fresh,
-        ...existing,
-        used: Array.isArray(existing.used) ? existing.used : [],
-      },
+      turn_resources: shouldReset
+        ? fresh
+        : {
+            ...fresh,
+            ...existing,
+            used: Array.isArray(existing.used) ? existing.used : [],
+          },
     },
   };
 }
@@ -279,6 +282,8 @@ function describeAvailableResources(resources = {}) {
 function buildFreshTurnResources(characterSheet = {}, worldState = {}) {
   return {
     actor: 'player',
+    character_id: getActiveCharacterId(characterSheet, worldState),
+    character_name: getActiveCharacterName(characterSheet, worldState),
     action_available: true,
     extra_action_available: false,
     bonus_action_available: true,
@@ -286,6 +291,23 @@ function buildFreshTurnResources(characterSheet = {}, worldState = {}) {
     movement_remaining: getSpeed(characterSheet, worldState),
     used: [],
   };
+}
+
+function turnResourcesBelongToDifferentCharacter(existing = {}, fresh = {}) {
+  return Boolean(existing.character_id && fresh.character_id && existing.character_id !== fresh.character_id);
+}
+
+function getActiveCharacterId(characterSheet = {}, worldState = {}) {
+  return characterSheet.derived_stats?.character_id
+    || characterSheet.identity?.character_id
+    || worldState.player_stats?.character_id
+    || null;
+}
+
+function getActiveCharacterName(characterSheet = {}, worldState = {}) {
+  return characterSheet.identity?.name
+    || worldState.player_stats?.name
+    || null;
 }
 
 function getSpeed(characterSheet = {}, worldState = {}) {
