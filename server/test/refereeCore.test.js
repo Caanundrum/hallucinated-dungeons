@@ -110,6 +110,50 @@ test('contextual phrasing maps present targets to referee checks', () => {
   assert.match(socialApproach.reply, /Charisma \(Persuasion\)/);
 });
 
+test('outside-combat end turn after Wild Companion stays deterministic', () => {
+  const druidSheet = {
+    ...characterSheet,
+    identity: { ...characterSheet.identity, class: 'druid', class_name: 'Druid', level: 2 },
+    resources: {
+      wild_shape: { name: 'Wild Shape', remaining: 2, max: 2, reset: 'short_rest' },
+    },
+  };
+  const companion = adjudicate({
+    message: 'I use Wild Companion.',
+    worldState: worldState({
+      scene_presence: {
+        exact_location: 'Lantern Bridge',
+        present_npcs: [],
+        present_objects: ['bridge rail', 'dark water'],
+        available_exits: ['far bank'],
+      },
+      player_stats: {
+        hp: 10,
+        max_hp: 10,
+        armor_class: 13,
+        resources: {
+          wild_shape: { name: 'Wild Shape', remaining: 2, max: 2, reset: 'short_rest' },
+        },
+      },
+      active_effects: [],
+    }),
+    characterSheet: druidSheet,
+  });
+  const ended = adjudicate({
+    message: 'I end my turn.',
+    worldState: companion.worldState,
+    characterSheet: druidSheet,
+  });
+
+  assert.equal(companion.handled, true);
+  assert.equal(companion.worldState.player_stats.resources.wild_shape.remaining, 1);
+  assert.equal(ended.handled, true);
+  assert.equal(ended.logType, 'referee_no_combat_turn_to_end');
+  assert.equal(ended.worldState.combat_state, null);
+  assert.ok(ended.worldState.active_effects.some((effect) => effect.id === 'wild_companion'));
+  assert.match(ended.reply, /No initiative is running/);
+});
+
 test('hazardous swimming and climbing in heavy armor prompt Athletics instead of free narration', () => {
   const armoredSheet = {
     ...characterSheet,

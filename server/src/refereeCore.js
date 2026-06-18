@@ -200,6 +200,15 @@ function adjudicate({ message, worldState = {}, characterSheet = null, currentTu
   const originFeatAction = resolveOriginFeatAction({ message: text, worldState: state, characterSheet: sheet, rollDie });
   if (originFeatAction) return finishPlayerCombatAction({ result: originFeatAction, characterSheet: sheet });
 
+  if (!state.combat_state?.active && isEndTurnIntent(text)) {
+    return {
+      handled: true,
+      logType: 'referee_no_combat_turn_to_end',
+      worldState: state,
+      reply: 'No initiative is running right now, so there is no combat turn to end. Ongoing effects, companions, and scene state stay tracked; tell me what you do next.',
+    };
+  }
+
   if (!state.combat_state?.active && isCombatStarter(text)) {
     const targetIssue = validateCombatStartTarget({ message: text, worldState: state });
     if (targetIssue) return targetIssue;
@@ -1669,7 +1678,7 @@ function resolveCombatAction({ message, intent, worldState, characterSheet, curr
     });
   }
 
-  if (/\b(?:end|finish)\s+(?:my\s+)?turn\b|\b(?:wait|done)\s*$/i.test(message)) {
+  if (isEndTurnIntent(message, { includeShortcuts: true })) {
     const result = advanceEnemyTurns({
       worldState,
       characterSheet,
@@ -3610,6 +3619,12 @@ function combineAdvantageModes(left = null, right = null) {
 
 function isMovementIntent(message) {
   return /\b(?:go|walk|head|travel|move|return|enter|leave|approach|step|run|ride|follow|continue|flee|escape|retreat|withdraw|back away)\b/i.test(message);
+}
+
+function isEndTurnIntent(message = '', { includeShortcuts = false } = {}) {
+  const text = String(message || '');
+  return /\b(?:end|finish)\s+(?:my\s+)?turn\b/i.test(text)
+    || (includeShortcuts && /\b(?:wait|done)\s*$/i.test(text));
 }
 
 function advanceNarrativeTime({ message = '', dmReply = '', worldState = {}, characterSheet = {}, defaultElapsed = null } = {}) {

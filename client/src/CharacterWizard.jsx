@@ -2087,7 +2087,7 @@ function getGuidanceNotes({
       armor ? `${armor.name} sets base AC ${armor.ac_base}${armor.dex_cap !== null && armor.dex_cap !== undefined ? ` with DEX cap ${armor.dex_cap}` : ''}` : null,
       shield ? `${shield.name} adds +2 AC while equipped` : null,
       weapon ? `${weapon.name} attacks with ${weapon.ability?.toUpperCase() || 'its listed ability'} for ${weapon.damage || 'listed'} damage` : null,
-      armorTraining.length ? `${selectedClass.name} choice grants ${armorTraining.map(formatArmorTraining).join(', ')} armor training, but the starting pack still equips ${armor?.name || 'no armor'} until different armor is obtained and equipped` : null,
+      armorTraining.length ? `${selectedClass.name} choice grants ${armorTraining.map(formatArmorTraining).join(', ')} training, but the starting pack still equips ${armor?.name || 'no armor'} until different armor is obtained and equipped` : null,
     ].filter(Boolean);
     notes.push({
       id: 'equipment',

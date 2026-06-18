@@ -1,3 +1,5 @@
+const { getContentBundle } = require('./contentData');
+
 const RESOURCE_ALIASES = {
   second_wind: ['second wind', 'tactical mind'],
   action_surge: ['action surge'],
@@ -21,13 +23,12 @@ function answerResourceCountQuestion(message = '', worldState = {}) {
   if (!isResourceQuestion(text)) return '';
 
   const resources = worldState.player_stats?.resources || {};
-  const spellSlots = worldState.player_stats?.spell_slots || {};
   const resourceMatches = findRequestedResources(text, resources)
     .map((match) => ({
       index: match.index,
       entry: formatResourceEntry(match.key, resources[match.key], text),
     }));
-  const spellSlotMatch = findRequestedSpellSlots(text, spellSlots);
+  const spellSlotMatch = findRequestedSpellSlots(text, worldState);
   const matches = [
     ...resourceMatches,
     ...(spellSlotMatch ? [spellSlotMatch] : []),
@@ -85,12 +86,12 @@ function findRequestedResources(text = '', resources = {}) {
   return matches.sort((a, b) => a.index - b.index);
 }
 
-function findRequestedSpellSlots(text = '', spellSlots = {}) {
+function findRequestedSpellSlots(text = '', worldState = {}) {
   const index = spellSlotIndex(text);
   if (index === -1) return null;
   return {
     index,
-    entry: formatSpellSlotEntry(spellSlots),
+    entry: formatSpellSlotEntry(worldState),
   };
 }
 
@@ -104,13 +105,65 @@ function spellSlotIndex(text = '') {
   return -1;
 }
 
-function formatSpellSlotEntry(spellSlots = {}) {
-  const entries = Object.entries(spellSlots || {})
-    .filter(([, value]) => value !== null && value !== undefined)
-    .sort(([a], [b]) => Number(a) - Number(b))
-    .map(([level, remaining]) => `level ${level}: ${formatNumber(remaining)}`);
+function formatSpellSlotEntry(worldState = {}) {
+  const spellSlots = normalizeSlotMap(worldState.player_stats?.spell_slots || {});
+  const maxSlots = normalizeSlotMap(
+    worldState.player_stats?.spell_slots_max
+    || deriveSpellSlotMaximums(worldState)
+  );
+  const levels = [...new Set([
+    ...Object.keys(spellSlots),
+    ...Object.keys(maxSlots),
+  ])].sort((a, b) => Number(a) - Number(b));
+
+  const entries = levels
+    .filter((level) => spellSlots[level] !== undefined || maxSlots[level] !== undefined)
+    .map((level) => {
+      const remaining = spellSlots[level] !== undefined ? spellSlots[level] : '?';
+      const max = maxSlots[level];
+      if (max === undefined) return `level ${level}: ${formatNumber(remaining)}`;
+      return `level ${level}: ${formatNumber(remaining)}/${formatNumber(max)}`;
+    });
+
   if (!entries.length) return '**Spell slots: none recorded on the current sheet.**';
   return `**Spell slots remaining: ${entries.join(', ')}.**`;
+}
+
+function deriveSpellSlotMaximums(worldState = {}) {
+  const playerStats = worldState.player_stats || {};
+  const classId = resolveClassId(playerStats);
+  const characterLevel = Number(playerStats.level || 1);
+  if (!classId || !Number.isFinite(characterLevel) || characterLevel < 1) return {};
+
+  const content = getContentBundle();
+  const classData = (content.classes || []).find((entry) => entry.id === classId);
+  const maxSlots = normalizeSlotMap(classData?.spellcasting?.slots || {});
+  const classLevels = content.classAdvancement?.levels?.[classId] || {};
+  for (let level = 2; level <= characterLevel; level += 1) {
+    const advancementSlots = classLevels[String(level)]?.spellcasting?.slots;
+    if (advancementSlots) {
+      Object.assign(maxSlots, normalizeSlotMap(advancementSlots));
+    }
+  }
+  return maxSlots;
+}
+
+function resolveClassId(playerStats = {}) {
+  const content = getContentBundle();
+  const direct = normalizeId(playerStats.class_id || playerStats.class);
+  if (!direct) return '';
+  const directMatch = (content.classes || []).find((entry) => entry.id === direct);
+  if (directMatch) return directMatch.id;
+  const nameMatch = (content.classes || []).find((entry) => normalizeId(entry.name) === direct);
+  return nameMatch?.id || direct;
+}
+
+function normalizeSlotMap(slots = {}) {
+  return Object.fromEntries(
+    Object.entries(slots || {})
+      .filter(([level, value]) => level !== '' && value !== null && value !== undefined)
+      .map(([level, value]) => [String(level), value])
+  );
 }
 
 function firstAliasIndex(text, aliases = []) {
@@ -134,6 +187,10 @@ function normalizeText(value = '') {
     .replace(/[^a-z0-9]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function normalizeId(value = '') {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 }
 
 function humanize(value = '') {
