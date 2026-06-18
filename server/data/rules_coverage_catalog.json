@@ -1,5 +1,5 @@
 {
-  "version": "4C.6-H30",
+  "version": "4C.6-H31",
   "status_definitions": {
     "implemented": "Exposed and mechanically enforced for the current supported level/scope.",
     "partial": "Exposed and partially enforced, but missing at least one meaningful rules interaction.",
@@ -58,6 +58,7 @@
     "rage": "implemented",
     "second_wind": "implemented",
     "lay_on_hands": "partial",
+    "paladins_smite": "implemented",
     "innate_sorcery": "implemented",
     "arcane_recovery": "implemented",
     "sorcery_points": "not_exposed",
@@ -78,7 +79,10 @@
     "second_wind": "implemented",
     "martial_arts": "partial",
     "lay_on_hands": "partial",
+    "paladins_smite": "implemented",
     "favored_enemy": "partial",
+    "deft_explorer": "implemented",
+    "druidic_warrior": "implemented",
     "expertise": "implemented",
     "sneak_attack": "partial",
     "thieves_cant": "partial",
@@ -128,6 +132,7 @@
     "command": "partial",
     "cure_wounds": "implemented",
     "divine_favor": "implemented",
+    "divine_smite": "implemented",
     "faerie_fire": "partial",
     "fire_bolt": "implemented",
     "guidance": "implemented",

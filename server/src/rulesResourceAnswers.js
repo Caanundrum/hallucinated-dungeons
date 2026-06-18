@@ -5,6 +5,7 @@ const RESOURCE_ALIASES = {
   action_surge: ['action surge'],
   rage: ['rage'],
   lay_on_hands: ['lay on hands', 'healing pool'],
+  paladins_smite: ["paladin's smite", 'paladin smite', 'divine smite'],
   bardic_inspiration: ['bardic inspiration'],
   innate_sorcery: ['innate sorcery'],
   arcane_recovery: ['arcane recovery'],

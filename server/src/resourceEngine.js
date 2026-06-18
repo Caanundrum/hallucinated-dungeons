@@ -32,6 +32,12 @@ const RESOURCE_DEFINITIONS = {
     reset: 'long_rest',
     unit: 'HP',
   },
+  paladins_smite: {
+    name: "Paladin's Smite",
+    remaining: 1,
+    max: 1,
+    reset: 'long_rest',
+  },
   bardic_inspiration: {
     name: 'Bardic Inspiration',
     reset: 'long_rest',
@@ -356,6 +362,7 @@ function applyClassResourceDefaults(resources, characterSheet = {}, worldResourc
   if (classId === 'paladin') {
     const max = level * 5;
     defaults.lay_on_hands = { ...RESOURCE_DEFINITIONS.lay_on_hands, remaining: max, max };
+    if (level >= 2) defaults.paladins_smite = RESOURCE_DEFINITIONS.paladins_smite;
   }
   if (classId === 'bard') {
     const max = Math.max(1, Number(abilityMods.cha || 0));

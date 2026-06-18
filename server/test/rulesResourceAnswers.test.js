@@ -93,6 +93,19 @@ test('answers direct spell-slot questions from current sheet state', () => {
   assert.match(reply, /Spell slots remaining: level 1: 3\/3/);
 });
 
+test("answers Paladin's Smite resource questions by feature or spell name", () => {
+  const state = {
+    player_stats: {
+      resources: {
+        paladins_smite: { name: "Paladin's Smite", remaining: 1, max: 1, reset: 'long_rest' },
+      },
+    },
+  };
+
+  assert.match(answerResourceCountQuestion("How many Paladin's Smite uses remain?", state), /Paladin's Smite 1\/1 uses left/);
+  assert.match(answerResourceCountQuestion('Is my Divine Smite free use available?', state), /Paladin's Smite 1\/1 uses left/);
+});
+
 test('ignores non-resource questions', () => {
   assert.equal(answerResourceCountQuestion('What is my AC?', worldState), '');
   assert.equal(answerResourceCountQuestion('How many doors are in the room?', worldState), '');

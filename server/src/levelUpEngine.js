@@ -1,5 +1,10 @@
 const { getContentBundle, byId } = require('./contentData');
 const { abilityMod } = require('./characterValidator');
+const {
+  getFightingStyleArmorBonus,
+  getFightingStyleAttackBonus,
+  getFightingStyleSenses,
+} = require('./fightingStyleEngine');
 
 const SUPPORTED_LEVEL_UP_MECHANICS = new Set([
   'action_surge',
@@ -8,9 +13,13 @@ const SUPPORTED_LEVEL_UP_MECHANICS = new Set([
   'danger_sense',
   'divine_spark',
   'expertise_level_2',
+  'deft_explorer',
+  'druidic_warrior',
+  'fighting_style_level_2',
   'focus_points',
   'jack_of_all_trades',
   'reckless_attack',
+  'paladin_smite',
   'tactical_mind',
   'turn_undead',
   'unarmored_movement',
@@ -142,6 +151,8 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
   const currentSpellcasting = characterSheet.spellcasting || null;
   const currentProgression = characterSheet.progression || {};
   const levelUpChoices = normalizeChoiceSelections(payload.choices || {});
+  const selectedFightingStyle = levelUpChoices.fighting_style?.[0]
+    || normalizeId(characterSheet.class_choices?.fighting_style);
   const nextExpertiseSkills = mergeExpertiseSkills(
     characterSheet.expertise_skills || [],
     getExpertiseChoiceIds(advancement.required_choices || [], levelUpChoices),
@@ -158,7 +169,12 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
       max: nextLevel,
     },
   });
-  const nextSpellcasting = mergeSpellcasting(currentSpellcasting, advancement.spellcasting, levelUpChoices);
+  const nextCantrips = getCantripChoiceIds(advancement.required_choices || [], levelUpChoices);
+  const nextSpellcasting = mergeSpellcasting(currentSpellcasting, advancement.spellcasting, levelUpChoices, nextCantrips);
+  const nextLanguages = mergeLanguages(
+    characterSheet.languages || characterSheet.proficiencies?.languages || [],
+    getLanguageChoiceIds(advancement.required_choices || [], levelUpChoices),
+  );
   const nextFeatures = [
     ...(characterSheet.features || []),
     ...(advancement.features || []).map((feature) => ({
@@ -178,6 +194,7 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
     nextHp,
     nextSpeed,
     nextExpertiseSkills,
+    fightingStyle: selectedFightingStyle,
     hasJackOfAllTrades: Boolean(currentDerived.jack_of_all_trades || (advancement.runtime_mechanics || []).includes('jack_of_all_trades')),
   });
 
@@ -193,6 +210,15 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
     features: dedupeFeatures(nextFeatures),
     resources: nextResources,
     expertise_skills: nextExpertiseSkills,
+    class_choices: {
+      ...(characterSheet.class_choices || {}),
+      ...(selectedFightingStyle ? { fighting_style: selectedFightingStyle } : {}),
+    },
+    languages: nextLanguages,
+    proficiencies: {
+      ...(characterSheet.proficiencies || {}),
+      languages: nextLanguages,
+    },
     ...(nextSpellcasting ? { spellcasting: nextSpellcasting } : {}),
     progression: {
       ...currentProgression,
@@ -234,6 +260,7 @@ function buildRequiredChoicePreviews({
     return {
       ...choice,
       selected,
+      active: isRequiredChoiceActive(choice, selections),
       options: getChoiceOptions({ choice, characterSheet, content, classId }),
     };
   });
@@ -266,10 +293,12 @@ function getChoiceOptions({ choice = {}, characterSheet = {}, content = {}, clas
     ].map(normalizeId));
     const spellClass = normalizeId(choice.class_id || classId);
     const maxLevel = Number(choice.max_level ?? 1);
+    const excluded = new Set((choice.exclude_ids || []).map(normalizeId));
     return (content.spells || [])
       .filter((spell) => Number(spell.level || 0) <= maxLevel)
       .filter((spell) => (spell.classes || []).map(normalizeId).includes(spellClass))
       .filter((spell) => !prepared.has(normalizeId(spell.id)))
+      .filter((spell) => !excluded.has(normalizeId(spell.id)))
       .map((spell) => ({
         id: spell.id,
         name: spell.name || titleCase(spell.id),
@@ -278,12 +307,49 @@ function getChoiceOptions({ choice = {}, characterSheet = {}, content = {}, clas
       }));
   }
 
+  if (choice.type === 'language') {
+    const known = new Set([
+      ...(characterSheet.languages || []),
+      ...(characterSheet.proficiencies?.languages || []),
+    ].map(normalizeId));
+    const reserved = new Set(['druidic', 'thieves_cant']);
+    return (content.languages || [])
+      .filter((language) => !known.has(normalizeId(language.id)))
+      .filter((language) => !reserved.has(normalizeId(language.id)))
+      .map((language) => ({
+        id: language.id,
+        name: language.name || titleCase(language.id),
+        description: language.description || '',
+        meta: titleCase(language.category || 'language'),
+      }));
+  }
+
+  if (choice.type === 'fighting_style') {
+    const fighter = byId(content.classes || [], 'fighter');
+    const fighterStyles = (fighter?.class_choices || [])
+      .find((entry) => entry.id === 'fighting_style')?.options || [];
+    const extraStyles = classId === 'ranger'
+      ? [{
+          id: 'druidic_warrior',
+          name: 'Druidic Warrior',
+          description: 'Learn two Druid cantrips, using Wisdom as your spellcasting ability for them.',
+        }]
+      : [];
+    return [...fighterStyles, ...extraStyles].map((style) => ({
+      id: style.id,
+      name: style.name || titleCase(style.id),
+      description: style.description || '',
+      meta: style.id === 'druidic_warrior' ? 'Cantrip style' : 'Fighting Style feat',
+    }));
+  }
+
   return [];
 }
 
 function validateRequiredChoices(requiredChoices = [], selections = {}) {
   const blockers = [];
   for (const choice of requiredChoices) {
+    if (!isRequiredChoiceActive(choice, selections)) continue;
     const selected = selections[choice.id] || [];
     const count = Number(choice.count || 0);
     if (selected.length !== count) {
@@ -328,6 +394,7 @@ function buildLeveledDerivedStats({
   nextSpeed,
   nextExpertiseSkills = [],
   hasJackOfAllTrades = false,
+  fightingStyle = '',
 } = {}) {
   const nextDerived = {
     ...currentDerived,
@@ -354,7 +421,7 @@ function buildLeveledDerivedStats({
     });
   }
 
-  return nextDerived;
+  return applyFightingStyleToDerivedStats(nextDerived, characterSheet, fightingStyle);
 }
 
 function buildSkillModifiersForLevelUp({
@@ -400,6 +467,31 @@ function isExpertiseChoice(choice = {}) {
 
 function mergeExpertiseSkills(current = [], additions = []) {
   return [...new Set([...current, ...additions].map(normalizeId).filter(Boolean))];
+}
+
+function getLanguageChoiceIds(requiredChoices = [], selections = {}) {
+  return requiredChoices
+    .filter((choice) => choice.type === 'language' && isRequiredChoiceActive(choice, selections))
+    .flatMap((choice) => selections[choice.id] || []);
+}
+
+function getCantripChoiceIds(requiredChoices = [], selections = {}) {
+  return requiredChoices
+    .filter((choice) => choice.type === 'spell' && Number(choice.max_level) === 0)
+    .filter((choice) => isRequiredChoiceActive(choice, selections))
+    .flatMap((choice) => selections[choice.id] || []);
+}
+
+function mergeLanguages(current = [], additions = []) {
+  return [...new Set([...current, ...additions].map(normalizeId).filter(Boolean))];
+}
+
+function isRequiredChoiceActive(choice = {}, selections = {}) {
+  const condition = choice.required_if;
+  if (!condition) return true;
+  const selected = selections[condition.choice_id] || [];
+  const required = normalizeId(condition.includes || condition.equals);
+  return required ? selected.includes(required) : true;
 }
 
 function getDerivedSpeedBonus(advancement = {}, characterSheet = {}) {
@@ -484,7 +576,7 @@ function mergeResources(current = {}, advancementResources = {}, extra = {}) {
   return merged;
 }
 
-function mergeSpellcasting(current, advancementSpellcasting, levelUpChoices = {}) {
+function mergeSpellcasting(current, advancementSpellcasting, levelUpChoices = {}, cantripAdditions = []) {
   if (!current && !advancementSpellcasting) return null;
   if (!advancementSpellcasting) return current;
   const preparedAdditions = levelUpChoices.prepared_spells || [];
@@ -492,6 +584,12 @@ function mergeSpellcasting(current, advancementSpellcasting, levelUpChoices = {}
     ...(current || {}),
     ...(advancementSpellcasting.cantrips !== undefined ? { cantrips_count: advancementSpellcasting.cantrips } : {}),
     ...(advancementSpellcasting.prepared_spells !== undefined ? { prepared_spells_count: advancementSpellcasting.prepared_spells } : {}),
+    cantrips_known: [
+      ...new Set([
+        ...((current || {}).cantrips_known || []),
+        ...cantripAdditions,
+      ]),
+    ],
     prepared_from_choices: [
       ...new Set([
         ...((current || {}).prepared_from_choices || []),
@@ -515,6 +613,54 @@ function mergeSpellcasting(current, advancementSpellcasting, levelUpChoices = {}
       ...(advancementSpellcasting.slots || {}),
     },
   };
+}
+
+function applyFightingStyleToDerivedStats(derivedStats = {}, characterSheet = {}, styleId = '') {
+  const style = normalizeId(styleId);
+  if (!style) return derivedStats;
+
+  const next = clone(derivedStats);
+  const armorBreakdown = next.armor_class_breakdown || [];
+  const wearingArmor = Boolean(characterSheet.equipped?.armor);
+  const hasDefense = armorBreakdown.some((entry) => entry.label === 'Defense Fighting Style');
+  const armorBonus = getFightingStyleArmorBonus({ styleId: style, wearingArmor });
+  if (armorBonus && !hasDefense) {
+    next.armor_class = Number(next.armor_class || 10) + armorBonus;
+    next.armor_class_breakdown = [...armorBreakdown, { label: 'Defense Fighting Style', value: armorBonus }];
+    next.defense_fighting_style_applied = true;
+  }
+
+  next.attack_breakdowns = (next.attack_breakdowns || []).map((attack) => {
+    const expected = getFightingStyleAttackBonus({
+      styleId: style,
+      attack: { attackKind: attack.attack_kind || attack.attackKind },
+    });
+    const included = Number(attack.fighting_style_attack_bonus || 0);
+    const added = Math.max(0, expected - included);
+    if (!added) return attack;
+    return {
+      ...attack,
+      attack_total: Number(attack.attack_total || 0) + added,
+      fighting_style_attack_bonus: included + added,
+      attack_parts: [
+        ...(attack.attack_parts || []),
+        { label: 'Archery Fighting Style', value: added },
+      ],
+    };
+  });
+
+  const senses = getFightingStyleSenses({ class_choices: { fighting_style: style } });
+  if (senses.length) {
+    next.senses = {
+      ...(next.senses || {}),
+      ...Object.fromEntries(senses.map((sense) => [sense.type, sense.range_feet])),
+      special: [
+        ...((next.senses || {}).special || []).filter((sense) => sense.source !== 'Blind Fighting'),
+        ...senses,
+      ],
+    };
+  }
+  return next;
 }
 
 function dedupeFeatures(features = []) {

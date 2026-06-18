@@ -10,6 +10,7 @@ const {
   getKnownSpellInfo,
   resolveSpellCastLegality,
   spendSpellResource,
+  summarizeKnownSpells,
 } = require('../src/spellcastingEngine');
 
 const content = getContentBundle();
@@ -117,6 +118,33 @@ test('always-prepared class spells use slots unless a limited class feature use 
   assert.equal(rangerSpent.note, 'spent Favored Enemy');
   assert.equal(rangerSpent.characterSheet.spellcasting.slots[1], 2);
   assert.equal(rangerSpent.characterSheet.resources.spell_uses['class_feature:favored_enemy:hunter_mark'].remaining, 1);
+});
+
+test('Paladin Divine Smite is listed but direct casting redirects to the on-hit referee', () => {
+  const paladin = {
+    identity: { name: 'Ari', level: 2, class: 'paladin', class_name: 'Paladin' },
+    spellcasting: {
+      ability: 'cha',
+      always_prepared_spells: ['divine_smite'],
+      spells_prepared: ['bless', 'shield_of_faith'],
+      slots: { 1: 2 },
+    },
+    resources: {
+      paladins_smite: { name: "Paladin's Smite", remaining: 1, max: 1, reset: 'long_rest' },
+    },
+  };
+  const result = resolveSpellCastLegality({
+    message: 'I cast Divine Smite.',
+    content,
+    characterSheet: paladin,
+    worldState: {},
+  });
+
+  assert.match(summarizeKnownSpells(paladin, content), /Divine Smite/);
+  assert.equal(result.blocked, true);
+  assert.match(result.reply, /immediately after a melee weapon hit/);
+  assert.equal(paladin.resources.paladins_smite.remaining, 1);
+  assert.equal(paladin.spellcasting.slots[1], 2);
 });
 
 test('reaction spells and long casting times are blocked before resources are spent', () => {

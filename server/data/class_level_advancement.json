@@ -211,6 +211,15 @@
             "label": "Fighting Style",
             "type": "fighting_style",
             "count": 1
+          },
+          {
+            "id": "prepared_spells",
+            "label": "Prepared Spell",
+            "type": "spell",
+            "count": 1,
+            "class_id": "paladin",
+            "max_level": 1,
+            "exclude_ids": ["divine_smite"]
           }
         ],
         "spellcasting": {
@@ -261,6 +270,26 @@
             "label": "Fighting Style",
             "type": "fighting_style",
             "count": 1
+          },
+          {
+            "id": "druidic_warrior_cantrips",
+            "label": "Druidic Warrior Cantrips",
+            "type": "spell",
+            "count": 2,
+            "class_id": "druid",
+            "max_level": 0,
+            "required_if": {
+              "choice_id": "fighting_style",
+              "includes": "druidic_warrior"
+            }
+          },
+          {
+            "id": "prepared_spells",
+            "label": "Prepared Spell",
+            "type": "spell",
+            "count": 1,
+            "class_id": "ranger",
+            "max_level": 1
           }
         ],
         "spellcasting": {

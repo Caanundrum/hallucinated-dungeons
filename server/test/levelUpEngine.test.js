@@ -42,6 +42,9 @@ function baseSheet(overrides = {}) {
     active_effects: overrides.active_effects || [],
     features: overrides.features || [],
     resources: overrides.resources || {},
+    languages: overrides.languages || overrides.proficiencies?.languages || [],
+    class_choices: overrides.class_choices || {},
+    equipped: overrides.equipped || {},
     spellcasting: overrides.spellcasting,
     progression: {
       experience_points: overrides.identity?.experience_points ?? 0,
@@ -378,6 +381,213 @@ test('applying cleric and druid level 2 records Channel Divinity and Wild Shape 
   assert.equal(druid.characterSheet.spellcasting.prepared_spells_count, 5);
   assert(druid.characterSheet.features.some((feature) => feature.name === 'Wild Shape'));
   assert(druid.characterSheet.features.some((feature) => feature.name === 'Wild Companion'));
+});
+
+test('Paladin level 2 requires a Fighting Style and one additional prepared spell', () => {
+  const sheet = baseSheet({
+    identity: {
+      class: 'paladin',
+      class_name: 'Paladin',
+      experience_points: 300,
+      level_up_available: true,
+    },
+    equipped: { armor: 'chain_mail', main_hand: 'longsword', off_hand: 'shield' },
+    derived_stats: {
+      armor_class: 18,
+      armor_class_breakdown: [
+        { label: 'Chain Mail', value: 16 },
+        { label: 'Shield', value: 2 },
+      ],
+      attack_breakdowns: [
+        { name: 'Longsword', attack_kind: 'melee', attack_total: 5, fighting_style_attack_bonus: 0 },
+      ],
+    },
+    spellcasting: {
+      ability: 'cha',
+      cantrips_known: [],
+      prepared_from_choices: ['bless', 'shield_of_faith'],
+      spells_prepared: ['bless', 'shield_of_faith'],
+      always_prepared_spells: [],
+      slots: { 1: 2 },
+    },
+    progression: { experience_points: 300 },
+  });
+  const preview = getLevelUpPreview(sheet, getContentBundle());
+  const result = applyLevelUp({ characterSheet: sheet, content: getContentBundle() });
+
+  assert.equal(preview.canLevelUp, true);
+  assert.equal(preview.canApply, false);
+  assert.equal(preview.requiredChoices.find((choice) => choice.id === 'fighting_style').options.length, 10);
+  assert(preview.requiredChoices.find((choice) => choice.id === 'prepared_spells').options.some((option) => option.id === 'divine_favor'));
+  assert.equal(result.ok, false);
+});
+
+test('applying Paladin level 2 records Fighting Style, Smite, spell preparation, and static Defense AC', () => {
+  const result = applyLevelUp({
+    characterSheet: baseSheet({
+      identity: {
+        class: 'paladin',
+        class_name: 'Paladin',
+        experience_points: 300,
+        level_up_available: true,
+      },
+      equipped: { armor: 'chain_mail', main_hand: 'longsword', off_hand: 'shield' },
+      derived_stats: {
+        armor_class: 18,
+        armor_class_breakdown: [
+          { label: 'Chain Mail', value: 16 },
+          { label: 'Shield', value: 2 },
+        ],
+        attack_breakdowns: [
+          { name: 'Longsword', attack_kind: 'melee', attack_total: 5, fighting_style_attack_bonus: 0 },
+        ],
+      },
+      spellcasting: {
+        ability: 'cha',
+        cantrips_known: [],
+        prepared_from_choices: ['bless', 'shield_of_faith'],
+        spells_prepared: ['bless', 'shield_of_faith'],
+        always_prepared_spells: [],
+        slots: { 1: 2 },
+      },
+      progression: { experience_points: 300 },
+    }),
+    content: getContentBundle(),
+    payload: {
+      choices: {
+        fighting_style: ['defense'],
+        prepared_spells: ['divine_favor'],
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.characterSheet.identity.level, 2);
+  assert.equal(result.characterSheet.class_choices.fighting_style, 'defense');
+  assert.equal(result.characterSheet.derived_stats.armor_class, 19);
+  assert(result.characterSheet.derived_stats.armor_class_breakdown.some((entry) => entry.label === 'Defense Fighting Style'));
+  assert.equal(result.characterSheet.resources.paladins_smite.remaining, 1);
+  assert(result.characterSheet.spellcasting.always_prepared_spells.includes('divine_smite'));
+  assert(result.characterSheet.spellcasting.spells_prepared.includes('divine_favor'));
+  assert.equal(result.characterSheet.spellcasting.prepared_spells_count, 3);
+});
+
+test('Ranger level 2 applies Deft Explorer, Archery, languages, and one prepared spell', () => {
+  const result = applyLevelUp({
+    characterSheet: baseSheet({
+      identity: {
+        class: 'ranger',
+        class_name: 'Ranger',
+        experience_points: 300,
+        level_up_available: true,
+      },
+      abilities: {
+        final_scores: { str: 10, dex: 16, con: 14, int: 10, wis: 14, cha: 8 },
+        modifiers: { str: 0, dex: 3, con: 2, int: 0, wis: 2, cha: -1 },
+      },
+      proficiencies: {
+        skills: ['perception', 'stealth', 'survival'],
+        languages: ['common', 'elvish'],
+      },
+      languages: ['common', 'elvish'],
+      derived_stats: {
+        skill_modifiers: {
+          perception: { ability: 'wis', proficient: true, total: 4 },
+          stealth: { ability: 'dex', proficient: true, total: 5 },
+          survival: { ability: 'wis', proficient: true, total: 4 },
+        },
+        attack_breakdowns: [
+          { name: 'Longbow', attack_kind: 'ranged', attack_total: 5, fighting_style_attack_bonus: 0 },
+        ],
+      },
+      spellcasting: {
+        ability: 'wis',
+        cantrips_known: [],
+        prepared_from_choices: ['cure_wounds', 'ensnaring_strike'],
+        spells_prepared: ['cure_wounds', 'ensnaring_strike', 'hunter_mark'],
+        always_prepared_spells: ['hunter_mark'],
+        slots: { 1: 2 },
+      },
+      progression: { experience_points: 300 },
+    }),
+    content: getContentBundle(),
+    payload: {
+      choices: {
+        deft_explorer_expertise: ['perception'],
+        deft_explorer_languages: ['draconic', 'dwarvish'],
+        fighting_style: ['archery'],
+        prepared_spells: ['hail_of_thorns'],
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.characterSheet.class_choices.fighting_style, 'archery');
+  assert.equal(result.characterSheet.derived_stats.attack_breakdowns[0].attack_total, 7);
+  assert.equal(result.characterSheet.derived_stats.skill_modifiers.perception.expertise, true);
+  assert.equal(result.characterSheet.derived_stats.skill_modifiers.perception.total, 6);
+  assert(result.characterSheet.languages.includes('draconic'));
+  assert(result.characterSheet.languages.includes('dwarvish'));
+  assert(result.characterSheet.spellcasting.spells_prepared.includes('hail_of_thorns'));
+  assert.equal(result.characterSheet.spellcasting.prepared_spells_count, 3);
+});
+
+test('Ranger Druidic Warrior conditionally requires and records two Druid cantrips', () => {
+  const ranger = baseSheet({
+    identity: {
+      class: 'ranger',
+      class_name: 'Ranger',
+      experience_points: 300,
+      level_up_available: true,
+    },
+    proficiencies: {
+      skills: ['perception', 'stealth', 'survival'],
+      languages: ['common', 'elvish'],
+    },
+    languages: ['common', 'elvish'],
+    derived_stats: {
+      skill_modifiers: {
+        perception: { ability: 'wis', proficient: true, total: 3 },
+        stealth: { ability: 'dex', proficient: true, total: 2 },
+        survival: { ability: 'wis', proficient: true, total: 3 },
+      },
+    },
+    spellcasting: {
+      ability: 'wis',
+      cantrips_known: [],
+      prepared_from_choices: ['cure_wounds', 'ensnaring_strike'],
+      spells_prepared: ['cure_wounds', 'ensnaring_strike', 'hunter_mark'],
+      always_prepared_spells: ['hunter_mark'],
+      slots: { 1: 2 },
+    },
+    progression: { experience_points: 300 },
+  });
+  const incompleteChoices = {
+    deft_explorer_expertise: ['perception'],
+    deft_explorer_languages: ['draconic', 'dwarvish'],
+    fighting_style: ['druidic_warrior'],
+    prepared_spells: ['hail_of_thorns'],
+  };
+  const preview = getLevelUpPreview(ranger, getContentBundle(), { choices: incompleteChoices });
+  const cantripChoice = preview.requiredChoices.find((choice) => choice.id === 'druidic_warrior_cantrips');
+  const result = applyLevelUp({
+    characterSheet: ranger,
+    content: getContentBundle(),
+    payload: {
+      choices: {
+        ...incompleteChoices,
+        druidic_warrior_cantrips: ['druidcraft', 'produce_flame'],
+      },
+    },
+  });
+
+  assert.equal(cantripChoice.active, true);
+  assert(cantripChoice.options.some((option) => option.id === 'druidcraft'));
+  assert(preview.blockers.some((entry) => entry.type === 'required_choice' && entry.choice.id === 'druidic_warrior_cantrips'));
+  assert.equal(result.ok, true);
+  assert.equal(result.characterSheet.class_choices.fighting_style, 'druidic_warrior');
+  assert(result.characterSheet.spellcasting.cantrips_known.includes('druidcraft'));
+  assert(result.characterSheet.spellcasting.cantrips_known.includes('produce_flame'));
 });
 
 test('fixed HP increase includes per-level HP bonuses', () => {

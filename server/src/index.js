@@ -353,7 +353,12 @@ function characterSheetToWorldStats(characterSheet, characterId = null) {
     resistances: characterSheet.resistances || [],
     species_spells: (characterSheet.species_spells || []).map((spell) => spell.id || spell),
     class_cantrips: characterSheet.spellcasting?.cantrips_known || [],
-    class_spells: characterSheet.spellcasting?.spells_prepared || [],
+    class_spells: [
+      ...new Set([
+        ...(characterSheet.spellcasting?.spells_prepared || []),
+        ...(characterSheet.spellcasting?.always_prepared_spells || []),
+      ]),
+    ],
     class_choice_spells: characterSheet.class_choice_spells || characterSheet.spellcasting?.class_choice_spells || [],
     origin_magic: characterSheet.origin?.magic_initiate || {},
     experience_points: identity.experience_points ?? characterSheet.progression?.experience_points ?? 0,

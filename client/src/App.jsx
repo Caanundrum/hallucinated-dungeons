@@ -1173,9 +1173,10 @@ function LevelUpModal({ preview, error, busy, onClose, onConfirm }) {
   const canLevelUp = Boolean(preview?.canLevelUp);
   const requiredChoices = preview?.requiredChoices || [];
   const [choiceSelections, setChoiceSelections] = useState(() => buildInitialLevelUpChoices(preview));
+  const activeRequiredChoices = requiredChoices.filter((choice) => isLevelUpChoiceActive(choice, choiceSelections));
   const choiceBlockerTypes = new Set(['required_choice', 'invalid_choice']);
   const hardBlockers = blockers.filter((entry) => !choiceBlockerTypes.has(entry.type));
-  const choicesComplete = requiredChoices.every((choice) => {
+  const choicesComplete = activeRequiredChoices.every((choice) => {
     const selected = choiceSelections[choice.id] || [];
     return selected.length === Number(choice.count || 0);
   });
@@ -1245,10 +1246,10 @@ function LevelUpModal({ preview, error, busy, onClose, onConfirm }) {
               )) : <p className="muted-text">No new feature data for this level.</p>}
             </section>
 
-            {requiredChoices.length > 0 && (
+            {activeRequiredChoices.length > 0 && (
               <section className="sheet-section">
                 <h3>Level Choices</h3>
-                {requiredChoices.map((choice) => (
+                {activeRequiredChoices.map((choice) => (
                   <div key={choice.id} className="level-up-choice">
                     <div className="sheet-line">
                       <strong>{choice.label || titleCase(choice.id)}</strong>
@@ -1304,6 +1305,14 @@ function LevelUpModal({ preview, error, busy, onClose, onConfirm }) {
       </div>
     </div>
   );
+}
+
+function isLevelUpChoiceActive(choice = {}, selections = {}) {
+  const condition = choice.required_if;
+  if (!condition) return true;
+  const selected = selections[condition.choice_id] || [];
+  const required = String(condition.includes || condition.equals || '').toLowerCase();
+  return required ? selected.includes(required) : true;
 }
 
 function SheetStat({ label, value }) {

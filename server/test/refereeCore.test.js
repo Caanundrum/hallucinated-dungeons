@@ -1527,6 +1527,96 @@ test('Attack leaves movement and Bonus Action available until the player ends th
   assert.match(ended.reply, /Wolf uses bite/);
 });
 
+test("Paladin Divine Smite rides a weapon hit and spends the free use before slots", () => {
+  const paladin = {
+    ...characterSheet,
+    identity: { name: 'Ari', class: 'paladin', class_name: 'Paladin', level: 2 },
+    resources: {
+      paladins_smite: { name: "Paladin's Smite", remaining: 1, max: 1, reset: 'long_rest' },
+    },
+    spellcasting: {
+      ability: 'cha',
+      always_prepared_spells: ['divine_smite'],
+      slots: { 1: 2 },
+    },
+  };
+  const result = adjudicate({
+    message: 'I attack the Cultist with my longsword and use Divine Smite.',
+    worldState: worldState({
+      player_stats: {
+        hp: 12,
+        max_hp: 12,
+        armor_class: 16,
+        spell_slots: { 1: 2 },
+        resources: {
+          paladins_smite: { name: "Paladin's Smite", remaining: 1, max: 1, reset: 'long_rest' },
+        },
+      },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', hp: 12, max_hp: 12, ac: 16, is_player: true },
+          { name: 'Cultist', hp: 40, max_hp: 40, ac: 12, is_player: false },
+        ],
+      },
+    }),
+    characterSheet: paladin,
+    rollDie: sequenceRolls([12, 4, 5, 6]),
+  });
+  const cultist = result.worldState.combat_state.combatants.find((entry) => entry.name === 'Cultist');
+
+  assert.equal(cultist.hp, 22);
+  assert.equal(result.worldState.player_stats.resources.paladins_smite.remaining, 0);
+  assert.equal(result.worldState.player_stats.spell_slots[1], 2);
+  assert.equal(result.worldState.combat_state.turn_resources.action_available, false);
+  assert.equal(result.worldState.combat_state.turn_resources.bonus_action_available, false);
+  assert.match(result.reply, /Divine Smite/);
+  assert.match(result.reply, /free Paladin's Smite use/);
+});
+
+test('Paladin Divine Smite spends nothing when the declared weapon attack misses', () => {
+  const paladin = {
+    ...characterSheet,
+    identity: { name: 'Ari', class: 'paladin', class_name: 'Paladin', level: 2 },
+    resources: {
+      paladins_smite: { name: "Paladin's Smite", remaining: 1, max: 1, reset: 'long_rest' },
+    },
+    spellcasting: { ability: 'cha', always_prepared_spells: ['divine_smite'], slots: { 1: 2 } },
+  };
+  const result = adjudicate({
+    message: 'I attack the Cultist with my longsword and use Divine Smite.',
+    worldState: worldState({
+      player_stats: {
+        hp: 12,
+        max_hp: 12,
+        armor_class: 16,
+        spell_slots: { 1: 2 },
+        resources: {
+          paladins_smite: { name: "Paladin's Smite", remaining: 1, max: 1, reset: 'long_rest' },
+        },
+      },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', hp: 12, max_hp: 12, ac: 16, is_player: true },
+          { name: 'Cultist', hp: 40, max_hp: 40, ac: 30, is_player: false },
+        ],
+      },
+    }),
+    characterSheet: paladin,
+    rollDie: sequenceRolls([1]),
+  });
+
+  assert.equal(result.worldState.player_stats.resources.paladins_smite.remaining, 1);
+  assert.equal(result.worldState.player_stats.spell_slots[1], 2);
+  assert.equal(result.worldState.combat_state.turn_resources.bonus_action_available, true);
+  assert.match(result.reply, /no weapon hit occurred/);
+});
+
 test('level 2 Barbarian Reckless Attack grants attack advantage and exposes return attacks', () => {
   const barbarian = {
     ...characterSheet,

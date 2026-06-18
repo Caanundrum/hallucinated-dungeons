@@ -150,6 +150,7 @@ function getKnownSpellIds(characterSheet = {}, { includeRitualOnly = true } = {}
   const ids = new Set([
     ...(spellcasting.cantrips_known || []),
     ...(spellcasting.spells_prepared || []),
+    ...(spellcasting.always_prepared_spells || []),
     ...(characterSheet.class_choice_spells || []).map((spell) => spell.id || spell),
     ...(spellcasting.class_choice_spells || []).map((spell) => spell.id || spell),
     ...(characterSheet.species_spells || []).map((spell) => spell.id || spell),
@@ -171,6 +172,10 @@ function summarizeKnownSpells(characterSheet = {}, content = {}) {
 }
 
 function validateSpellTiming({ spell, message, worldState = {}, characterSheet = {} }) {
+  if (spell.id === 'divine_smite') {
+    return 'Divine Smite is cast immediately after a melee weapon hit. Declare it with the attack, such as "I attack the cultist with my longsword and use Divine Smite." No resource is spent yet.';
+  }
+
   if (spell.id === 'mage_armor' && characterSheet?.equipped?.armor) {
     return 'Mage Armor only works on a creature that is not wearing armor. Your current armor is already doing the job, and it is not interested in being replaced by sparkle math.';
   }

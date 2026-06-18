@@ -184,6 +184,16 @@ test('builds Fighter Action Surge resource starting at level 2', () => {
   assert.equal(fighter.action_surge.reset, 'short_rest');
 });
 
+test("builds Paladin's Smite free use starting at level 2", () => {
+  const levelOne = buildResourceState({ identity: { class: 'paladin', level: 1 } });
+  const levelTwo = buildResourceState({ identity: { class: 'paladin', level: 2 } });
+
+  assert.equal(levelOne.paladins_smite, undefined);
+  assert.equal(levelTwo.paladins_smite.remaining, 1);
+  assert.equal(levelTwo.paladins_smite.max, 1);
+  assert.equal(levelTwo.paladins_smite.reset, 'long_rest');
+});
+
 test('builds Cleric Channel Divinity and Druid Wild Shape resources starting at level 2', () => {
   const cleric = buildResourceState({
     identity: { class: 'cleric', level: 2 },

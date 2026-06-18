@@ -133,6 +133,10 @@ const {
   resumeCombatMovement,
 } = require('./combatMovementEngine');
 const { resolveReadyAction } = require('./readyActionEngine');
+const {
+  resolvePaladinSmiteOnHit,
+  wantsDivineSmite,
+} = require('./paladinSmiteEngine');
 
 const DEFAULT_CHECK_DC = 15;
 
@@ -2184,6 +2188,19 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
       consumeEffectIds.push('sleep');
       if (Number(target.hp) > 0) lines.push(`${target.name} wakes as the damage lands. Extremely rude alarm clock, but effective.`);
     }
+    const smite = resolvePaladinSmiteOnHit({
+      message,
+      worldState: { ...attackState, combat_state: combat },
+      characterSheet,
+      targetName: target.name,
+      attack,
+      crit: isCrit,
+      rollDie,
+    });
+    attackState = smite.worldState;
+    combat = cloneCombatState(attackState.combat_state);
+    target = findCombatTarget(combat, target.name) || target;
+    lines.push(...smite.lines);
     lines.push(...applyWeaponMasteryOnHit({ attack, target, combat, characterSheet, damageDealt: totalDamage, rollDie }).lines);
     const ancestry = applyGiantAncestryOnHit({
       message,
@@ -2202,9 +2219,11 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
     cleaveExtra = getCleaveExtraAttack({ characterSheet, attack, primaryTarget: target, combat, message });
   } else if (criticalMiss) {
     lines.push('**Critical miss.** The attack fails no matter how pretty the math looked in the margins.');
+    if (wantsDivineSmite(message)) lines.push('**Divine Smite:** no weapon hit occurred, so no Bonus Action, free use, or spell slot is spent.');
     lines.push(...applyWeaponMasteryOnMiss({ attack, target, characterSheet }).lines);
   } else {
     lines.push('Miss. The attack fails to connect, which is rude but rules-compliant.');
+    if (wantsDivineSmite(message)) lines.push('**Divine Smite:** no weapon hit occurred, so no Bonus Action, free use, or spell slot is spent.');
     lines.push(...applyWeaponMasteryOnMiss({ attack, target, characterSheet }).lines);
   }
   consumeEffectIds.push(...attackBonusDice.expireEffectIds);
