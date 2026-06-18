@@ -21,10 +21,21 @@ function answerResourceCountQuestion(message = '', worldState = {}) {
   if (!isResourceQuestion(text)) return '';
 
   const resources = worldState.player_stats?.resources || {};
-  const matches = findRequestedResources(text, resources);
+  const spellSlots = worldState.player_stats?.spell_slots || {};
+  const resourceMatches = findRequestedResources(text, resources)
+    .map((match) => ({
+      index: match.index,
+      entry: formatResourceEntry(match.key, resources[match.key], text),
+    }));
+  const spellSlotMatch = findRequestedSpellSlots(text, spellSlots);
+  const matches = [
+    ...resourceMatches,
+    ...(spellSlotMatch ? [spellSlotMatch] : []),
+  ].sort((a, b) => a.index - b.index);
+
   if (!matches.length) return '';
 
-  const entries = matches.map((match) => formatResourceEntry(match.key, resources[match.key], text));
+  const entries = matches.map((match) => match.entry);
   if (entries.length > 1) {
     return `Current sheet state:\n${entries.map((entry) => `- ${entry}`).join('\n')}`;
   }
@@ -48,7 +59,8 @@ function formatResourceEntry(key, resource = {}, text = '') {
 }
 
 function isResourceQuestion(text = '') {
-  return /\b(?:how many|how much|uses?|left|remaining|available|resource|resources|spent|spend|after)\b/.test(text);
+  return /\b(?:how many|how much|uses?|left|remaining|available|resource|resources|spent|spend|after)\b/.test(text)
+    || /\bspell slots?\b/.test(text);
 }
 
 function findRequestedResources(text = '', resources = {}) {
@@ -71,6 +83,34 @@ function findRequestedResources(text = '', resources = {}) {
     matches.push({ key: 'second_wind', index: text.indexOf('tactical mind') });
   }
   return matches.sort((a, b) => a.index - b.index);
+}
+
+function findRequestedSpellSlots(text = '', spellSlots = {}) {
+  const index = spellSlotIndex(text);
+  if (index === -1) return null;
+  return {
+    index,
+    entry: formatSpellSlotEntry(spellSlots),
+  };
+}
+
+function spellSlotIndex(text = '') {
+  const direct = firstAliasIndex(text, ['spell slot', 'spell slots']);
+  if (direct !== -1) return direct;
+  const levelSlot = /\blevel \d+ slots?\b/.exec(text);
+  if (levelSlot) return levelSlot.index;
+  const slots = phraseIndex(text, 'slots');
+  if (slots !== -1 && /\b(?:spell|spells|cast|casting)\b/.test(text)) return slots;
+  return -1;
+}
+
+function formatSpellSlotEntry(spellSlots = {}) {
+  const entries = Object.entries(spellSlots || {})
+    .filter(([, value]) => value !== null && value !== undefined)
+    .sort(([a], [b]) => Number(a) - Number(b))
+    .map(([level, remaining]) => `level ${level}: ${formatNumber(remaining)}`);
+  if (!entries.length) return '**Spell slots: none recorded on the current sheet.**';
+  return `**Spell slots remaining: ${entries.join(', ')}.**`;
 }
 
 function firstAliasIndex(text, aliases = []) {

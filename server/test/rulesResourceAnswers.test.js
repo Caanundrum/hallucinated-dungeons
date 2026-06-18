@@ -9,6 +9,7 @@ const { answerResourceCountQuestion } = require('../src/rulesResourceAnswers');
 
 const worldState = {
   player_stats: {
+    spell_slots: { 1: 2 },
     resources: {
       second_wind: { name: 'Second Wind', remaining: 1, max: 2, reset: 'long_rest', recover_on_short_rest: 1 },
       action_surge: { name: 'Action Surge', remaining: 0, max: 1, reset: 'short_rest' },
@@ -51,6 +52,31 @@ test('answers every named resource in a combined exact resource question', () =>
   assert.match(reply, /Action Surge 0\/1 uses left/);
   assert.match(reply, /Second Wind 1\/2 uses left/);
   assert.ok(reply.indexOf('Action Surge') < reply.indexOf('Second Wind'));
+});
+
+test('includes spell slots in combined resource questions', () => {
+  const reply = answerResourceCountQuestion(
+    'What are my exact Channel Divinity, Lucky, and spell slots remaining?',
+    {
+      player_stats: {
+        spell_slots: { 1: 1, 2: 0 },
+        resources: {
+          channel_divinity: { name: 'Channel Divinity', remaining: 1, max: 2, reset: 'long_rest' },
+          luck_points: { name: 'Luck Points', remaining: 2, max: 2, reset: 'long_rest' },
+        },
+      },
+    }
+  );
+
+  assert.match(reply, /Channel Divinity 1\/2 uses left/);
+  assert.match(reply, /Luck Points 2\/2 uses left/);
+  assert.match(reply, /Spell slots remaining: level 1: 1, level 2: 0/);
+});
+
+test('answers direct spell-slot questions from current sheet state', () => {
+  const reply = answerResourceCountQuestion('How many spell slots do I have left?', worldState);
+
+  assert.match(reply, /Spell slots remaining: level 1: 2/);
 });
 
 test('ignores non-resource questions', () => {

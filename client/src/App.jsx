@@ -173,6 +173,7 @@ function App() {
   const [characterError, setCharacterError] = useState(null);
   const [characterSaving, setCharacterSaving] = useState(false);
   const [characterJoining, setCharacterJoining] = useState(false);
+  const [creatingCharacter, setCreatingCharacter] = useState(false);
 
   // Narrative feed (DM1)
   const [narrative, setNarrative] = useState([]);
@@ -190,10 +191,15 @@ function App() {
   const narrativeEndRef = useRef(null);
   const rulesEndRef = useRef(null);
   const currentCharacterRef = useRef(null);
+  const creatingCharacterRef = useRef(false);
 
   useEffect(() => {
     currentCharacterRef.current = currentCharacter;
   }, [currentCharacter]);
+
+  useEffect(() => {
+    creatingCharacterRef.current = creatingCharacter;
+  }, [creatingCharacter]);
 
   // ── Socket lifecycle ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -243,6 +249,7 @@ function App() {
       setLevelUpPreview(null);
       setLevelUpError(null);
       setLevelUpBusy(false);
+      setCreatingCharacter(false);
       setCharacterStatus('loading');
       socket.emit('get_character_data', { sessionId: id, sessionToken });
     });
@@ -292,7 +299,9 @@ function App() {
       setActiveCharacterId(activeCharacterId || null);
       setCharacterError(null);
       setCurrentCharacter(character || null);
-      if (character) {
+      if (creatingCharacterRef.current) {
+        setCharacterStatus('required');
+      } else if (character) {
         setCharacterStatus('ready');
       } else if (characters.length > 0) {
         setCharacterStatus('select');
@@ -304,6 +313,7 @@ function App() {
     socket.on('character_ready', ({ character, characterId, shouldStartSession } = {}) => {
       setCharacterSaving(false);
       setCharacterJoining(false);
+      setCreatingCharacter(false);
       setLevelUpBusy(false);
       setCharacterError(null);
       if (character) setCurrentCharacter(character);
@@ -504,6 +514,7 @@ function App() {
       setCharacterError({ message: 'No active session. Please refresh.' });
       return;
     }
+    setCreatingCharacter(false);
     setLevelUpPreview(null);
     setLevelUpError(null);
     if (characterId === activeCharacterId && currentCharacter) {
@@ -518,6 +529,7 @@ function App() {
   }, [activeCharacterId, currentCharacter, sessionId, sessionToken]);
 
   const handleCreateNewCharacter = useCallback(() => {
+    setCreatingCharacter(true);
     setCurrentCharacter(null);
     setActiveCharacterId(null);
     setCharacterError(null);
@@ -527,6 +539,7 @@ function App() {
   }, []);
 
   const handleSwitchCharacter = useCallback(() => {
+    setCreatingCharacter(false);
     setCharacterError(null);
     setLevelUpPreview(null);
     setLevelUpError(null);
@@ -602,7 +615,7 @@ function App() {
   const rulesTextareaDisabled = !connected || !sessionId;
   const rulesDisabled = dm2Typing || !connected || !sessionId;
 
-  if (characterStatus !== 'ready') {
+  if (creatingCharacter || characterStatus !== 'ready') {
     return (
       <div className="app">
         <header className="app-header">
@@ -620,7 +633,7 @@ function App() {
             <h2>Preparing character creation...</h2>
             <p>The quills are sharpening themselves. Probably fine.</p>
           </main>
-        ) : characterStatus === 'select' ? (
+        ) : characterStatus === 'select' && !creatingCharacter ? (
           <CharacterSelect
             characters={availableCharacters}
             activeCharacterId={activeCharacterId}
@@ -1319,20 +1332,39 @@ function formatPreviewSpellcasting(spellcasting = {}) {
 function formatEffectSummary(effect) {
   const parts = [];
   if (effect.mechanical_effect) parts.push(effect.mechanical_effect);
-  else if (effect.target === 'armor_formula') {
-    parts.push(`Base AC ${effect.base}${effect.dex_cap == null ? ' + full DEX modifier' : ` + DEX modifier cap ${effect.dex_cap}`}`);
-  } else if (effect.target === 'shield_bonus') {
-    parts.push(`AC ${fmtMod(effect.value)}`);
-  } else if (effect.target === 'max_hp_per_level_bonus') {
-    parts.push(`Max HP ${fmtMod(effect.value)} per level`);
-  } else if (effect.target && effect.value != null) {
-    parts.push(`${titleCase(String(effect.target).replaceAll('_', ' '))}: ${fmtMod(effect.value)}`);
-  }
+  parts.push(...getEffectRules(effect).map((rule) => formatEffectRuleSummary(rule, effect)).filter(Boolean));
   if (effect.duration) parts.push(`Duration ${effect.duration}`);
   if (effect.remaining_rounds != null) parts.push(`${effect.remaining_rounds} rounds left`);
   else if (effect.remaining_minutes != null) parts.push(`${effect.remaining_minutes} minutes left`);
   if (effect.concentration) parts.push('Concentration');
   return parts.join(' - ') || 'Effect active';
+}
+
+function getEffectRules(effect = {}) {
+  return Array.isArray(effect.rules_effects) && effect.rules_effects.length
+    ? effect.rules_effects
+    : [effect];
+}
+
+function formatEffectRuleSummary(rule = {}, effect = {}) {
+  const target = rule.target || effect.target;
+  const value = rule.value ?? effect.value;
+  if (target === 'armor_formula') {
+    return `Base AC ${rule.base ?? effect.base ?? '--'}${(rule.dex_cap ?? effect.dex_cap) == null ? ' + full DEX modifier' : ` + DEX modifier cap ${rule.dex_cap ?? effect.dex_cap}`}`;
+  }
+  if (target === 'shield_bonus') {
+    return `AC ${fmtMod(value)}`;
+  }
+  if (target === 'armor_class_bonus') {
+    return `AC ${fmtMod(value)}`;
+  }
+  if (target === 'max_hp_per_level_bonus') {
+    return `Max HP ${fmtMod(value)} per level`;
+  }
+  if (target && value != null) {
+    return `${titleCase(String(target).replaceAll('_', ' '))}: ${fmtMod(value)}`;
+  }
+  return '';
 }
 
 function formatEffectName(effect) {
