@@ -1,5 +1,54 @@
 # Hallucinated Dungeons QA Handoff
 
+## Latest QA Pass - 2026-06-18 Cleric/Druid Level 2 Production QA `a675d3e`
+
+Scope:
+
+- Verified production frontend at `https://hallucinated-dungeons.vercel.app/`.
+- Latest repo HEAD seen by QA: `43c404e Update QA_HANDOFF.md` (handoff-only).
+- App-code commit under test: `a675d3e Add Cleric and Druid level 2 mechanics`.
+- Relevant prior fix under test: `094d442 Scope combat turn resources to active character`.
+- QA remained read-only for app code. Only this handoff was updated.
+
+Automated checks:
+
+- Server `npm.cmd test`: PASS, `496/496`.
+- Client `npm.cmd run lint`: PASS.
+- `git diff --check HEAD^ HEAD`: PASS for the handoff-only HEAD.
+
+Verified passed in production - Cleric:
+
+- Created fresh `QA Cleric` through the visible character-creation UI as Orc Cleric / Protector / Wayfarer.
+- Level 1 sheet passed: `Orc Cleric - Level 1`, HP `10/10`, AC `16`, speed `30 ft`, Wisdom spellcasting attack `+5`, save DC `13`.
+- Used QA level-up hook to make `QA Cleric` level-up-ready, then applied level 2 through the visible sheet UI.
+- Level 2 sheet passed: `Orc Cleric - Level 2`, HP `17/17`, AC `16`, XP `300/900`, feature `Channel Divinity`, resource `Channel Divinity 2/2 until short rest`.
+- Prior action-economy carryover fix appears to pass for this path: after switching to Cleric, a full-HP Divine Spark heal attempt reported fresh turn resources (`Action`, `Bonus Action`, `Reaction`, `30 ft movement`) instead of inheriting another character's spent state.
+- `I use Divine Spark to heal myself.` at full HP correctly did not spend Channel Divinity.
+- `I use Divine Spark to damage First Hostile Shape That Comes Close.` worked: target failed CON save `12 vs DC 13`, took `9 radiant damage`, dropped from `3 -> 0 HP`, awarded `25 XP`, and spent Channel Divinity to `1/2`.
+- Direct Rules query confirmed Level 1 Cleric spell slots `3/3`.
+- Browser console/warn/error logs were empty during the Cleric checks.
+
+Blocked in production - Druid:
+
+- Attempted Druid creation through the visible UI multiple times as a normal player path.
+- Reproduced a hard creation-flow failure: while creating `QA Druid` as Orc Druid / Warden / Wayfarer, the app abruptly exited character creation and returned to the existing game screen before review/confirm.
+- Most recent reproduction happened at Step 7 of 10 on the `Skills` page while selecting the first Druid class skill (`Animal Handling`). Earlier attempts dropped around the later equipment/spell area.
+- After the jump, the character switcher did not contain `QA Druid`; the draft was not saved.
+- Browser console/warn/error logs were empty, so this looks like an app state/navigation/socket-flow issue rather than an obvious client exception.
+- Because the Druid cannot be created through the visible production UI, QA could not fairly verify level 2 `Wild Shape` or `Wild Companion` in live player flow.
+
+Findings for DEV:
+
+- P1: Druid creation flow can exit to the game screen before review/confirm and lose the draft. Repro path: `Create New Character` -> name `QA Druid` -> Orc with two languages -> Druid with Primal Order `Warden` -> Wayfarer with DEX `+1`, WIS `+2` -> Lucky -> ability scores -> Skills -> select `Animal Handling`; production returned to the game screen and no `QA Druid` was saved. This blocks production QA of Druid level 2 mechanics. The wizard did not merely stumble; it left the dungeon and pretended it had an appointment.
+- P3: Cleric sheet display regression after Divine Spark action: `Equipped Defenses` changed from clear AC formulas (`Shield AC +2`, `Scale Mail Base AC 14 + DEX modifier cap 2`) to `Shield / Effect active` and `Scale Mail / Effect active`, even though AC stayed correct at `16` and `Active Effects` said none.
+- P3: Combined Rules resource query can omit spell slots when asked alongside class resources. Querying `Channel Divinity, Lucky, level 1 Cleric spell slots` returned Channel Divinity and Lucky but omitted spell slots; a direct spell-slot query returned `3/3`.
+- P3 / review note: During Druid creation, Warden selection says it grants Medium armor training, but build guidance/default equipment still references Leather Armor and AC `13`. This may be valid default equipment, but DEV should confirm whether Warden should offer or default to medium armor.
+
+Current recommendation:
+
+- Treat Cleric level 2 as production-passed for the tested path.
+- Fix Druid creation before adding more Druid mechanics. Once a Druid can be created through the UI, QA should retest level-up, `Wild Companion`, `Wild Shape`, resource spending from `2/2`, active effects, and sheet/resource display.
+
 Date: 2026-06-14
 QA thread role: read-only QA, no development changes.
 
