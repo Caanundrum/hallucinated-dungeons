@@ -1,5 +1,53 @@
 # Hallucinated Dungeons QA Handoff
 
+## Latest QA Pass - 2026-06-18 Paladin/Ranger Level 2 Production QA `aae53ad`
+
+Scope:
+
+- Verified production frontend at `https://hallucinated-dungeons.vercel.app/` after the latest push.
+- Repo tip during QA: `503e680 Update QA_HANDOFF.md`; app-code commit under test: `aae53ad Add Paladin and Ranger level 2 mechanics`.
+- Created fresh production characters `QA Paladin 2` and `QA Ranger 2`, leveled both through the visible UI, and tested class-specific mechanics/resources.
+- QA remained read-only for app code. Only this handoff was updated.
+
+Automated checks:
+
+- Server `npm.cmd test`: PASS, `515/515`.
+- Client `npm.cmd run lint`: PASS.
+- `git diff --check aae53ad^ aae53ad`: PASS.
+
+Verified passed in production - Paladin:
+
+- Fresh Orc Paladin creation passed with Noble background, Skilled choices, Longsword/Javelin masteries, Bless and Cure Wounds.
+- Level 1 sheet passed: HP `11/11`, AC `18`, Longsword attack `+5`, CHA spellcasting attack `+4`, DC `12`.
+- QA level-up hook correctly returned blocked until one Fighting Style and one additional prepared spell were selected.
+- Visible level-up UI passed: selected `Defense` and `Command`; `Apply Level Up` enabled only after both choices were complete.
+- Level 2 sheet passed: `Orc Paladin - Level 2`, HP `18/18`, AC `19`, XP `300/900`, Command added, Divine Smite always prepared, Paladin's Smite `1/1 until long rest`.
+- Divine Smite miss behavior passed using attack wording without an explicit weapon name: attack missed and no Bonus Action, free use, or spell slot was spent.
+- Divine Smite hit behavior passed on retry: Longsword hit for `4`, free Paladin's Smite use spent first, Bonus Action spent, Divine Smite dealt `9 radiant damage (2d8)`, target fell, combat ended, and XP increased to `325/900`.
+- Fresh combined Rules query passed after the Smite: Paladin's Smite `0/1`, level 1 spell slots `2/2`.
+
+Verified passed in production - Ranger:
+
+- Fresh Orc Ranger creation passed with Criminal background, Alert, Longbow/Shortsword masteries, Hail of Thorns and Cure Wounds; Hunter's Mark was always prepared with `2/2` free uses.
+- Level 1 sheet passed: HP `12/12`, AC `14`, Longbow attack `+5`, WIS spellcasting attack `+4`, DC `12`, initiative `+5` from Alert.
+- QA level-up hook correctly blocked application on four choice groups: one Expertise skill, two languages, one Fighting Style, and one prepared spell.
+- Visible level-up UI passed: selected Perception Expertise, Draconic, Dwarvish, Archery, and Ensnaring Strike; Apply enabled only after all required choices were complete.
+- Level 2 sheet passed: HP `20/20`, XP `300/900`, Longbow attack increased from `+5` to `+7`, Perception became `+6 Expertise`, both languages were added, and Ensnaring Strike was prepared.
+- Direct Rules query for Hunter's Mark passed: remaining `2/2`, max `2`.
+- Browser console/warn/error logs were empty throughout the pass.
+
+Findings for DEV:
+
+- P2: Explicit weapon-name Paladin attacks are misclassified as object use. Both `I attack the hostile shape beneath the surface with my longsword and use Divine Smite.` and the more explicit `I make a melee weapon attack ... with my Longsword and use Divine Smite if the attack hits.` resolved as `You take the Utilize action to use Longsword. Object state is updated for narration.` No attack roll occurred and the Action was spent. Control wording without naming the weapon (`I attack Hostile Shape Beneath Surface and use Divine Smite if I hit.`) routed correctly. Expected: clear attack intent must beat carried-object Utilize routing even when an equipped weapon is named.
+- P3: Paladin Defense AC is calculated but omitted from the visible Equipped Defenses breakdown. Sheet AC is correctly `19`, but the breakdown only shows Chain Mail `16` and Shield `+2`, leaving the Fighting Style `+1` unexplained.
+- P3: Ranger combined resource query drops Hunter's Mark. Asking for Hunter's Mark uses plus level 1 Ranger spell slots returned only spell slots `2/2`; asking for Hunter's Mark alone correctly returned `2/2`.
+- P3: Ranger sheet places `Initiative Proficiency / Effect active` inside `Equipped Defenses`. Initiative `+5` is correct, but the grouping/label is misleading and resembles the prior generic `Effect active` display issue.
+
+Current recommendation:
+
+- Treat the new Paladin and Ranger level-2 choice/application math as production-passed.
+- Fix attack-intent precedence over weapon object interaction before relying on player-natural Smite declarations. The Paladin should swing the sword, not file a utilization report about it.
+
 ## Latest QA Pass - 2026-06-18 Wild Companion Dismissal Retest `f827fb7`
 
 Scope:
