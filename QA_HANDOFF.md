@@ -1,5 +1,37 @@
 # Hallucinated Dungeons QA Handoff
 
+## Latest QA Pass - 2026-06-18 Wild Companion Dismissal Retest `f827fb7`
+
+Scope:
+
+- Verified production frontend at `https://hallucinated-dungeons.vercel.app/` after the latest push.
+- Repo tip during QA: `379d5b6 Update QA_HANDOFF.md`; app-code commit under test: `f827fb7 Add Wild Companion dismissal lifecycle`.
+- Retested dismissal, resource preservation, resummoning, active-effect state, and immediate end-turn behavior on live `QA Druid 2`.
+- QA remained read-only for app code. Only this handoff was updated.
+
+Automated checks:
+
+- Server `npm.cmd test`: PASS, `501/501`.
+- Client `npm.cmd run lint`: PASS.
+- `git diff --check f827fb7^ f827fb7`: PASS.
+
+Verified fixed / passed in production:
+
+- `I dismiss my Wild Companion familiar.` now works. Response: `You dismiss your Wild Companion. familiar vanishes from the scene. No Wild Shape use is spent.`
+- Sheet after dismissal passed: `Active Effects` showed `No active effects`, `Wild Companion Familiar` was absent, and Wild Shape remained `2/2 until short rest`.
+- Fresh resummon passed: `I use Wild Companion to summon a familiar spirit named QA Sprout Three.` added the familiar again and reduced Wild Shape from `2/2` to `1/2`.
+- Sheet after resummon passed: `Wild Companion Familiar` returned under Active Effects and Wild Shape showed `1/2 until short rest`.
+- Immediate `I end my turn.` after the fresh successful summon passed with the expected no-initiative response; no GM error occurred.
+- Browser console/warn/error logs were empty throughout the retest.
+
+Findings for DEV:
+
+- No new blocker found in this focused pass.
+
+Current recommendation:
+
+- Treat the Wild Companion lifecycle as production-passed: summon, duplicate guard, dismiss without resource spend, resummon with resource spend, sheet state, and end-turn follow-up all work. The familiar can now leave the party without filing a supernatural two-week notice.
+
 ## Latest QA Pass - 2026-06-18 Druid Follow-up Retest `fbc1862`
 
 Scope:
