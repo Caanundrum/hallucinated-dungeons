@@ -36,7 +36,7 @@ function resolveFeatureAction({ message = '', worldState = {}, characterSheet = 
   if (intent.id === 'divine_spark') return resolveDivineSpark({ message, worldState, characterSheet, rollDie });
   if (intent.id === 'turn_undead') return resolveTurnUndead({ worldState, characterSheet, rollDie });
   if (intent.id === 'innate_sorcery') return resolveInnateSorcery({ worldState, characterSheet });
-  if (intent.id === 'wild_companion') return resolveWildCompanion({ worldState, characterSheet });
+  if (intent.id === 'wild_companion') return resolveWildCompanion({ message, worldState, characterSheet });
   if (intent.id === 'wild_shape') return resolveWildShape({ message, worldState, characterSheet });
   if (intent.id === 'bardic_inspiration') return resolveBardicInspiration({ message, worldState, characterSheet });
   if (intent.id === 'patient_defense') return resolvePatientDefense({ worldState, characterSheet });
@@ -65,6 +65,7 @@ function getFeatureIntent(message = '') {
   if (/\bturn\s+undead\b/.test(text)) return { id: 'turn_undead' };
   if (/\bchannel\s+divinity\b/.test(text)) return { id: 'channel_divinity' };
   if (/\binnate\s+sorcery\b/.test(text)) return { id: 'innate_sorcery' };
+  if (isWildCompanionDismissal(text)) return { id: 'wild_companion' };
   if (/\bwild\s+companion\b|\bfind\s+familiar\b.*\bwild\s*shape\b|\bwild\s*shape\b.*\bfind\s+familiar\b/.test(text)) return { id: 'wild_companion' };
   if (/\bwild\s*shape\b|\bshape\s*change\b|\bturn\s+into\s+(?:a|an|the)?\s*(?:wolf|cat|badger|spider|rat|dog|mastiff|goat|boar|scouting beast|[a-z -]*beast)\b/.test(text)) return { id: 'wild_shape' };
   if (/\bbardic\s+inspiration\b/.test(text)) return { id: 'bardic_inspiration' };
@@ -532,9 +533,13 @@ function resolveWildShape({ message = '', worldState = {}, characterSheet = {} }
   };
 }
 
-function resolveWildCompanion({ worldState = {}, characterSheet = {} } = {}) {
+function resolveWildCompanion({ message = '', worldState = {}, characterSheet = {} } = {}) {
   const requirement = requireDruidWildShape('Wild Companion', worldState, characterSheet);
   if (requirement) return requirement;
+
+  if (isWildCompanionDismissal(message)) {
+    return dismissWildCompanion({ worldState, characterSheet });
+  }
 
   if (hasActiveEffect(worldState, 'wild_companion')) {
     return {
@@ -573,6 +578,42 @@ function resolveWildCompanion({ worldState = {}, characterSheet = {} } = {}) {
     logType: 'feature_wild_companion',
     worldState: withCompanion,
     reply: `You use **Wild Companion**, spending one Wild Shape use to call a familiar spirit into the scene. ${companionName} is now present for narration and future targeting. Wild Shape uses left: ${remainingResourceText(withCompanion, characterSheet, 'wild_shape')}.`,
+  };
+}
+
+function dismissWildCompanion({ worldState = {}, characterSheet = {} } = {}) {
+  const activeEffect = (worldState.active_effects || []).find((effect) => effect.id === 'wild_companion');
+  const companion = (worldState.player_stats?.companions || [])
+    .find((entry) => normalizeId(entry.id || entry.name) === 'wild_companion_familiar');
+  if (!activeEffect && !companion) {
+    return {
+      handled: true,
+      logType: 'feature_wild_companion_not_active',
+      worldState: mergeWorldResources(worldState, buildResourceState(characterSheet, worldState)),
+      reply: 'No Wild Companion familiar is currently present to dismiss.',
+    };
+  }
+
+  const spentAction = spendTurnResource(worldState, 'action', 'Dismiss Wild Companion', characterSheet);
+  if (!spentAction.ok) {
+    return {
+      handled: true,
+      logType: 'feature_action_unavailable',
+      worldState: spentAction.worldState,
+      reply: spentAction.reply,
+    };
+  }
+
+  const companionName = companion?.name || activeEffect?.target || 'familiar';
+  const stripped = removeCompanionFromWorldState(spentAction.worldState, companionName);
+  const retainedEffects = (stripped.active_effects || []).filter((effect) => effect.id !== 'wild_companion');
+  const dismissed = applyActiveEffectsToWorldState(stripped, retainedEffects, characterSheet);
+
+  return {
+    handled: true,
+    logType: 'feature_wild_companion_dismissed',
+    worldState: dismissed,
+    reply: `You dismiss your **Wild Companion**. ${companionName} vanishes from the scene. No Wild Shape use is spent.`,
   };
 }
 
@@ -961,6 +1002,32 @@ function addCompanionToWorldState(worldState = {}, companionName = 'familiar') {
         }
       : scene,
   };
+}
+
+function removeCompanionFromWorldState(worldState = {}, companionName = 'familiar') {
+  const scene = worldState.scene_presence || {};
+  const normalizedName = normalizeId(companionName);
+  return {
+    ...worldState,
+    player_stats: {
+      ...(worldState.player_stats || {}),
+      companions: (worldState.player_stats?.companions || []).filter((companion) => (
+        normalizeId(companion.id || companion.name) !== 'wild_companion_familiar'
+      )),
+    },
+    scene_presence: {
+      ...scene,
+      present_npcs: (scene.present_npcs || []).filter((name) => normalizeId(name) !== normalizedName),
+    },
+  };
+}
+
+function isWildCompanionDismissal(message = '') {
+  const text = String(message || '').toLowerCase();
+  const hasFamiliarTarget = /\b(?:wild\s+companion|familiar)\b/.test(text);
+  const hasDismissalVerb = /\b(?:dismiss|release|banish)\b/.test(text)
+    || /\bsend\b.*\b(?:away|home|back)\b/.test(text);
+  return hasFamiliarTarget && hasDismissalVerb;
 }
 
 function inferFamiliarName(worldState = {}) {

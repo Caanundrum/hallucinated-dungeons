@@ -393,6 +393,95 @@ test('Wild Companion spends a Wild Shape use and adds a familiar to scene state'
   assert.equal(result.worldState.combat_state.turn_resources.action_available, false);
 });
 
+test('Wild Companion dismissal preserves Wild Shape and permits a later resummon', () => {
+  const druid = sheet('druid', {
+    identity: { name: 'Ari', class: 'druid', level: 2 },
+  });
+  const initialState = {
+    player_stats: {
+      hp: 12,
+      max_hp: 12,
+      armor_class: 13,
+      resources: {
+        wild_shape: { name: 'Wild Shape', remaining: 2, max: 2, reset: 'short_rest' },
+      },
+    },
+    scene_presence: {
+      exact_location: 'Lantern Bridge',
+      present_npcs: [],
+      present_objects: [],
+    },
+    active_effects: [],
+    combat_state: null,
+  };
+
+  const summoned = resolveFeatureAction({
+    message: 'I use Wild Companion.',
+    worldState: initialState,
+    characterSheet: druid,
+  });
+  const dismissed = resolveFeatureAction({
+    message: 'I dismiss my Wild Companion familiar.',
+    worldState: summoned.worldState,
+    characterSheet: druid,
+  });
+  const resummoned = resolveFeatureAction({
+    message: 'I use Wild Companion again.',
+    worldState: dismissed.worldState,
+    characterSheet: druid,
+  });
+
+  assert.equal(summoned.worldState.player_stats.resources.wild_shape.remaining, 1);
+  assert.equal(dismissed.logType, 'feature_wild_companion_dismissed');
+  assert.equal(dismissed.worldState.player_stats.resources.wild_shape.remaining, 1);
+  assert.equal(dismissed.worldState.active_effects.some((effect) => effect.id === 'wild_companion'), false);
+  assert.equal(dismissed.worldState.player_stats.companions.length, 0);
+  assert.equal(dismissed.worldState.scene_presence.present_npcs.includes('familiar'), false);
+  assert.match(dismissed.reply, /No Wild Shape use is spent/);
+  assert.equal(resummoned.worldState.player_stats.resources.wild_shape.remaining, 0);
+  assert.equal(resummoned.worldState.active_effects.some((effect) => effect.id === 'wild_companion'), true);
+});
+
+test('dismissing Wild Companion in combat spends the Action but not Wild Shape', () => {
+  const result = resolveFeatureAction({
+    message: 'Send my familiar away.',
+    worldState: combatWorld({
+      player_stats: {
+        hp: 12,
+        max_hp: 12,
+        armor_class: 13,
+        resources: {
+          wild_shape: { name: 'Wild Shape', remaining: 1, max: 2, reset: 'short_rest' },
+        },
+        companions: [
+          { id: 'wild_companion_familiar', name: 'familiar', type: 'familiar', source: 'Wild Companion' },
+        ],
+      },
+      scene_presence: {
+        exact_location: 'Lantern Bridge',
+        present_npcs: ['familiar'],
+        present_objects: [],
+      },
+      active_effects: [
+        {
+          id: 'wild_companion',
+          name: 'Wild Companion Familiar',
+          target: 'familiar',
+          duration: 'until dismissed',
+          rules_effects: [],
+        },
+      ],
+    }),
+    characterSheet: sheet('druid', {
+      identity: { name: 'Ari', class: 'druid', level: 2 },
+    }),
+  });
+
+  assert.equal(result.logType, 'feature_wild_companion_dismissed');
+  assert.equal(result.worldState.player_stats.resources.wild_shape.remaining, 1);
+  assert.equal(result.worldState.combat_state.turn_resources.action_available, false);
+});
+
 test('Bardic Inspiration requires another present creature target', () => {
   const noTarget = resolveFeatureAction({
     message: 'I use Bardic Inspiration.',
