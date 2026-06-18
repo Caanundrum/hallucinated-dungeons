@@ -1,5 +1,38 @@
 # Hallucinated Dungeons QA Handoff
 
+## Latest QA Pass - 2026-06-18 Druid Follow-up Retest `fbc1862`
+
+Scope:
+
+- Verified production frontend at `https://hallucinated-dungeons.vercel.app/` after the next push.
+- Repo tip during QA: `fb6c82e Update QA_HANDOFF.md`; app-code commit under test: `fbc1862 Stabilize Druid resource followups`.
+- Retested the three open Druid items from the prior pass: end turn after Wild Companion, combined resource max values, and Warden guidance copy.
+- QA remained read-only for app code. Only this handoff was updated.
+
+Automated checks:
+
+- Server `npm.cmd test`: PASS, `499/499`.
+- Client `npm.cmd run lint`: PASS.
+- `git diff --check fbc1862^ fbc1862`: PASS.
+
+Verified fixed / passed in production:
+
+- P2 end-turn error is fixed for the current live Druid state. `I end my turn.` now returns `No initiative is running right now, so there is no combat turn to end...` instead of `The Game Master encountered an error.`
+- Short rest passed and restored Wild Shape from `0/2` to `2/2`; it also expired the one-hour wolf form and restored Adrenaline Rush.
+- Duplicate Wild Companion use is guarded correctly: with a familiar already active, another summon attempt reports `Wild Companion is already present` and does not spend Wild Shape.
+- Combined resource Rules query is fixed. Fresh query asking for remaining and max returned `Wild Shape 2/2`, `Luck Points 2/2`, and level 1 Druid spell slots `3/3`.
+- Warden build-guidance copy is fixed in source: it now produces `medium armor training`, not `medium armor armor training`.
+- Browser console/warn/error logs remained empty.
+
+New finding for DEV:
+
+- P2: Wild Companion cannot be dismissed even though the active effect says its duration is `until dismissed`. Player action `I dismiss my Wild Companion familiar.` is misclassified as another summon attempt and returns `Wild Companion is already present. One familiar is enough bookkeeping...`. The familiar stays active, so QA cannot perform a truly fresh resummon on the same character. Expected: dismissal removes the familiar active effect without spending Wild Shape; a later Wild Companion use should then summon a new familiar and spend one use.
+
+Current recommendation:
+
+- Treat the prior end-turn crash, combined resource max output, and Warden copy typo as fixed.
+- Add a deterministic Wild Companion dismissal path before expanding companion behavior. The familiar has learned the oldest summon trick: arriving is easy; leaving is apparently advanced magic.
+
 ## Latest QA Pass - 2026-06-18 Druid Creation Fix Retest `02b55c3`
 
 Scope:
