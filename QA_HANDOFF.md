@@ -1,5 +1,46 @@
 # Hallucinated Dungeons QA Handoff
 
+## Latest QA Pass - 2026-06-18 Druid Creation Fix Retest `02b55c3`
+
+Scope:
+
+- Verified production frontend at `https://hallucinated-dungeons.vercel.app/` after latest push.
+- Repo tip during QA: `228e451 Update QA_HANDOFF.md`; app-code commit under test: `02b55c3 Fix Druid creation flow and resource display`.
+- QA remained read-only for app code. Only this handoff was updated.
+
+Automated checks:
+
+- Server `npm.cmd test`: PASS, `498/498`.
+- Client `npm.cmd run lint`: PASS.
+- `git diff --check 02b55c3^ 02b55c3`: PASS.
+
+Verified fixed / passed in production:
+
+- P1 Druid creation blocker is fixed. Created fresh `QA Druid 2` through the visible character-creation UI without being dumped back to the game screen.
+- Druid creation path tested: Orc, languages `Elvish` and `Giant`, Druid with Primal Order `Warden`, Wayfarer with DEX `+1` and WIS `+2`, Lucky origin feat, default ability scores, class skills `Animal Handling` and `Nature`, default equipment, cantrips `Druidcraft` and `Produce Flame`, prepared spells `Cure Wounds`, `Entangle`, `Faerie Fire`, and `Goodberry`.
+- Level 1 sheet passed: `QA Druid 2`, `Orc Druid - Level 1`, HP `10/10`, AC `13`, WIS spellcasting attack `+5`, save DC `13`, expected skills/languages/spells/features present.
+- QA level-up hook made `QA Druid 2` level-up-ready at XP `300`, next level `2`, with no blockers.
+- Visible level-up UI passed: `Druid Level 2`, `Wild Shape`, `Wild Companion`, and `Apply Level Up` enabled without additional choices.
+- Level 2 sheet passed: `Orc Druid - Level 2`, HP `17/17`, XP `300/900`, resource `Wild Shape 2/2 until short rest`, features `Wild Shape` and `Wild Companion`.
+- `I use Wild Companion to summon a familiar spirit named QA Sprout.` passed: spent one Wild Shape use, added `Wild Companion Familiar` active effect, and reported `Wild Shape uses left: 1`.
+- Fresh Rules query after Wild Companion passed: `Wild Shape 1/2 uses left`.
+- `I use Wild Shape to become a wolf.` passed: used a Bonus Action, added `Wild Shape (wolf)`, granted `2 temporary HP`, tracked `1 hour / 600 rounds`, and reported `Wild Shape uses left: 0`.
+- Fresh Rules query after Wild Shape passed: `Wild Shape 0/2 uses left`.
+- Sheet after Wild Shape passed: active effects show both `Wild Companion Familiar` and `Wild Shape (wolf)`, resource shows `Wild Shape 0/2 until short rest`, and equipped defense display stayed clear (`Leather Armor`, `Base AC 11 + full DEX modifier`).
+- Combined resource Rules query is improved: asking for `Wild Shape`, `Lucky`, and level 1 Druid spell slots returned all three categories instead of omitting spell slots.
+- Browser console/warn/error logs were empty during this pass.
+
+Findings for DEV:
+
+- P2: First `I end my turn.` immediately after Wild Companion produced `The Game Master encountered an error. Please try again.` No browser console/warn/error logs were captured. A later `I end my turn.` after Wild Shape succeeded normally, so this may be context-specific to the post-Wild-Companion state rather than a permanently wedged turn. Still worth fixing because players will absolutely press the shiny "done with my turn" button after summoning a buddy.
+- P3: Combined resource query now includes spell slots, but spell slots only report remaining uses, not max. Example fresh Druid query asking for remaining and max returned `Wild Shape 0/2`, `Luck Points 2/2`, and `Spell slots remaining: level 1: 3` without the level 1 max `3`.
+- P3: Druid Warden build guidance copy says `medium armor armor training`. Display-only typo; tiny, but it does step on its own shoelace.
+
+Current recommendation:
+
+- Treat Druid creation, level-up, Wild Companion, Wild Shape, resource display, and active-effect display as production-passed for this retest.
+- Ask DEV to inspect the one-shot end-turn error after Wild Companion and clean up the two display/copy issues before moving too far into more Druid complexity.
+
 ## Latest QA Pass - 2026-06-18 Cleric/Druid Level 2 Production QA `a675d3e`
 
 Scope:
