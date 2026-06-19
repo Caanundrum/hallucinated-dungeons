@@ -12,6 +12,7 @@ const {
   spendSpellResource,
   summarizeKnownSpells,
 } = require('../src/spellcastingEngine');
+const { resolveSpellCast } = require('../src/spellEffectEngine');
 
 const content = getContentBundle();
 
@@ -69,6 +70,32 @@ test('Quickened Spell spends Sorcery Points and changes an Action spell to a Bon
   assert.equal(result.blocked, false);
   assert.equal(result.spell.casting_time, 'Bonus Action');
   assert.equal(result.characterSheet.resources.sorcery_points.remaining, 0);
+  assert.equal(result.characterSheet.spellcasting.slots[1], 2);
+});
+
+test('Quickened Spell persists authoritative Sorcery Points into both sheet and world state', () => {
+  const result = resolveSpellCast({
+    message: 'I cast Mage Armor with Quickened Spell.',
+    content,
+    characterSheet: {
+      identity: { name: 'Mira', level: 2, class: 'sorcerer', class_name: 'Sorcerer' },
+      abilities: { modifiers: { dex: 2, cha: 3 } },
+      class_choices: { metamagic: ['quickened_spell', 'transmuted_spell'] },
+      resources: { sorcery_points: { name: 'Sorcery Points', remaining: 2, max: 2, reset: 'long_rest' } },
+      derived_stats: { armor_class: 12 },
+      spellcasting: { ability: 'cha', cantrips_known: [], spells_prepared: ['mage_armor'], slots: { 1: 3 } },
+    },
+    worldState: {
+      player_stats: {
+        armor_class: 12,
+        resources: { sorcery_points: { name: 'Sorcery Points', remaining: 2, max: 2, reset: 'long_rest' } },
+      },
+    },
+  });
+
+  assert.equal(result.blocked, false);
+  assert.equal(result.characterSheet.resources.sorcery_points.remaining, 0);
+  assert.equal(result.worldState.player_stats.resources.sorcery_points.remaining, 0);
   assert.equal(result.characterSheet.spellcasting.slots[1], 2);
 });
 

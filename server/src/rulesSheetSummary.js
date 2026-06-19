@@ -46,6 +46,8 @@ function summarizeCharacterSheetForRules(characterSheet) {
   if (features.length) {
     lines.push(`Features: ${features.map((feature) => `${feature.name} (${feature.source || 'feature'})`).join('; ')}`);
   }
+  const pactWeapon = getPactWeapon(characterSheet);
+  if (pactWeapon) lines.push(`Pact weapon: ${humanizeRuleTarget(pactWeapon)} (chosen through Pact of the Blade; uses Charisma for attack and damage)`);
   if (inventory.length) {
     lines.push(`Equipment: ${inventory.map((item) => Number(item.quantity || 0) > 1 ? `${item.name} x${item.quantity}` : item.name).join(', ')}`);
   }
@@ -64,6 +66,13 @@ function summarizeCharacterSheetForRules(characterSheet) {
     lines.push(`Character details: ${[details.alignment, details.personality, details.backstory].filter(Boolean).join(' ')}`);
   }
   return lines.join('\n');
+}
+
+function getPactWeapon(characterSheet = {}) {
+  return characterSheet.class_choice_details?.pact_of_the_blade?.pact_weapon
+    || characterSheet.class_choice_details?.eldritch_invocations?.pact_weapon
+    || characterSheet.class_choice_details?.eldritch_invocation?.pact_weapon
+    || '';
 }
 
 function formatArmorClassSources(parts = [], total = null) {

@@ -284,6 +284,25 @@ test('Magical Cunning restores one Pact slot after its one-minute rite', () => {
   assert.match(result.reply, /recover 1 Pact Magic slot/);
 });
 
+test('natural Pact of the Blade wording conjures the selected weapon without using the narrator', () => {
+  const result = resolveFeatureAction({
+    message: 'I conjure my Pact of the Blade weapon as the longsword I chose.',
+    worldState: combatWorld(),
+    characterSheet: sheet('warlock', {
+      identity: { name: 'Ari', class: 'warlock', level: 2 },
+      class_choices: { eldritch_invocations: ['armor_of_shadows', 'pact_of_the_blade', 'eldritch_mind'] },
+      class_choice_details: { pact_of_the_blade: { pact_weapon: 'longsword' } },
+    }),
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.logType, 'feature_pact_blade_conjure');
+  assert.equal(result.worldState.player_stats.pact_weapon.id, 'longsword');
+  assert.equal(result.worldState.player_stats.pact_weapon.active, true);
+  assert.equal(result.worldState.combat_state.turn_resources.bonus_action_available, false);
+  assert.match(result.reply, /Longsword/);
+});
+
 test('Divine Spark healing spends Channel Divinity and restores HP', () => {
   const result = resolveFeatureAction({
     message: 'I use Divine Spark to heal myself.',

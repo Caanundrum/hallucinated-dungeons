@@ -38,6 +38,7 @@ function resolveFeatureAction({ message = '', worldState = {}, characterSheet = 
   if (intent.id === 'innate_sorcery') return resolveInnateSorcery({ worldState, characterSheet });
   if (intent.id === 'font_of_magic') return resolveFontOfMagic({ message, worldState, characterSheet });
   if (intent.id === 'magical_cunning') return resolveMagicalCunning({ worldState, characterSheet });
+  if (intent.id === 'pact_of_the_blade') return resolvePactOfTheBlade({ worldState, characterSheet });
   if (intent.id === 'wild_companion') return resolveWildCompanion({ message, worldState, characterSheet });
   if (intent.id === 'wild_shape') return resolveWildShape({ message, worldState, characterSheet });
   if (intent.id === 'bardic_inspiration') return resolveBardicInspiration({ message, worldState, characterSheet });
@@ -69,6 +70,7 @@ function getFeatureIntent(message = '') {
   if (/\binnate\s+sorcery\b/.test(text)) return { id: 'innate_sorcery' };
   if (/\bfont\s+of\s+magic\b|\bconvert\b.*\b(?:sorcery points?|spell slots?)\b|\bcreate\b.*\bspell slot\b.*\bsorcery\b/.test(text)) return { id: 'font_of_magic' };
   if (/\bmagical\s+cunning\b/.test(text)) return { id: 'magical_cunning' };
+  if (/\b(?:conjure|summon|create|call|manifest|bind)\b.*\b(?:pact of the blade|pact weapon)\b|\bpact of the blade\b.*\b(?:weapon|conjure|summon|manifest)\b/.test(text)) return { id: 'pact_of_the_blade' };
   if (isWildCompanionDismissal(text)) return { id: 'wild_companion' };
   if (/\bwild\s+companion\b|\bfind\s+familiar\b.*\bwild\s*shape\b|\bwild\s*shape\b.*\bfind\s+familiar\b/.test(text)) return { id: 'wild_companion' };
   if (/\bwild\s*shape\b|\bshape\s*change\b|\bturn\s+into\s+(?:a|an|the)?\s*(?:wolf|cat|badger|spider|rat|dog|mastiff|goat|boar|scouting beast|[a-z -]*beast)\b/.test(text)) return { id: 'wild_shape' };
@@ -602,6 +604,62 @@ function resolveMagicalCunning({ worldState = {}, characterSheet = {} } = {}) {
     }, nextResources),
     reply: `You complete a one-minute **Magical Cunning** rite and recover ${restored} Pact Magic slot. Level 1 Pact slots: ${current + restored}/${maxSlots}. Uses left: ${nextResources.magical_cunning.remaining}/${nextResources.magical_cunning.max}.`,
   };
+}
+
+function resolvePactOfTheBlade({ worldState = {}, characterSheet = {} } = {}) {
+  if (!isClass(characterSheet, 'warlock')) return wrongClass('Pact of the Blade', 'Warlock', worldState);
+  if (!hasInvocation(characterSheet, 'pact_of_the_blade')) {
+    return {
+      handled: true,
+      logType: 'feature_pact_blade_unavailable',
+      worldState,
+      reply: 'Pact of the Blade is not selected on this character sheet, so no pact weapon can be conjured.',
+    };
+  }
+
+  const weaponId = getPactWeaponId(characterSheet);
+  if (!weaponId) {
+    return {
+      handled: true,
+      logType: 'feature_pact_blade_weapon_missing',
+      worldState,
+      reply: 'Pact of the Blade is selected, but its weapon form is missing from the character sheet. Nothing is spent or conjured.',
+    };
+  }
+
+  const spent = spendTurnResource(worldState, 'bonus_action', 'Pact of the Blade', characterSheet);
+  if (!spent.ok) {
+    return { handled: true, logType: 'feature_pact_blade_action_unavailable', worldState: spent.worldState, reply: spent.reply };
+  }
+
+  const weaponName = titleCase(weaponId);
+  return {
+    handled: true,
+    logType: 'feature_pact_blade_conjure',
+    worldState: {
+      ...spent.worldState,
+      player_stats: {
+        ...(spent.worldState.player_stats || {}),
+        pact_weapon: { id: weaponId, name: weaponName, active: true },
+      },
+    },
+    reply: `You use **Pact of the Blade**${spent.worldState.combat_state?.active ? ' as a Bonus Action' : ''} and conjure your chosen **${weaponName}**. It is now your active pact weapon and uses Charisma for its attack and damage rolls.`,
+  };
+}
+
+function hasInvocation(characterSheet = {}, invocationId = '') {
+  return [
+    characterSheet.class_choices?.eldritch_invocation,
+    ...(characterSheet.class_choices?.eldritch_invocations || []),
+  ].map(normalizeId).filter(Boolean).includes(normalizeId(invocationId));
+}
+
+function getPactWeaponId(characterSheet = {}) {
+  return normalizeId(
+    characterSheet.class_choice_details?.pact_of_the_blade?.pact_weapon
+      || characterSheet.class_choice_details?.eldritch_invocations?.pact_weapon
+      || characterSheet.class_choice_details?.eldritch_invocation?.pact_weapon
+  );
 }
 
 function getWarlockLevelOneSlotMaximum(characterSheet = {}) {
@@ -1326,6 +1384,10 @@ function formatSigned(value) {
 
 function articleFor(value = '') {
   return /^[aeiou]/i.test(String(value || '')) ? 'an' : 'a';
+}
+
+function titleCase(value = '') {
+  return String(value || '').replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function normalizeId(value) {

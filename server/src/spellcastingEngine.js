@@ -37,7 +37,7 @@ function resolveSpellCastLegality({ message, content = {}, characterSheet = {}, 
     };
   }
 
-  const metamagic = applyMetamagicToCast({ message, spell, characterSheet });
+  const metamagic = applyMetamagicToCast({ message, spell, characterSheet, worldState });
   if (!metamagic.ok) {
     return {
       matched: true,

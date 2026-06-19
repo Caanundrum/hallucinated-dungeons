@@ -134,6 +134,32 @@ test("includes nested class spell uses with spell slots in combined questions", 
   assert.match(reply, /Spell slots remaining: level 1: 2\/2/);
 });
 
+test('recognizes Pact Magic slots in combined Warlock resource questions', () => {
+  const state = {
+    player_stats: {
+      class: 'Warlock',
+      level: 2,
+      spell_slots: { 1: 2 },
+      spell_slots_max: { 1: 2 },
+      resources: {
+        magical_cunning: { name: 'Magical Cunning', remaining: 0, max: 1, reset: 'long_rest' },
+      },
+    },
+  };
+
+  const reply = answerResourceCountQuestion('What are my exact Magical Cunning uses and level 1 Warlock Pact Magic slots?', state);
+  assert.match(reply, /Magical Cunning 0\/1 uses left/);
+  assert.match(reply, /Spell slots remaining: level 1: 2\/2/);
+});
+
+test('spell-slot wording wins even when Armor of Shadows also appears in the question', () => {
+  const reply = answerResourceCountQuestion(
+    'After Armor of Shadows, what are my exact current level 1 spell slots remaining and max?',
+    { player_stats: { class: 'Warlock', level: 2, spell_slots: { 1: 2 }, spell_slots_max: { 1: 2 }, resources: {} } },
+  );
+  assert.match(reply, /Spell slots remaining: level 1: 2\/2/);
+});
+
 test('ignores non-resource questions', () => {
   assert.equal(answerResourceCountQuestion('What is my AC?', worldState), '');
   assert.equal(answerResourceCountQuestion('How many doors are in the room?', worldState), '');

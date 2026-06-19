@@ -113,6 +113,8 @@ function findRequestedSpellSlots(text = '', worldState = {}) {
 function spellSlotIndex(text = '') {
   const direct = firstAliasIndex(text, ['spell slot', 'spell slots']);
   if (direct !== -1) return direct;
+  const pactMagic = /\bpact magic slots?\b/.exec(text);
+  if (pactMagic) return pactMagic.index;
   const levelSlot = /\blevel \d+ slots?\b/.exec(text);
   if (levelSlot) return levelSlot.index;
   const slots = phraseIndex(text, 'slots');

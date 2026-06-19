@@ -868,10 +868,16 @@ test('Mage Armor raises unarmored AC using the spell formula', () => {
       player_stats: { armor_class: 12, base_armor_class: 12, spell_slots: { 1: 1 } },
     }),
   });
+  const outcome = resolveSpellOutcome({
+    spellCast: cast,
+    characterSheet: cast.characterSheet,
+    worldState: cast.worldState,
+  });
   const ticked = tickActiveEffects(cast.worldState, { minutes: 8 * 60 });
 
   assert.equal(cast.blocked, false);
   assert.equal(cast.worldState.player_stats.armor_class, 15);
+  assert.doesNotMatch(outcome.reply, /affecting on/i);
   assert.equal(ticked.worldState.player_stats.armor_class, 12);
 });
 

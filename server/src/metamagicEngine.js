@@ -28,7 +28,7 @@ const TRANSMUTABLE_SPELLS = new Set([
   'witch_bolt',
 ]);
 
-function applyMetamagicToCast({ message = '', spell = {}, characterSheet = {} } = {}) {
+function applyMetamagicToCast({ message = '', spell = {}, characterSheet = {}, worldState = {} } = {}) {
   const requested = getRequestedMetamagic(message);
   if (!requested.length) return { ok: true, spell, characterSheet, notes: [] };
 
@@ -50,7 +50,9 @@ function applyMetamagicToCast({ message = '', spell = {}, characterSheet = {} } 
   if (validation) return blocked(validation, spell, characterSheet);
 
   const cost = requested.reduce((sum, id) => sum + METAMAGIC[id].cost, 0);
-  const resource = characterSheet.resources?.sorcery_points || { name: 'Sorcery Points', remaining: 0, max: getLevel(characterSheet), reset: 'long_rest' };
+  const resource = worldState.player_stats?.resources?.sorcery_points
+    || characterSheet.resources?.sorcery_points
+    || { name: 'Sorcery Points', remaining: 0, max: getLevel(characterSheet), reset: 'long_rest' };
   if (Number(resource.remaining || 0) < cost) {
     return blocked(`That Metamagic combination costs ${cost} Sorcery Point${cost === 1 ? '' : 's'}, but only ${Number(resource.remaining || 0)} remain. No resources are spent.`, spell, characterSheet);
   }

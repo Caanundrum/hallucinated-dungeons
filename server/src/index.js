@@ -1743,8 +1743,8 @@ io.on('connection', (socket) => {
           await db.updateWorldState(sessionId, ws);
         }
         if (ws) {
-          deterministicRulesReply = answerInventoryCountQuestion(message, ws)
-            || answerResourceCountQuestion(message, ws);
+          deterministicRulesReply = answerResourceCountQuestion(message, ws)
+            || answerInventoryCountQuestion(message, ws);
           const contextParts = [];
           if (ws.current_location) {
             contextParts.push(`Current location: ${ws.current_location}`);

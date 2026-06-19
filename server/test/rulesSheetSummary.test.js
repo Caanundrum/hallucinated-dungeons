@@ -63,3 +63,14 @@ test('equipment rule summary does not expose raw armor formula tokens', () => {
   assert.match(summary, /Shield: AC \+2/);
   assert.doesNotMatch(summary, /armor_formula/);
 });
+
+test('DM2 sheet summary exposes the selected Pact of the Blade weapon', () => {
+  const summary = summarizeCharacterSheetForRules({
+    identity: { name: 'Vex', class: 'warlock', class_name: 'Warlock', level: 2 },
+    derived_stats: {},
+    class_choice_details: { pact_of_the_blade: { pact_weapon: 'longsword' } },
+  });
+
+  assert.match(summary, /Pact weapon: longsword/);
+  assert.match(summary, /uses Charisma for attack and damage/);
+});

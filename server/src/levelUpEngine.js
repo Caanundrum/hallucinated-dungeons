@@ -215,6 +215,18 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
     fightingStyle: selectedFightingStyle,
     hasJackOfAllTrades: Boolean(currentDerived.jack_of_all_trades || (advancement.runtime_mechanics || []).includes('jack_of_all_trades')),
   });
+  const pactWeaponAttack = buildPactWeaponAttack({
+    weaponId: invocationState.pactWeaponId,
+    characterSheet,
+    content,
+    proficiencyBonus: nextPb,
+  });
+  if (pactWeaponAttack) {
+    nextDerivedStats.attack_breakdowns = [
+      ...(nextDerivedStats.attack_breakdowns || []).filter((attack) => attack.weapon_id !== pactWeaponAttack.weapon_id),
+      pactWeaponAttack,
+    ];
+  }
 
   return {
     ...characterSheet,
@@ -700,7 +712,8 @@ function mergeSpellcasting(current, advancementSpellcasting, levelUpChoices = {}
 
 function buildInvocationLevelUpState({ characterSheet = {}, levelUpChoices = {}, content = {} } = {}) {
   const added = levelUpChoices.eldritch_invocations || [];
-  if (!added.length) return { invocations: [], details: {}, spells: [] };
+  const existingPactWeaponId = getExistingPactWeaponId(characterSheet);
+  if (!added.length) return { invocations: [], details: {}, spells: [], pactWeaponId: existingPactWeaponId };
   const existing = [
     normalizeId(characterSheet.class_choices?.eldritch_invocation),
     ...((characterSheet.class_choices?.eldritch_invocations || []).map(normalizeId)),
@@ -728,7 +741,52 @@ function buildInvocationLevelUpState({ characterSheet = {}, levelUpChoices = {},
     spells.push(...(levelUpChoices.pact_tome_rituals || []).map((id) => ({ id, source: 'Pact of the Tome', type: 'ritual' })));
   }
 
-  return { invocations, details, spells };
+  return { invocations, details, spells, pactWeaponId: details.pact_of_the_blade?.pact_weapon || existingPactWeaponId };
+}
+
+function getExistingPactWeaponId(characterSheet = {}) {
+  return normalizeId(
+    characterSheet.class_choice_details?.pact_of_the_blade?.pact_weapon
+      || characterSheet.class_choice_details?.eldritch_invocations?.pact_weapon
+      || characterSheet.class_choice_details?.eldritch_invocation?.pact_weapon
+  );
+}
+
+function buildPactWeaponAttack({ weaponId = '', characterSheet = {}, content = {}, proficiencyBonus = 2 } = {}) {
+  if (!weaponId) return null;
+  const weapon = byId(content.equipment || [], weaponId);
+  if (!weapon || weapon.type !== 'weapon') return null;
+  const charisma = Number(characterSheet.abilities?.modifiers?.cha || 0);
+  const damageModifier = charisma;
+  return {
+    weapon_id: weapon.id,
+    name: `${weapon.name} (Pact Weapon)`,
+    ability: 'cha',
+    properties: weapon.properties || [],
+    weapon_category: weapon.weapon_category || null,
+    attack_kind: weapon.attack_kind || 'melee',
+    damage_type: weapon.damage_type || null,
+    mastery: null,
+    versatile_damage: weapon.versatile_damage || null,
+    ammunition_type: weapon.ammunition_type || null,
+    attack_total: charisma + Number(proficiencyBonus || 0),
+    attack_parts: [
+      { label: 'CHA (Pact of the Blade)', value: charisma },
+      { label: 'Proficiency', value: Number(proficiencyBonus || 0) },
+    ],
+    damage_formula: formatDamageFormula(weapon.damage, damageModifier),
+    damage_parts: [
+      { label: weapon.damage, value: null },
+      { label: 'CHA (Pact of the Blade)', value: damageModifier },
+    ],
+    pact_weapon: true,
+  };
+}
+
+function formatDamageFormula(dice = '1d4', modifier = 0) {
+  const value = Number(modifier || 0);
+  if (value < 0) return `${dice} - ${Math.abs(value)}`;
+  return `${dice} + ${value}`;
 }
 
 function mergeClassChoiceSpells(current = [], additions = []) {

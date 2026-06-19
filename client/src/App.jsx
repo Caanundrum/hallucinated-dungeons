@@ -1004,10 +1004,18 @@ function CharacterSheetModal({ character, content, levelUpBusy, onClose, onLevel
                   <strong>{choiceId.replaceAll('_', ' ')}</strong>
                   <span>{[
                     formatClassChoiceValue(optionId),
-                    ...Object.entries(classChoiceDetails[choiceId] || {}).map(([detailId, detailValue]) => `${detailId.replaceAll('_', ' ')}: ${Array.isArray(detailValue) ? detailValue.map(spellName).join(', ') : spellName(detailValue)}`),
+                    ...Object.entries(classChoiceDetails[choiceId] || {}).map(([detailId, detailValue]) => `${detailId.replaceAll('_', ' ')}: ${formatClassChoiceDetailValue(detailValue, spellName)}`),
                   ].join(' | ')}</span>
                 </div>
               ))}
+              {Object.entries(classChoiceDetails)
+                .filter(([choiceId]) => !Object.prototype.hasOwnProperty.call(classChoices, choiceId))
+                .map(([choiceId, details]) => (
+                  <div key={`detail-${choiceId}`} className="sheet-line">
+                    <strong>{choiceId.replaceAll('_', ' ')}</strong>
+                    <span>{Object.entries(details || {}).map(([detailId, value]) => `${detailId.replaceAll('_', ' ')}: ${formatClassChoiceDetailValue(value, spellName)}`).join(' | ')}</span>
+                  </div>
+                ))}
               {weaponMasteries.length > 0 && (
                 <div className="sheet-line">
                   <strong>Weapon Mastery</strong>
@@ -1390,6 +1398,14 @@ function formatEffectName(effect) {
 function formatClassChoiceValue(value) {
   const entries = Array.isArray(value) ? value : [value];
   return entries.map((entry) => String(entry || '').replaceAll('_', ' ')).filter(Boolean).join(', ');
+}
+
+function formatClassChoiceDetailValue(value, nameFormatter = formatClassChoiceValue) {
+  if (Array.isArray(value)) return value.map((entry) => formatClassChoiceDetailValue(entry, nameFormatter)).join(', ');
+  if (value && typeof value === 'object') {
+    return Object.entries(value).map(([key, nested]) => `${key.replaceAll('_', ' ')}: ${formatClassChoiceDetailValue(nested, nameFormatter)}`).join(', ');
+  }
+  return nameFormatter(value);
 }
 
 function isEquipmentEffect(effect = {}) {

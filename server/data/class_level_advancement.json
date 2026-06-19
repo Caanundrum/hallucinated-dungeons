@@ -339,6 +339,7 @@
             "type": "spell",
             "count": 2,
             "class_id": "sorcerer",
+            "min_level": 1,
             "max_level": 1
           }
         ],
@@ -447,6 +448,7 @@
             "type": "spell",
             "count": 1,
             "class_id": "warlock",
+            "min_level": 1,
             "max_level": 1
           }
         ],

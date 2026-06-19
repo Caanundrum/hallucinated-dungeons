@@ -66,7 +66,14 @@ const BONUS_DIE_RULES = {
 
 function resolveSpellCast({ message, content, characterSheet, worldState = {} }) {
   const castWorldState = clearResolvedCombatState(worldState);
-  const legality = resolveSpellCastLegality({ message, content, characterSheet, worldState: castWorldState });
+  const runtimeCharacterSheet = {
+    ...characterSheet,
+    resources: mergeRuntimeResources(
+      characterSheet.resources || {},
+      castWorldState.player_stats?.resources || {},
+    ),
+  };
+  const legality = resolveSpellCastLegality({ message, content, characterSheet: runtimeCharacterSheet, worldState: castWorldState });
   if (!legality) return null;
   if (legality.blocked) return legality;
 
@@ -77,6 +84,10 @@ function resolveSpellCast({ message, content, characterSheet, worldState = {} })
     player_stats: {
       ...(castWorldState.player_stats || {}),
       spell_slots: nextSheet.spellcasting?.slots || castWorldState.player_stats?.spell_slots || {},
+      resources: mergeRuntimeResources(
+        castWorldState.player_stats?.resources || {},
+        nextSheet.resources || {},
+      ),
     },
   };
   if (/\bspent level \d+ spell slot\b/i.test(legality.resourceNote || '') && nextWorldState.combat_state?.active) {
@@ -473,7 +484,8 @@ function formatUtilitySpellEffectSummary(spell = {}, worldState = {}) {
   if (!effect) return '';
 
   const rules = effect.rules_effects || [];
-  const targetText = effect.target ? ` on ${effect.target}` : '';
+  const targetLabel = String(effect.target || '').replace(/^\s*(?:on|at)\s+/i, '').trim();
+  const targetText = targetLabel ? ` on ${targetLabel}` : '';
   const armorBonus = rules.find((rule) => rule.target === 'armor_class_bonus');
   if (armorBonus) {
     const ac = worldState.player_stats?.armor_class;
@@ -491,7 +503,17 @@ function formatUtilitySpellEffectSummary(spell = {}, worldState = {}) {
     .map((rule) => `${rule.die} ${String(rule.target || 'bonus').replaceAll('_', ' ')}`);
   if (bonusDice.length) return `The active benefit is ${bonusDice.join(', ')}${targetText}.`;
 
-  return targetText ? `It is now affecting${targetText}.` : '';
+  return targetLabel ? `It is now affecting ${targetLabel}.` : '';
+}
+
+function mergeRuntimeResources(base = {}, incoming = {}) {
+  const merged = { ...base };
+  for (const [key, value] of Object.entries(incoming || {})) {
+    merged[key] = value && typeof value === 'object' && !Array.isArray(value)
+      ? { ...(base[key] || {}), ...value }
+      : value;
+  }
+  return merged;
 }
 
 function finishSpellAction({ spell, worldState, combat, lines, activeCombat }) {

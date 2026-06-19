@@ -44,6 +44,7 @@ function baseSheet(overrides = {}) {
     resources: overrides.resources || {},
     languages: overrides.languages || overrides.proficiencies?.languages || [],
     class_choices: overrides.class_choices || {},
+    class_choice_details: overrides.class_choice_details || {},
     equipped: overrides.equipped || {},
     spellcasting: overrides.spellcasting,
     progression: {
@@ -609,6 +610,37 @@ test('Sorcerer level 2 requires Metamagic and two new prepared spells', () => {
   assert.equal(preview.requiredChoices.find((choice) => choice.id === 'prepared_spells').count, 2);
 });
 
+test('Sorcerer and Warlock level-up prepared spell choices exclude cantrips and reject forged cantrip selections', () => {
+  const cases = [
+    {
+      classId: 'sorcerer',
+      spells: ['magic_missile', 'mage_armor'],
+      choices: { metamagic: ['quickened_spell', 'subtle_spell'], prepared_spells: ['fire_bolt', 'ray_of_frost'] },
+    },
+    {
+      classId: 'warlock',
+      spells: ['hex', 'armor_of_agathys'],
+      choices: { eldritch_invocations: ['eldritch_mind', 'pact_of_the_blade'], pact_weapon: ['longsword'], prepared_spells: ['eldritch_blast'] },
+    },
+  ];
+
+  for (const entry of cases) {
+    const characterSheet = baseSheet({
+      identity: { class: entry.classId, class_name: entry.classId, experience_points: 300, level_up_available: true },
+      class_choices: entry.classId === 'warlock' ? { eldritch_invocation: 'armor_of_shadows' } : {},
+      spellcasting: { ability: 'cha', cantrips_known: ['fire_bolt', 'eldritch_blast'], spells_prepared: entry.spells, slots: { 1: entry.classId === 'warlock' ? 1 : 2 } },
+      progression: { experience_points: 300 },
+    });
+    const preview = getLevelUpPreview(characterSheet, getContentBundle());
+    const prepared = preview.requiredChoices.find((choice) => choice.id === 'prepared_spells');
+    assert.equal(prepared.options.some((option) => Number(option.level) === 0 || ['fire_bolt', 'eldritch_blast'].includes(option.id)), false);
+
+    const result = applyLevelUp({ characterSheet, content: getContentBundle(), payload: { choices: entry.choices } });
+    assert.equal(result.ok, false);
+    assert.equal(result.preview.blockers.some((entryBlocker) => entryBlocker.type === 'invalid_choice'), true);
+  }
+});
+
 test('applying Sorcerer level 2 records Metamagic, Sorcery Points, spells, and slots', () => {
   const result = applyLevelUp({
     characterSheet: baseSheet({
@@ -669,6 +701,28 @@ test('applying Warlock level 2 records invocations, granted magic, Magical Cunni
   assert.equal(result.characterSheet.spellcasting.slots_max[1], 2);
   assert.equal(result.characterSheet.spellcasting.prepared_spells_count, 3);
   assert(result.characterSheet.class_choice_spells.some((spell) => spell.id === 'mage_armor' && spell.type === 'at_will'));
+  assert.equal(result.characterSheet.derived_stats.attack_breakdowns.some((attack) => attack.weapon_id === 'spear' && attack.pact_weapon), true);
+});
+
+test('new Pact of the Blade choice records and exposes its Charisma pact weapon attack', () => {
+  const result = applyLevelUp({
+    characterSheet: baseSheet({
+      identity: { class: 'warlock', class_name: 'Warlock', experience_points: 300, level_up_available: true },
+      abilities: { modifiers: { str: 0, dex: 1, con: 2, int: 0, wis: 0, cha: 3 } },
+      class_choices: { eldritch_invocation: 'armor_of_shadows' },
+      spellcasting: { ability: 'cha', cantrips_known: ['eldritch_blast', 'mage_hand'], spells_prepared: ['hex', 'armor_of_agathys'], slots: { 1: 1 } },
+      progression: { experience_points: 300 },
+    }),
+    content: getContentBundle(),
+    payload: { choices: { eldritch_invocations: ['pact_of_the_blade', 'eldritch_mind'], pact_weapon: ['longsword'], prepared_spells: ['charm_person'] } },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.characterSheet.class_choice_details.pact_of_the_blade.pact_weapon, 'longsword');
+  const attack = result.characterSheet.derived_stats.attack_breakdowns.find((entry) => entry.weapon_id === 'longsword');
+  assert.equal(attack.ability, 'cha');
+  assert.equal(attack.attack_total, 5);
+  assert.match(attack.name, /Pact Weapon/);
 });
 
 test('Warlock Pact of the Tome level-up choices become usable cantrips and rituals', () => {
