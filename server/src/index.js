@@ -57,6 +57,7 @@ const {
 const {
   applyLevelUp,
   getLevelUpPreview,
+  repairPactWeaponAttack,
 } = require('./levelUpEngine');
 const {
   buildLevelUpReadySheet,
@@ -289,13 +290,14 @@ function repairCharacterSheetForRuntime(characterSheet) {
   const activeSpellEffects = Array.isArray(characterSheet.derived_stats?.active_spell_effects)
     ? characterSheet.derived_stats.active_spell_effects
     : [];
-  return applyActiveEffectsToCharacterSheet(
+  const effectRepairedSheet = applyActiveEffectsToCharacterSheet(
     {
       ...characterSheet,
       active_effects: equipmentEffects,
     },
     [...activeSpellEffects, ...equipmentEffects],
   );
+  return repairPactWeaponAttack(effectRepairedSheet, getContentBundle());
 }
 
 async function repairCharacterRowForRuntime(character) {
@@ -320,6 +322,7 @@ function getRuntimeRepairSnapshot(characterSheet = {}) {
     natural_base_armor_class: derived.natural_base_armor_class,
     armor_class_breakdown: derived.armor_class_breakdown || [],
     active_spell_effects: derived.active_spell_effects || [],
+    attack_breakdowns: derived.attack_breakdowns || [],
     active_effects: characterSheet.active_effects || [],
   };
 }

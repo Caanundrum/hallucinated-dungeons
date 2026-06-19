@@ -11,6 +11,7 @@ const {
   getFixedHpIncrease,
   getLevelUpPreview,
   proficiencyBonus,
+  repairPactWeaponAttack,
 } = require('../src/levelUpEngine');
 
 function baseSheet(overrides = {}) {
@@ -723,6 +724,28 @@ test('new Pact of the Blade choice records and exposes its Charisma pact weapon 
   assert.equal(attack.ability, 'cha');
   assert.equal(attack.attack_total, 5);
   assert.match(attack.name, /Pact Weapon/);
+});
+
+test('runtime repair adds the chosen Pact weapon attack to an already-leveled legacy sheet', () => {
+  const legacy = baseSheet({
+    identity: { class: 'warlock', class_name: 'Warlock', level: 2 },
+    abilities: { modifiers: { str: 1, dex: 1, con: 2, int: 0, wis: 0, cha: 3 } },
+    class_choices: { eldritch_invocation: 'armor_of_shadows', eldritch_invocations: ['armor_of_shadows', 'pact_of_the_blade', 'eldritch_mind'] },
+    class_choice_details: { pact_of_the_blade: { pact_weapon: 'longsword' } },
+    derived_stats: {
+      level: 2,
+      proficiency_bonus: 2,
+      attack_breakdowns: [{ weapon_id: 'dagger', name: 'Dagger', ability: 'dex', attack_total: 3, damage_formula: '1d4 + 1' }],
+    },
+  });
+
+  const repaired = repairPactWeaponAttack(legacy, getContentBundle());
+  const pactAttack = repaired.derived_stats.attack_breakdowns.find((entry) => entry.pact_weapon);
+  assert.equal(pactAttack.weapon_id, 'longsword');
+  assert.equal(pactAttack.attack_total, 5);
+  assert.equal(pactAttack.damage_formula, '1d8 + 3');
+  assert.equal(repaired.derived_stats.attack_breakdowns.some((entry) => entry.weapon_id === 'dagger'), true);
+  assert.strictEqual(repairPactWeaponAttack(repaired, getContentBundle()), repaired);
 });
 
 test('Warlock Pact of the Tome level-up choices become usable cantrips and rituals', () => {

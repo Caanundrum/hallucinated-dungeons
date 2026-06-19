@@ -783,6 +783,37 @@ function buildPactWeaponAttack({ weaponId = '', characterSheet = {}, content = {
   };
 }
 
+function repairPactWeaponAttack(characterSheet = {}, content = getContentBundle()) {
+  const invocations = [
+    characterSheet.class_choices?.eldritch_invocation,
+    ...(characterSheet.class_choices?.eldritch_invocations || []),
+  ].map(normalizeId).filter(Boolean);
+  if (!invocations.includes('pact_of_the_blade')) return characterSheet;
+
+  const weaponId = getExistingPactWeaponId(characterSheet);
+  const attack = buildPactWeaponAttack({
+    weaponId,
+    characterSheet,
+    content,
+    proficiencyBonus: Number(characterSheet.derived_stats?.proficiency_bonus || proficiencyBonus(getCharacterLevel(characterSheet))),
+  });
+  if (!attack) return characterSheet;
+
+  const currentAttacks = characterSheet.derived_stats?.attack_breakdowns || [];
+  const nextAttacks = [
+    ...currentAttacks.filter((entry) => !(entry.pact_weapon || entry.weapon_id === weaponId)),
+    attack,
+  ];
+  if (JSON.stringify(currentAttacks) === JSON.stringify(nextAttacks)) return characterSheet;
+  return {
+    ...characterSheet,
+    derived_stats: {
+      ...(characterSheet.derived_stats || {}),
+      attack_breakdowns: nextAttacks,
+    },
+  };
+}
+
 function formatDamageFormula(dice = '1d4', modifier = 0) {
   const value = Number(modifier || 0);
   if (value < 0) return `${dice} - ${Math.abs(value)}`;
@@ -884,4 +915,5 @@ module.exports = {
   getLevelUpPreview,
   getXpThreshold,
   proficiencyBonus,
+  repairPactWeaponAttack,
 };
