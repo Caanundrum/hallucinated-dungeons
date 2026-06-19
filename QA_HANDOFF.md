@@ -1,5 +1,38 @@
 # Hallucinated Dungeons QA Handoff
 
+## Latest QA Pass - 2026-06-19 Sorcerer/Warlock Regression Retest `a5d8bad`
+
+Scope:
+
+- Retested production at `https://hallucinated-dungeons.vercel.app/` after `a5d8bad Fix Sorcerer and Warlock QA regressions`.
+- Reused the existing level 2 QA characters for resource, Rules, and Pact Blade checks, and created fresh `QA Sorcerer Filter` to verify the visible level-up selector on the deployed build.
+- QA remained read-only for app code. Only this handoff was updated.
+
+Automated checks:
+
+- Server `npm.cmd test`: PASS, `540/540`.
+- Client `npm.cmd run lint`: PASS.
+- `git diff --check a5d8bad^ a5d8bad`: PASS.
+
+Verified fixed / passed in production:
+
+- Sorcerer prepared-spell level-up filtering is fixed in the visible UI. Fresh level-up preview contained only level 1 spells and no `Level 0` cantrips. The QA-hook preview also carried `min_level: 1`.
+- Quickened Spell persistence is fixed end to end. Quickened Mage Armor reported Sorcery Points `0/2`; the fresh exact Rules query returned `0/2` and slots `2/3`; the visible sheet also showed Sorcery Points `0/2`.
+- Quickened Mage Armor narration is fixed: `It is now affecting QA Sorcerer 2`, with no `affecting on` wording.
+- Pact Blade Rules state is fixed. Exact query correctly answered that the selected weapon is a longsword.
+- Natural Pact Blade action is fixed. `I conjure my Pact of the Blade weapon as the longsword I chose.` succeeded, named Longsword, marked it active, and stated that it uses Charisma for attack and damage; no GM error occurred.
+- Combined Warlock query is fixed: Magical Cunning `0/1` and Pact Magic slots `2/2` were both returned.
+- Armor of Shadows query routing is fixed. `After Armor of Shadows, ... level 1 spell slots` returned slots `2/2` instead of Leather Armor inventory.
+
+Finding for DEV:
+
+- P2 compatibility/migration gap: `QA Warlock 2` was leveled before `a5d8bad`. Its sheet now displays `pact weapon: longsword`, and conjuring the longsword works, but its Attacks section still contains only `Dagger +3, 1d4+1`. The new `Longsword (Pact Weapon)` Charisma attack row is generated during level-up, so already-leveled characters are not repaired. Expected: existing level 2 Pact Blade sheets should receive or derive the pact attack row as well.
+
+Current recommendation:
+
+- Treat all seven original Sorcerer/Warlock regressions as fixed.
+- Add a small compatibility repair for already-leveled Pact Blade characters before calling Pact Blade fully production-complete. The pact contract is readable now; one older signature still needs countersigning.
+
 ## Latest QA Pass - 2026-06-19 Sorcerer/Warlock Level 2 Production QA `f33f61f`
 
 Scope:
