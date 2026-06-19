@@ -1,5 +1,53 @@
 # Hallucinated Dungeons QA Handoff
 
+## Latest QA Pass - 2026-06-19 Sorcerer/Warlock Level 2 Production QA `f33f61f`
+
+Scope:
+
+- Verified production at `https://hallucinated-dungeons.vercel.app/` after the Sorcerer/Warlock push.
+- Repo tip during QA: `e54de6b Update QA_HANDOFF.md`; app-code commit under test: `f33f61f Add Sorcerer and Warlock level 2 mechanics`.
+- Created fresh visible-UI characters `QA Sorcerer 2` and `QA Warlock 2`, raised both to the level-up threshold with the production QA hook, exercised the visible level-up gates, and tested class mechanics through player-natural actions.
+- QA remained read-only for app code. Only this handoff was updated.
+
+Automated checks:
+
+- Server `npm.cmd test`: PASS, `533/533`.
+- Client `npm.cmd run lint`: PASS.
+- `git diff --check f33f61f^ f33f61f`: PASS.
+
+Verified passed in production - Sorcerer:
+
+- Fresh Orc Sorcerer creation passed at HP `8/8`, AC `11`, CHA spell attack `+5`, DC `13`, with four cantrips and two prepared spells.
+- Valid level-up choices applied successfully with Quickened Spell, Transmuted Spell, Chromatic Orb, and Shield.
+- Level 2 sheet passed for core advancement: HP `14/14`, four prepared level 1 spells, three level 1 slots, Sorcery Points `2/2`, and both Metamagic choices recorded.
+- Both Font of Magic directions passed live: 2 Sorcery Points created one level 1 slot (`3 -> 4`), then one level 1 slot restored 1 Sorcery Point (`4 -> 3`, `0 -> 1`).
+- Quickened Mage Armor cast successfully as a Metamagic spell, spent one spell slot, and applied the correct AC `14` Mage Armor effect.
+
+Verified passed in production - Warlock:
+
+- Fresh Orc Warlock creation passed with Armor of Shadows, Eldritch Blast, Mage Hand, Armor of Agathys, and Hex.
+- Valid level-up choices applied successfully with Eldritch Mind, Pact of the Blade, Longsword, and Arms of Hadar.
+- Level 2 sheet passed for core advancement: HP `17/17`, Pact slots `2/2`, Magical Cunning `1/1`, three prepared spells, and all three invocations recorded.
+- Armor of Agathys spent Pact slots and granted 5 temporary HP.
+- Magical Cunning passed: after one spent slot, the one-minute rite restored the pool to `2/2` and persisted the resource at `0/1`.
+- Short rest passed: two expended Pact slots restored to `2/2`, while Magical Cunning correctly remained `0/1` because it resets on a long rest.
+- Armor of Shadows correctly refused Mage Armor while Leather Armor was equipped and did not spend a slot.
+
+Findings for DEV:
+
+- P1: Sorcerer and Warlock level-up prepared-spell selectors include level 0 cantrips. Selecting two Sorcerer cantrips or one Warlock cantrip satisfies the required prepared-spell count and enables `Apply Level Up`. Expected: these selectors must expose and accept only eligible level 1 spells; the current gate can create invalid level-2 sheets.
+- P1: Quickened Spell Sorcery Point spending does not persist through the production spell path. The action reply reported `Sorcery Points: 0/2`, and the spell slot correctly fell from `3/3` to `2/3`, but both the visible sheet and a fresh exact Rules query still reported Sorcery Points `2/2`. Expected: the 2-point cost must be saved authoritatively.
+- P1: Natural Pact of the Blade action crashes the GM path. `I conjure my Pact of the Blade weapon as the longsword I chose.` returned `The Game Master encountered an error. Please try again.`
+- P2: The selected Pact Blade weapon is not surfaced correctly after level-up. QA selected Longsword, but the sheet does not display the pact-weapon detail and an exact Rules query answered that the chosen pact weapon was the starting Dagger.
+- P2: Rules query routing can mistake a class feature name for inventory. `After Armor of Shadows, what are my exact current level 1 spell slots...` answered `You have 1 Leather Armor remaining.` The control query without `After Armor of Shadows` correctly returned slots `2/2`.
+- P3: A combined query asking for `Magical Cunning uses and level 1 Warlock Pact Magic slots` returned only Magical Cunning. The same query using generic `level 1 spell slots` returned both resources correctly.
+- P3: Quickened Mage Armor narration says `It is now affecting on QA Sorcerer 2`, an awkward generated phrase.
+
+Current recommendation:
+
+- Fix the shared level-up spell-level filter and Quickened resource persistence before adding the next classes.
+- Then repair Pact Blade state exposure/action handling. Magical Cunning and Pact-slot rest recovery are solid; the pact weapon itself currently disappears into contract fine print, which is perhaps thematic but not acceptable QA.
+
 ## Latest QA Pass - 2026-06-19 Paladin/Ranger Regression Retest `fc5eabe`
 
 Scope:
