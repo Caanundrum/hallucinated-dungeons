@@ -815,6 +815,57 @@ test('natural bonus-action hide wording routes to Cunning Action instead of obje
   assert.doesNotMatch(result.reply, /Utilize/);
 });
 
+test('explicit weapon attack with an on-hit feature beats carried-object Utilize routing', () => {
+  const result = adjudicate({
+    message: 'I make a melee weapon attack at the dark shape with my Longsword and use Divine Smite if the attack hits.',
+    worldState: worldState({
+      scene_presence: {
+        exact_location: 'Lantern Bridge',
+        present_npcs: ['Dark Shape'],
+        present_objects: [],
+        available_exits: ['bridge span'],
+      },
+      inventory_state: {
+        carried_objects: [{ name: 'Longsword', quantity: 1 }],
+      },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Brightward', hp: 18, max_hp: 18, ac: 19, is_player: true },
+          { name: 'Dark Shape', hp: 20, max_hp: 20, ac: 12, is_player: false },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      identity: { name: 'Brightward', class: 'paladin', class_name: 'Paladin', level: 2 },
+      equipped: { main_hand: 'longsword', off_hand: 'shield', armor: 'chain_mail' },
+      resources: {
+        paladins_smite: { name: "Paladin's Smite", remaining: 1, max: 1, reset: 'long_rest' },
+      },
+      derived_stats: {
+        ...characterSheet.derived_stats,
+        attack_breakdowns: [{
+          weapon_id: 'longsword',
+          name: 'Longsword',
+          attack_total: 5,
+          damage_formula: '1d8+3',
+          damage_type: 'slashing',
+          properties: ['versatile'],
+        }],
+      },
+    },
+    rollDie: (sides) => (sides === 20 ? 10 : 4),
+  });
+
+  assert.equal(result.handled, true);
+  assert.match(result.reply, /attack Dark Shape with Longsword/i);
+  assert.doesNotMatch(result.reply, /Utilize/);
+  assert.equal(result.worldState.combat_state.turn_resources.action_available, false);
+});
+
 test('Cunning Action Hide wording wins over a same-message ready clause', () => {
   const result = adjudicate({
     message: 'I use Cunning Action to Hide behind the bridge support and ready my shortsword if anything approaches.',

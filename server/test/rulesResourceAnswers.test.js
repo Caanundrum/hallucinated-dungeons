@@ -106,6 +106,34 @@ test("answers Paladin's Smite resource questions by feature or spell name", () =
   assert.match(answerResourceCountQuestion('Is my Divine Smite free use available?', state), /Paladin's Smite 1\/1 uses left/);
 });
 
+test("includes nested class spell uses with spell slots in combined questions", () => {
+  const state = {
+    player_stats: {
+      class: 'Ranger',
+      level: 2,
+      spell_slots: { 1: 2 },
+      resources: {
+        spell_uses: {
+          'class_feature:favored_enemy:hunter_mark': {
+            name: "Hunter's Mark",
+            remaining: 2,
+            max: 2,
+            reset: 'long_rest',
+          },
+        },
+      },
+    },
+  };
+
+  const reply = answerResourceCountQuestion(
+    "What are my exact current Hunter's Mark uses and spell slots remaining and max?",
+    state
+  );
+
+  assert.match(reply, /Hunter's Mark 2\/2 uses left/);
+  assert.match(reply, /Spell slots remaining: level 1: 2\/2/);
+});
+
 test('ignores non-resource questions', () => {
   assert.equal(answerResourceCountQuestion('What is my AC?', worldState), '');
   assert.equal(answerResourceCountQuestion('How many doors are in the room?', worldState), '');

@@ -1611,36 +1611,43 @@ function resolveCombatAction({ message, intent, worldState, characterSheet, curr
   const helpAction = resolveHelpAction({ message, intent, worldState, characterSheet });
   if (helpAction) return helpAction;
 
-  const objectChallenge = resolveObjectChallengeAction({
-    message,
-    worldState,
-    characterSheet,
-    currentTurn,
-    inCombat: true,
-  });
-  if (objectChallenge) return objectChallenge;
+  const attackIntent = isCombatStarter(message)
+    || /\battack\b/i.test(message)
+    || isUnarmedAttackIntent(message)
+    || isThrownWeaponAttackIntent(message, characterSheet);
 
-  const objectInteraction = resolveObjectInteraction({ message, worldState });
-  if (objectInteraction?.handled) {
-    return {
-      handled: true,
-      logType: objectInteraction.logType,
-      worldState: objectInteraction.worldState,
-      reply: objectInteraction.response,
-    };
-  }
-  if (objectInteraction) {
-    const spent = spendTurnResource(worldState, 'action', 'Utilize', characterSheet);
-    if (!spent.ok) {
-      return { handled: true, logType: 'referee_action_unavailable', worldState: spent.worldState, reply: spent.reply };
-    }
-    const applied = resolveObjectInteraction({ message, worldState: spent.worldState });
-    const continued = continuePlayerTurn(
-      applied.worldState,
-      `You take the **Utilize** action to ${applied.intent.action} ${applied.target.name}. Object state is updated for narration.`,
+  if (!attackIntent) {
+    const objectChallenge = resolveObjectChallengeAction({
+      message,
+      worldState,
       characterSheet,
-    );
-    return { handled: true, logType: 'referee_combat_object_interaction', ...continued };
+      currentTurn,
+      inCombat: true,
+    });
+    if (objectChallenge) return objectChallenge;
+
+    const objectInteraction = resolveObjectInteraction({ message, worldState });
+    if (objectInteraction?.handled) {
+      return {
+        handled: true,
+        logType: objectInteraction.logType,
+        worldState: objectInteraction.worldState,
+        reply: objectInteraction.response,
+      };
+    }
+    if (objectInteraction) {
+      const spent = spendTurnResource(worldState, 'action', 'Utilize', characterSheet);
+      if (!spent.ok) {
+        return { handled: true, logType: 'referee_action_unavailable', worldState: spent.worldState, reply: spent.reply };
+      }
+      const applied = resolveObjectInteraction({ message, worldState: spent.worldState });
+      const continued = continuePlayerTurn(
+        applied.worldState,
+        `You take the **Utilize** action to ${applied.intent.action} ${applied.target.name}. Object state is updated for narration.`,
+        characterSheet,
+      );
+      return { handled: true, logType: 'referee_combat_object_interaction', ...continued };
+    }
   }
 
   if (intent.castsSpell) return null;
@@ -1692,7 +1699,7 @@ function resolveCombatAction({ message, intent, worldState, characterSheet, curr
     return { handled: true, logType: 'referee_combat_end_turn', ...result };
   }
 
-  if (isCombatStarter(message) || /\battack\b/i.test(message) || isUnarmedAttackIntent(message) || isThrownWeaponAttackIntent(message, characterSheet)) {
+  if (attackIntent) {
     return resolvePlayerAttack({ message, worldState, characterSheet, rollDie });
   }
 

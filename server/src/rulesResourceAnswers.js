@@ -27,7 +27,7 @@ function answerResourceCountQuestion(message = '', worldState = {}) {
   const resourceMatches = findRequestedResources(text, resources)
     .map((match) => ({
       index: match.index,
-      entry: formatResourceEntry(match.key, resources[match.key], text),
+      entry: formatResourceEntry(match.key, match.resource, text),
     }));
   const spellSlotMatch = findRequestedSpellSlots(text, worldState);
   const matches = [
@@ -77,12 +77,24 @@ function findRequestedResources(text = '', resources = {}) {
     ].filter(Boolean);
     const index = firstAliasIndex(text, aliases);
     if (index !== -1) {
-      matches.push({ key, index });
+      matches.push({ key, index, resource: resources[key] });
+    }
+  }
+
+  for (const [key, resource] of Object.entries(resources.spell_uses || {})) {
+    const aliases = [
+      key,
+      humanize(key),
+      resource?.name,
+    ].filter(Boolean);
+    const index = firstAliasIndex(text, aliases);
+    if (index !== -1) {
+      matches.push({ key, index, resource });
     }
   }
 
   if (text.includes('tactical mind') && resources.second_wind && !matches.some((match) => match.key === 'second_wind')) {
-    matches.push({ key: 'second_wind', index: text.indexOf('tactical mind') });
+    matches.push({ key: 'second_wind', index: text.indexOf('tactical mind'), resource: resources.second_wind });
   }
   return matches.sort((a, b) => a.index - b.index);
 }

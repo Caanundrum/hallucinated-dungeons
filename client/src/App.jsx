@@ -857,7 +857,10 @@ function CharacterSheetModal({ character, content, levelUpBusy, onClose, onLevel
   const progression = character.progression || {};
   const abilities = character.abilities || {};
   const derived = character.derived_stats || {};
-  const equippedDefenses = character.active_effects || [];
+  const equippedDefenses = [
+    ...(character.active_effects || []).filter(isEquipmentEffect),
+    ...buildDerivedDefenseEffects(derived),
+  ];
   const activeEffects = (derived.active_spell_effects || []).filter((effect) => !isEquipmentEffect(effect));
   const attacks = derived.attack_breakdowns || [];
   const skills = derived.skill_modifiers || {};
@@ -1388,6 +1391,17 @@ function isEquipmentEffect(effect = {}) {
   return effect.source_type === 'equipment'
     || String(effect.id || '').startsWith('equipment_')
     || Boolean(effect.source_item_id || effect.source_item_name);
+}
+
+function buildDerivedDefenseEffects(derived = {}) {
+  return (derived.armor_class_breakdown || [])
+    .filter((entry) => /fighting style/i.test(String(entry.label || '')))
+    .map((entry) => ({
+      id: `derived_defense_${String(entry.label || 'bonus').toLowerCase().replace(/[^a-z0-9]+/g, '_')}`,
+      name: entry.label || 'Defense Bonus',
+      mechanical_effect: `AC ${fmtMod(entry.value)}`,
+      source_type: 'derived_defense',
+    }));
 }
 
 export default App;
