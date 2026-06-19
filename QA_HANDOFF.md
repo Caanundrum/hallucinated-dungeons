@@ -1,5 +1,36 @@
 # Hallucinated Dungeons QA Handoff
 
+## Latest QA Pass - 2026-06-19 Paladin/Ranger Regression Retest `fc5eabe`
+
+Scope:
+
+- Verified production at `https://hallucinated-dungeons.vercel.app/` after the latest push.
+- Repo tip and app-code commit under test: `fc5eabe Fix Paladin and Ranger QA regressions`.
+- Retested all four findings from the Paladin/Ranger level 2 production pass.
+- QA remained read-only for app code. Only this handoff was updated.
+
+Automated checks:
+
+- Server `npm.cmd test`: PASS, `517/517`.
+- Client `npm.cmd run lint`: PASS.
+- `git diff --check fc5eabe^ fc5eabe`: PASS.
+
+Verified fixed / passed in production:
+
+- Explicit weapon-name Smite routing is fixed. `I make a melee weapon attack ... with my Longsword and use Divine Smite if the attack hits.` started combat, then produced a real Longsword attack roll on the Paladin's turn instead of `Utilize Longsword`.
+- The named-weapon attack hit for 10 and defeated the 8 HP target. Divine Smite correctly spent no Bonus Action, free use, or spell slot because the weapon damage had already finished the target.
+- Paladin Equipped Defenses now explicitly shows Shield `AC +2`, Chain Mail `Base AC 16 + DEX modifier cap 0`, and Defense Fighting Style `AC +1`, matching total AC `19`.
+- Ranger combined resource query now returns both requested resources: Hunter's Mark `2/2` and level 1 spell slots `2/2`.
+- Ranger Equipped Defenses now contains only Leather Armor `Base AC 11 + full DEX modifier`. Initiative Proficiency / Effect active is no longer misplaced there.
+
+Findings for DEV:
+
+- No new blocker found in this focused regression pass.
+
+Current recommendation:
+
+- Treat all four Paladin/Ranger regressions from `aae53ad` as fixed in production. The Paladin now attacks with the sword instead of submitting paperwork about its utilization.
+
 ## Latest QA Pass - 2026-06-18 Paladin/Ranger Level 2 Production QA `aae53ad`
 
 Scope:
