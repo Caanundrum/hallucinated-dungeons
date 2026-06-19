@@ -53,6 +53,65 @@ test('prepared class spells spend slots while cantrips do not', () => {
   assert.equal(cantrip.characterSheet.spellcasting.slots[1], 2);
 });
 
+test('Quickened Spell spends Sorcery Points and changes an Action spell to a Bonus Action', () => {
+  const result = resolveSpellCastLegality({
+    message: 'I cast Magic Missile at the skeleton with Quickened Spell.',
+    content,
+    characterSheet: {
+      identity: { name: 'Mira', level: 2, class: 'sorcerer', class_name: 'Sorcerer' },
+      class_choices: { metamagic: ['quickened_spell', 'transmuted_spell'] },
+      resources: { sorcery_points: { name: 'Sorcery Points', remaining: 2, max: 2, reset: 'long_rest' } },
+      spellcasting: { ability: 'cha', cantrips_known: [], spells_prepared: ['magic_missile'], slots: { 1: 3 } },
+    },
+    worldState: {},
+  });
+
+  assert.equal(result.blocked, false);
+  assert.equal(result.spell.casting_time, 'Bonus Action');
+  assert.equal(result.characterSheet.resources.sorcery_points.remaining, 0);
+  assert.equal(result.characterSheet.spellcasting.slots[1], 2);
+});
+
+test('unselected or invalid Metamagic spends no spell slot or Sorcery Points', () => {
+  const sheet = {
+    identity: { name: 'Mira', level: 2, class: 'sorcerer', class_name: 'Sorcerer' },
+    class_choices: { metamagic: ['distant_spell', 'subtle_spell'] },
+    resources: { sorcery_points: { name: 'Sorcery Points', remaining: 2, max: 2, reset: 'long_rest' } },
+    spellcasting: { ability: 'cha', cantrips_known: [], spells_prepared: ['magic_missile'], slots: { 1: 3 } },
+  };
+  const result = resolveSpellCastLegality({
+    message: 'I cast Magic Missile at the skeleton with Quickened Spell.',
+    content,
+    characterSheet: sheet,
+    worldState: {},
+  });
+
+  assert.equal(result.blocked, true);
+  assert.equal(sheet.resources.sorcery_points.remaining, 2);
+  assert.equal(sheet.spellcasting.slots[1], 3);
+});
+
+test('a second spell-slot cast on the same combat turn is blocked while cantrips remain legal', () => {
+  const characterSheet = {
+    identity: { name: 'Mira', level: 2, class: 'sorcerer', class_name: 'Sorcerer' },
+    spellcasting: {
+      ability: 'cha',
+      cantrips_known: ['fire_bolt'],
+      spells_prepared: ['magic_missile'],
+      slots: { 1: 2 },
+    },
+  };
+  const worldState = {
+    combat_state: { active: true, turn_resources: { spell_slot_spent: true } },
+  };
+  const slotted = resolveSpellCastLegality({ message: 'I cast Magic Missile at the skeleton.', content, characterSheet, worldState });
+  const cantrip = resolveSpellCastLegality({ message: 'I cast Fire Bolt at the skeleton.', content, characterSheet, worldState });
+
+  assert.equal(slotted.blocked, true);
+  assert.match(slotted.reply, /already expended a spell slot/);
+  assert.equal(cantrip.blocked, false);
+});
+
 test('wizard spellbook spells are blocked when not prepared unless castable as rituals', () => {
   const mageArmor = resolveSpellCastLegality({
     message: 'I cast Mage Armor.',

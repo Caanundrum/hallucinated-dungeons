@@ -71,6 +71,18 @@ const RESOURCE_DEFINITIONS = {
     max: 2,
     reset: 'long_rest',
   },
+  sorcery_points: {
+    name: 'Sorcery Points',
+    remaining: 2,
+    max: 2,
+    reset: 'long_rest',
+  },
+  magical_cunning: {
+    name: 'Magical Cunning',
+    remaining: 1,
+    max: 1,
+    reset: 'long_rest',
+  },
   arcane_recovery: {
     name: 'Arcane Recovery',
     remaining: 1,
@@ -374,7 +386,11 @@ function applyClassResourceDefaults(resources, characterSheet = {}, worldResourc
     defaults.focus_points = { ...RESOURCE_DEFINITIONS.focus_points, remaining: level, max: level };
     defaults.uncanny_metabolism = RESOURCE_DEFINITIONS.uncanny_metabolism;
   }
-  if (classId === 'sorcerer') defaults.innate_sorcery = RESOURCE_DEFINITIONS.innate_sorcery;
+  if (classId === 'sorcerer') {
+    defaults.innate_sorcery = RESOURCE_DEFINITIONS.innate_sorcery;
+    if (level >= 2) defaults.sorcery_points = { ...RESOURCE_DEFINITIONS.sorcery_points, remaining: level, max: level };
+  }
+  if (classId === 'warlock' && level >= 2) defaults.magical_cunning = RESOURCE_DEFINITIONS.magical_cunning;
   if (classId === 'wizard') defaults.arcane_recovery = RESOURCE_DEFINITIONS.arcane_recovery;
 
   for (const [key, definition] of Object.entries(defaults)) {

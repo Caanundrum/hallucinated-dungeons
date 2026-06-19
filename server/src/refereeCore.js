@@ -1469,10 +1469,16 @@ function applyArcaneRecovery({ characterSheet = {}, worldState = {}, resources =
 }
 
 function getMaxSpellSlots(characterSheet = {}) {
+  if (characterSheet?.spellcasting?.slots_max) return characterSheet.spellcasting.slots_max;
   const classId = characterSheet?.identity?.class;
   const content = getContentBundle();
   const classData = content.classes.find((item) => item.id === classId);
-  return classData?.spellcasting?.slots || characterSheet?.spellcasting?.slots || {};
+  const slots = { ...(classData?.spellcasting?.slots || {}) };
+  const level = Number(characterSheet?.identity?.level || characterSheet?.derived_stats?.level || 1);
+  for (let currentLevel = 2; currentLevel <= level; currentLevel += 1) {
+    Object.assign(slots, content.classAdvancement?.levels?.[classId]?.[String(currentLevel)]?.spellcasting?.slots || {});
+  }
+  return Object.keys(slots).length ? slots : characterSheet?.spellcasting?.slots || {};
 }
 
 function getHitDiceState(characterSheet = {}, worldState = {}) {
@@ -2920,8 +2926,17 @@ function buildConcentrationPrompt({ worldState, characterSheet = {}, damageEvent
     testType: 'concentration_save',
     ability: 'con',
   });
-  const advantageMode = combineAdvantageModes(conditionMode, activeAdvantageSources.length ? 'advantage' : null);
-  const advantageSources = [...conditionSources, ...activeAdvantageSources];
+  const classAdvantageSources = getClassD20AdvantageSources({
+    characterSheet,
+    subject: conditionSubject,
+    testType: 'concentration_save',
+    ability: 'con',
+  });
+  const advantageMode = combineAdvantageModes(
+    conditionMode,
+    [...activeAdvantageSources, ...classAdvantageSources].length ? 'advantage' : null,
+  );
+  const advantageSources = [...conditionSources, ...activeAdvantageSources, ...classAdvantageSources];
   const pendingRoll = {
     id: `roll_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     kind: 'concentration_save',
@@ -3562,7 +3577,23 @@ function getClassD20AdvantageSources({ characterSheet = {}, subject = {}, testTy
   ) {
     sources.push('Danger Sense');
   }
+  if (
+    testType === 'concentration_save'
+    && normalizeId(ability) === 'con'
+    && isClass(characterSheet, 'warlock')
+    && hasEldritchInvocation(characterSheet, 'eldritch_mind')
+  ) {
+    sources.push('Eldritch Mind');
+  }
   return sources;
+}
+
+function hasEldritchInvocation(characterSheet = {}, invocationId) {
+  const selected = [
+    characterSheet.class_choices?.eldritch_invocation,
+    ...(characterSheet.class_choices?.eldritch_invocations || []),
+  ].map(normalizeId).filter(Boolean);
+  return selected.includes(normalizeId(invocationId));
 }
 
 function getRecklessAttackUse({ message = '', characterSheet = {}, attack = {} } = {}) {

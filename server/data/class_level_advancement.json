@@ -332,6 +332,14 @@
             "label": "Metamagic Options",
             "type": "metamagic",
             "count": 2
+          },
+          {
+            "id": "prepared_spells",
+            "label": "Prepared Spells",
+            "type": "spell",
+            "count": 2,
+            "class_id": "sorcerer",
+            "max_level": 1
           }
         ],
         "spellcasting": {
@@ -366,6 +374,80 @@
             "type": "eldritch_invocation",
             "count": 2,
             "total_after_level": 3
+          },
+          {
+            "id": "pact_weapon",
+            "label": "Pact Weapon",
+            "type": "weapon",
+            "count": 1,
+            "weapon_filter": "simple_or_martial_melee",
+            "required_if": {
+              "choice_id": "eldritch_invocations",
+              "includes": "pact_of_the_blade"
+            }
+          },
+          {
+            "id": "pact_chain_familiar",
+            "label": "Pact Familiar Form",
+            "type": "option",
+            "count": 1,
+            "options": [
+              { "id": "bat", "name": "Bat" },
+              { "id": "cat", "name": "Cat" },
+              { "id": "frog", "name": "Frog" },
+              { "id": "hawk", "name": "Hawk" },
+              { "id": "imp", "name": "Imp" },
+              { "id": "owl", "name": "Owl" },
+              { "id": "pseudodragon", "name": "Pseudodragon" },
+              { "id": "quasit", "name": "Quasit" },
+              { "id": "rat", "name": "Rat" },
+              { "id": "raven", "name": "Raven" },
+              { "id": "skeleton", "name": "Skeleton" },
+              { "id": "slaad_tadpole", "name": "Slaad Tadpole" },
+              { "id": "sphinx_of_wonder", "name": "Sphinx of Wonder" },
+              { "id": "spider", "name": "Spider" },
+              { "id": "sprite", "name": "Sprite" },
+              { "id": "venomous_snake", "name": "Venomous Snake" },
+              { "id": "weasel", "name": "Weasel" }
+            ],
+            "required_if": {
+              "choice_id": "eldritch_invocations",
+              "includes": "pact_of_the_chain"
+            }
+          },
+          {
+            "id": "pact_tome_cantrips",
+            "label": "Book of Shadows Cantrips",
+            "type": "spell",
+            "count": 3,
+            "class_id": "any",
+            "max_level": 0,
+            "required_if": {
+              "choice_id": "eldritch_invocations",
+              "includes": "pact_of_the_tome"
+            }
+          },
+          {
+            "id": "pact_tome_rituals",
+            "label": "Book of Shadows Rituals",
+            "type": "spell",
+            "count": 2,
+            "class_id": "any",
+            "min_level": 1,
+            "max_level": 1,
+            "ritual_only": true,
+            "required_if": {
+              "choice_id": "eldritch_invocations",
+              "includes": "pact_of_the_tome"
+            }
+          },
+          {
+            "id": "prepared_spells",
+            "label": "Prepared Spell",
+            "type": "spell",
+            "count": 1,
+            "class_id": "warlock",
+            "max_level": 1
           }
         ],
         "spellcasting": {

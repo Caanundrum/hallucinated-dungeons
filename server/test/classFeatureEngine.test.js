@@ -223,6 +223,67 @@ test('Innate Sorcery creates spell DC and spell attack advantage effects', () =>
   assert.equal(rules.some((rule) => rule.target === 'spell_attack_advantage'), true);
 });
 
+test('Font of Magic converts Sorcery Points into a level 1 spell slot', () => {
+  const result = resolveFeatureAction({
+    message: 'I use Font of Magic to create a level 1 spell slot from Sorcery Points.',
+    worldState: {
+      player_stats: {
+        spell_slots: { 1: 1 },
+        resources: { sorcery_points: { name: 'Sorcery Points', remaining: 2, max: 2, reset: 'long_rest' } },
+      },
+    },
+    characterSheet: sheet('sorcerer', {
+      identity: { name: 'Ari', class: 'sorcerer', level: 2 },
+      spellcasting: { ability: 'cha', slots: { 1: 3 } },
+    }),
+  });
+
+  assert.equal(result.worldState.player_stats.spell_slots[1], 2);
+  assert.equal(result.worldState.player_stats.resources.sorcery_points.remaining, 0);
+  assert.match(result.reply, /create one level 1 spell slot/i);
+});
+
+test('Font of Magic converts a level 1 spell slot into one Sorcery Point', () => {
+  const result = resolveFeatureAction({
+    message: 'I use Font of Magic to convert a spell slot into Sorcery Points.',
+    worldState: {
+      player_stats: {
+        spell_slots: { 1: 2 },
+        resources: { sorcery_points: { name: 'Sorcery Points', remaining: 0, max: 2, reset: 'long_rest' } },
+      },
+    },
+    characterSheet: sheet('sorcerer', {
+      identity: { name: 'Ari', class: 'sorcerer', level: 2 },
+      spellcasting: { ability: 'cha', slots: { 1: 3 } },
+    }),
+  });
+
+  assert.equal(result.worldState.player_stats.spell_slots[1], 1);
+  assert.equal(result.worldState.player_stats.resources.sorcery_points.remaining, 1);
+});
+
+test('Magical Cunning restores one Pact slot after its one-minute rite', () => {
+  const result = resolveFeatureAction({
+    message: 'I use Magical Cunning.',
+    worldState: {
+      player_stats: {
+        spell_slots: { 1: 0 },
+        resources: { magical_cunning: { name: 'Magical Cunning', remaining: 1, max: 1, reset: 'long_rest' } },
+      },
+      time_state: { elapsed_minutes: 4 },
+    },
+    characterSheet: sheet('warlock', {
+      identity: { name: 'Ari', class: 'warlock', level: 2 },
+      spellcasting: { ability: 'cha', slots: { 1: 0 }, slots_max: { 1: 2 } },
+    }),
+  });
+
+  assert.equal(result.worldState.player_stats.spell_slots[1], 1);
+  assert.equal(result.worldState.player_stats.resources.magical_cunning.remaining, 0);
+  assert.equal(result.worldState.time_state.elapsed_minutes, 5);
+  assert.match(result.reply, /recover 1 Pact Magic slot/);
+});
+
 test('Divine Spark healing spends Channel Divinity and restores HP', () => {
   const result = resolveFeatureAction({
     message: 'I use Divine Spark to heal myself.',

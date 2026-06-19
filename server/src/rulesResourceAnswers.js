@@ -8,6 +8,8 @@ const RESOURCE_ALIASES = {
   paladins_smite: ["paladin's smite", 'paladin smite', 'divine smite'],
   bardic_inspiration: ['bardic inspiration'],
   innate_sorcery: ['innate sorcery'],
+  sorcery_points: ['sorcery point', 'sorcery points', 'font of magic'],
+  magical_cunning: ['magical cunning'],
   arcane_recovery: ['arcane recovery'],
   heroic_inspiration: ['heroic inspiration'],
   luck_points: ['luck point', 'luck points', 'lucky'],

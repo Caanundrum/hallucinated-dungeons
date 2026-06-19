@@ -2560,6 +2560,30 @@ test('short rest spends available Hit Dice for healing', () => {
   assert.match(result.reply, /Spent 1 Hit Die/);
 });
 
+test('level 2 Warlock short rest restores the full two-slot Pact Magic pool', () => {
+  const result = adjudicate({
+    message: 'We take a short rest.',
+    worldState: worldState({
+      player_stats: {
+        hp: 10,
+        max_hp: 10,
+        armor_class: 14,
+        spell_slots: { 1: 0 },
+        spell_slots_max: { 1: 2 },
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      identity: { name: 'Vex', class: 'warlock', class_name: 'Warlock', level: 2 },
+      derived_stats: { ...characterSheet.derived_stats, hp: 10, max_hp: 10, armor_class: 14 },
+      spellcasting: { ability: 'cha', slots: { 1: 0 }, slots_max: { 1: 2 } },
+    },
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.player_stats.spell_slots[1], 2);
+});
+
 test('long rest grants Human Resourceful Heroic Inspiration', () => {
   const result = adjudicate({
     message: 'We take a long rest.',

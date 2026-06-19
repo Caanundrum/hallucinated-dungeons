@@ -36,6 +36,8 @@ function resolveFeatureAction({ message = '', worldState = {}, characterSheet = 
   if (intent.id === 'divine_spark') return resolveDivineSpark({ message, worldState, characterSheet, rollDie });
   if (intent.id === 'turn_undead') return resolveTurnUndead({ worldState, characterSheet, rollDie });
   if (intent.id === 'innate_sorcery') return resolveInnateSorcery({ worldState, characterSheet });
+  if (intent.id === 'font_of_magic') return resolveFontOfMagic({ message, worldState, characterSheet });
+  if (intent.id === 'magical_cunning') return resolveMagicalCunning({ worldState, characterSheet });
   if (intent.id === 'wild_companion') return resolveWildCompanion({ message, worldState, characterSheet });
   if (intent.id === 'wild_shape') return resolveWildShape({ message, worldState, characterSheet });
   if (intent.id === 'bardic_inspiration') return resolveBardicInspiration({ message, worldState, characterSheet });
@@ -65,6 +67,8 @@ function getFeatureIntent(message = '') {
   if (/\bturn\s+undead\b/.test(text)) return { id: 'turn_undead' };
   if (/\bchannel\s+divinity\b/.test(text)) return { id: 'channel_divinity' };
   if (/\binnate\s+sorcery\b/.test(text)) return { id: 'innate_sorcery' };
+  if (/\bfont\s+of\s+magic\b|\bconvert\b.*\b(?:sorcery points?|spell slots?)\b|\bcreate\b.*\bspell slot\b.*\bsorcery\b/.test(text)) return { id: 'font_of_magic' };
+  if (/\bmagical\s+cunning\b/.test(text)) return { id: 'magical_cunning' };
   if (isWildCompanionDismissal(text)) return { id: 'wild_companion' };
   if (/\bwild\s+companion\b|\bfind\s+familiar\b.*\bwild\s*shape\b|\bwild\s*shape\b.*\bfind\s+familiar\b/.test(text)) return { id: 'wild_companion' };
   if (/\bwild\s*shape\b|\bshape\s*change\b|\bturn\s+into\s+(?:a|an|the)?\s*(?:wolf|cat|badger|spider|rat|dog|mastiff|goat|boar|scouting beast|[a-z -]*beast)\b/.test(text)) return { id: 'wild_shape' };
@@ -462,6 +466,166 @@ function resolveInnateSorcery({ worldState = {}, characterSheet = {} } = {}) {
     worldState: nextState,
     reply: `You activate **Innate Sorcery** as a Bonus Action. For 1 minute, your Sorcerer spell save DC is +1 and your Sorcerer spell attacks have Advantage. Uses left: ${remainingResourceText(nextState, characterSheet, 'innate_sorcery')}.`,
   };
+}
+
+function resolveFontOfMagic({ message = '', worldState = {}, characterSheet = {} } = {}) {
+  if (!isClass(characterSheet, 'sorcerer')) return wrongClass('Font of Magic', 'Sorcerer', worldState);
+  if (getCharacterLevel(characterSheet) < 2) {
+    return levelRequired('Font of Magic', 'Sorcerer', 2, worldState);
+  }
+
+  const direction = inferFontConversion(message);
+  if (!direction) {
+    return {
+      handled: true,
+      logType: 'feature_font_of_magic_choice_required',
+      worldState: mergeWorldResources(worldState, buildResourceState(characterSheet, worldState)),
+      reply: 'Font of Magic needs a conversion direction: create a level 1 spell slot for 2 Sorcery Points, or turn one level 1 spell slot into 1 Sorcery Point.',
+    };
+  }
+
+  const spentAction = spendTurnResource(worldState, 'bonus_action', 'Font of Magic', characterSheet);
+  if (!spentAction.ok) {
+    return { handled: true, logType: 'feature_font_of_magic_action_unavailable', worldState: spentAction.worldState, reply: spentAction.reply };
+  }
+
+  const resources = buildResourceState(characterSheet, spentAction.worldState);
+  const sorcery = resources.sorcery_points || { name: 'Sorcery Points', remaining: 0, max: getCharacterLevel(characterSheet), reset: 'long_rest' };
+  const slots = { ...(spentAction.worldState.player_stats?.spell_slots || characterSheet.spellcasting?.slots || {}) };
+  const currentSlots = Number(slots['1'] || 0);
+
+  if (direction === 'slot') {
+    if (Number(sorcery.remaining || 0) < 2) {
+      return {
+        handled: true,
+        logType: 'feature_font_of_magic_resource_unavailable',
+        worldState: mergeWorldResources(worldState, resources),
+        reply: 'Creating a level 1 spell slot costs 2 Sorcery Points, and you do not currently have enough. Your Bonus Action and resources are not spent.',
+      };
+    }
+    const nextResources = {
+      ...resources,
+      sorcery_points: { ...sorcery, remaining: Number(sorcery.remaining) - 2 },
+    };
+    return {
+      handled: true,
+      logType: 'feature_font_of_magic_create_slot',
+      worldState: mergeWorldResources({
+        ...spentAction.worldState,
+        player_stats: { ...(spentAction.worldState.player_stats || {}), spell_slots: { ...slots, 1: currentSlots + 1 } },
+      }, nextResources),
+      reply: `You use **Font of Magic** as a Bonus Action, spend 2 Sorcery Points, and create one level 1 spell slot. Sorcery Points: ${nextResources.sorcery_points.remaining}/${nextResources.sorcery_points.max}. Level 1 slots: ${currentSlots + 1}.`,
+    };
+  }
+
+  if (currentSlots <= 0) {
+    return {
+      handled: true,
+      logType: 'feature_font_of_magic_slot_unavailable',
+      worldState: mergeWorldResources(worldState, resources),
+      reply: 'You do not have a level 1 spell slot available to convert. Your Bonus Action and Sorcery Points are not spent.',
+    };
+  }
+  if (Number(sorcery.remaining || 0) >= Number(sorcery.max || getCharacterLevel(characterSheet))) {
+    return {
+      handled: true,
+      logType: 'feature_font_of_magic_points_full',
+      worldState: mergeWorldResources(worldState, resources),
+      reply: 'Your Sorcery Points are already full, so converting a spell slot would waste it. Nothing is spent.',
+    };
+  }
+
+  const nextResources = {
+    ...resources,
+    sorcery_points: { ...sorcery, remaining: Math.min(Number(sorcery.max), Number(sorcery.remaining || 0) + 1) },
+  };
+  return {
+    handled: true,
+    logType: 'feature_font_of_magic_create_points',
+    worldState: mergeWorldResources({
+      ...spentAction.worldState,
+      player_stats: { ...(spentAction.worldState.player_stats || {}), spell_slots: { ...slots, 1: currentSlots - 1 } },
+    }, nextResources),
+    reply: `You use **Font of Magic** as a Bonus Action, expend one level 1 spell slot, and regain 1 Sorcery Point. Sorcery Points: ${nextResources.sorcery_points.remaining}/${nextResources.sorcery_points.max}. Level 1 slots: ${currentSlots - 1}.`,
+  };
+}
+
+function resolveMagicalCunning({ worldState = {}, characterSheet = {} } = {}) {
+  if (!isClass(characterSheet, 'warlock')) return wrongClass('Magical Cunning', 'Warlock', worldState);
+  if (getCharacterLevel(characterSheet) < 2) return levelRequired('Magical Cunning', 'Warlock', 2, worldState);
+  if (worldState.combat_state?.active) {
+    return {
+      handled: true,
+      logType: 'feature_magical_cunning_combat_blocked',
+      worldState,
+      reply: 'Magical Cunning requires a one-minute rite, so it cannot be completed during active combat. Initiative is famously hostile to quiet ritual breaks.',
+    };
+  }
+
+  const resources = buildResourceState(characterSheet, worldState);
+  const cunning = resources.magical_cunning;
+  if (Number(cunning?.remaining || 0) <= 0) {
+    return {
+      handled: true,
+      logType: 'feature_magical_cunning_unavailable',
+      worldState: mergeWorldResources(worldState, resources),
+      reply: 'Magical Cunning has already been used and returns after a Long Rest. The pact has reviewed the request and stamped it "later."',
+    };
+  }
+
+  const maxSlots = Number(characterSheet.spellcasting?.slots_max?.['1'] || getWarlockLevelOneSlotMaximum(characterSheet));
+  const slots = { ...(worldState.player_stats?.spell_slots || characterSheet.spellcasting?.slots || {}) };
+  const current = Number(slots['1'] || 0);
+  const recoverable = Math.ceil(maxSlots / 2);
+  const restored = Math.min(recoverable, Math.max(0, maxSlots - current));
+  if (restored <= 0) {
+    return {
+      handled: true,
+      logType: 'feature_magical_cunning_slots_full',
+      worldState: mergeWorldResources(worldState, resources),
+      reply: `Your Pact Magic slots are already full (${current}/${maxSlots}), so Magical Cunning is not spent. The patron declines to refill a cup that is visibly full.`,
+    };
+  }
+
+  const nextResources = {
+    ...resources,
+    magical_cunning: { ...cunning, remaining: Number(cunning.remaining) - 1 },
+  };
+  const elapsed = Number(worldState.time_state?.elapsed_minutes || 0) + 1;
+  return {
+    handled: true,
+    logType: 'feature_magical_cunning',
+    worldState: mergeWorldResources({
+      ...worldState,
+      time_state: { ...(worldState.time_state || {}), elapsed_minutes: elapsed, scene_time: 'after a one-minute Magical Cunning rite' },
+      player_stats: { ...(worldState.player_stats || {}), spell_slots: { ...slots, 1: current + restored } },
+    }, nextResources),
+    reply: `You complete a one-minute **Magical Cunning** rite and recover ${restored} Pact Magic slot. Level 1 Pact slots: ${current + restored}/${maxSlots}. Uses left: ${nextResources.magical_cunning.remaining}/${nextResources.magical_cunning.max}.`,
+  };
+}
+
+function getWarlockLevelOneSlotMaximum(characterSheet = {}) {
+  return getCharacterLevel(characterSheet) >= 2 ? 2 : Number(characterSheet.spellcasting?.slots?.['1'] || 1);
+}
+
+function inferFontConversion(message = '') {
+  const text = String(message || '').toLowerCase();
+  if (/\b(?:create|make|restore|gain)\b.*\bspell slot\b|\bsorcery points?\b.*\b(?:into|for)\b.*\bspell slot\b/.test(text)) return 'slot';
+  if (/\bspell slot\b.*\b(?:into|for|to gain|to restore)\b.*\bsorcery points?\b|\bconvert\b.*\bspell slot\b/.test(text)) return 'points';
+  return null;
+}
+
+function levelRequired(feature, className, level, worldState) {
+  return {
+    handled: true,
+    logType: `feature_${normalizeFeatureId(feature)}_level_required`,
+    worldState,
+    reply: `${feature} is a level ${level} ${className} feature. This character has not reached it yet.`,
+  };
+}
+
+function normalizeFeatureId(value = '') {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 }
 
 function resolveWildShape({ message = '', worldState = {}, characterSheet = {} } = {}) {

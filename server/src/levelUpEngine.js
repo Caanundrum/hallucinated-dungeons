@@ -17,7 +17,10 @@ const SUPPORTED_LEVEL_UP_MECHANICS = new Set([
   'druidic_warrior',
   'fighting_style_level_2',
   'focus_points',
+  'font_of_magic',
   'jack_of_all_trades',
+  'magical_cunning',
+  'metamagic',
   'reckless_attack',
   'paladin_smite',
   'tactical_mind',
@@ -26,7 +29,21 @@ const SUPPORTED_LEVEL_UP_MECHANICS = new Set([
   'uncanny_metabolism',
   'wild_companion',
   'wild_shape',
+  'eldritch_invocations_level_2',
 ]);
+
+const METAMAGIC_OPTIONS = [
+  { id: 'careful_spell', name: 'Careful Spell', description: 'Spend 1 Sorcery Point to protect chosen creatures from a spell saving throw.' },
+  { id: 'distant_spell', name: 'Distant Spell', description: 'Spend 1 Sorcery Point to double a spell range or make a Touch spell reach 30 feet.' },
+  { id: 'empowered_spell', name: 'Empowered Spell', description: 'Spend 1 Sorcery Point to reroll some spell damage dice.' },
+  { id: 'extended_spell', name: 'Extended Spell', description: 'Spend 1 Sorcery Point to double a spell duration and steady its Concentration.' },
+  { id: 'heightened_spell', name: 'Heightened Spell', description: 'Spend 2 Sorcery Points to impose Disadvantage on one target save.' },
+  { id: 'quickened_spell', name: 'Quickened Spell', description: 'Spend 2 Sorcery Points to cast an Action spell as a Bonus Action.' },
+  { id: 'seeking_spell', name: 'Seeking Spell', description: 'Spend 1 Sorcery Point to reroll a missed spell attack.' },
+  { id: 'subtle_spell', name: 'Subtle Spell', description: 'Spend 1 Sorcery Point to cast without verbal, somatic, or ordinary material components.' },
+  { id: 'transmuted_spell', name: 'Transmuted Spell', description: 'Spend 1 Sorcery Point to change eligible elemental spell damage.' },
+  { id: 'twinned_spell', name: 'Twinned Spell', description: 'Spend 1 Sorcery Point to increase a qualifying spell\'s effective level for an extra target.' },
+];
 
 function getLevelUpPreview(characterSheet = {}, content = getContentBundle(), options = {}) {
   const currentLevel = getCharacterLevel(characterSheet);
@@ -171,6 +188,7 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
   });
   const nextCantrips = getCantripChoiceIds(advancement.required_choices || [], levelUpChoices);
   const nextSpellcasting = mergeSpellcasting(currentSpellcasting, advancement.spellcasting, levelUpChoices, nextCantrips);
+  const invocationState = buildInvocationLevelUpState({ characterSheet, levelUpChoices, content });
   const nextLanguages = mergeLanguages(
     characterSheet.languages || characterSheet.proficiencies?.languages || [],
     getLanguageChoiceIds(advancement.required_choices || [], levelUpChoices),
@@ -213,13 +231,37 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
     class_choices: {
       ...(characterSheet.class_choices || {}),
       ...(selectedFightingStyle ? { fighting_style: selectedFightingStyle } : {}),
+      ...(levelUpChoices.metamagic?.length ? { metamagic: levelUpChoices.metamagic } : {}),
+      ...(invocationState.invocations.length ? { eldritch_invocations: invocationState.invocations } : {}),
     },
+    class_choice_details: {
+      ...(characterSheet.class_choice_details || {}),
+      ...invocationState.details,
+    },
+    class_choice_spells: mergeClassChoiceSpells(characterSheet.class_choice_spells, invocationState.spells),
     languages: nextLanguages,
     proficiencies: {
       ...(characterSheet.proficiencies || {}),
       languages: nextLanguages,
     },
-    ...(nextSpellcasting ? { spellcasting: nextSpellcasting } : {}),
+    ...(nextSpellcasting ? {
+      spellcasting: {
+        ...nextSpellcasting,
+        class_choice_spells: mergeClassChoiceSpells(nextSpellcasting.class_choice_spells, invocationState.spells),
+        ritual_spells: [
+          ...new Set([
+            ...(nextSpellcasting.ritual_spells || []),
+            ...invocationState.spells.filter((spell) => spell.type === 'ritual').map((spell) => spell.id),
+          ]),
+        ],
+        cantrips_known: [
+          ...new Set([
+            ...(nextSpellcasting.cantrips_known || []),
+            ...invocationState.spells.filter((spell) => spell.type === 'cantrip').map((spell) => spell.id),
+          ]),
+        ],
+      },
+    } : {}),
     progression: {
       ...currentProgression,
       experience_points: getCharacterXp(characterSheet),
@@ -292,11 +334,13 @@ function getChoiceOptions({ choice = {}, characterSheet = {}, content = {}, clas
       ...(spellcasting.always_prepared_spells || []),
     ].map(normalizeId));
     const spellClass = normalizeId(choice.class_id || classId);
+    const minLevel = Number(choice.min_level ?? 0);
     const maxLevel = Number(choice.max_level ?? 1);
     const excluded = new Set((choice.exclude_ids || []).map(normalizeId));
     return (content.spells || [])
-      .filter((spell) => Number(spell.level || 0) <= maxLevel)
-      .filter((spell) => (spell.classes || []).map(normalizeId).includes(spellClass))
+      .filter((spell) => Number(spell.level || 0) >= minLevel && Number(spell.level || 0) <= maxLevel)
+      .filter((spell) => spellClass === 'any' || (spell.classes || []).map(normalizeId).includes(spellClass))
+      .filter((spell) => !choice.ritual_only || spell.ritual)
       .filter((spell) => !prepared.has(normalizeId(spell.id)))
       .filter((spell) => !excluded.has(normalizeId(spell.id)))
       .map((spell) => ({
@@ -340,6 +384,41 @@ function getChoiceOptions({ choice = {}, characterSheet = {}, content = {}, clas
       name: style.name || titleCase(style.id),
       description: style.description || '',
       meta: style.id === 'druidic_warrior' ? 'Cantrip style' : 'Fighting Style feat',
+    }));
+  }
+
+  if (choice.type === 'metamagic') {
+    const known = new Set((characterSheet.class_choices?.metamagic || []).map(normalizeId));
+    return METAMAGIC_OPTIONS
+      .filter((option) => !known.has(option.id))
+      .map((option) => ({ ...option, meta: option.id === 'heightened_spell' || option.id === 'quickened_spell' ? '2 Sorcery Points' : '1 Sorcery Point' }));
+  }
+
+  if (choice.type === 'eldritch_invocation') {
+    const warlock = byId(content.classes || [], 'warlock');
+    const invocationChoice = (warlock?.class_choices || []).find((entry) => entry.id === 'eldritch_invocation');
+    const known = new Set([
+      normalizeId(characterSheet.class_choices?.eldritch_invocation),
+      ...((characterSheet.class_choices?.eldritch_invocations || []).map(normalizeId)),
+    ].filter(Boolean));
+    return (invocationChoice?.options || [])
+      .filter((option) => !known.has(normalizeId(option.id)))
+      .map((option) => ({ id: option.id, name: option.name, description: option.description, meta: 'Eldritch Invocation' }));
+  }
+
+  if (choice.type === 'weapon') {
+    return (content.equipment || [])
+      .filter((item) => item.type === 'weapon')
+      .filter((item) => choice.weapon_filter !== 'simple_or_martial_melee' || !item.properties?.includes('ammunition'))
+      .map((item) => ({ id: item.id, name: item.name, description: item.description || '', meta: 'Pact weapon form' }));
+  }
+
+  if (choice.type === 'option') {
+    return (choice.options || []).map((option) => ({
+      id: option.id,
+      name: option.name || titleCase(option.id),
+      description: option.description || '',
+      meta: option.meta || '',
     }));
   }
 
@@ -612,7 +691,55 @@ function mergeSpellcasting(current, advancementSpellcasting, levelUpChoices = {}
       ...((current || {}).slots || {}),
       ...(advancementSpellcasting.slots || {}),
     },
+    slots_max: {
+      ...((current || {}).slots_max || (current || {}).slots || {}),
+      ...(advancementSpellcasting.slots || {}),
+    },
   };
+}
+
+function buildInvocationLevelUpState({ characterSheet = {}, levelUpChoices = {}, content = {} } = {}) {
+  const added = levelUpChoices.eldritch_invocations || [];
+  if (!added.length) return { invocations: [], details: {}, spells: [] };
+  const existing = [
+    normalizeId(characterSheet.class_choices?.eldritch_invocation),
+    ...((characterSheet.class_choices?.eldritch_invocations || []).map(normalizeId)),
+  ].filter(Boolean);
+  const invocations = [...new Set([...existing, ...added])];
+  const details = {};
+  const spells = [];
+
+  if (added.includes('armor_of_shadows')) {
+    spells.push({ id: 'mage_armor', source: 'Armor of Shadows', type: 'at_will' });
+  }
+  if (added.includes('pact_of_the_blade')) {
+    details.pact_of_the_blade = { pact_weapon: levelUpChoices.pact_weapon?.[0] };
+  }
+  if (added.includes('pact_of_the_chain')) {
+    details.pact_of_the_chain = { familiar_form: levelUpChoices.pact_chain_familiar?.[0] };
+    spells.push({ id: 'find_familiar', source: 'Pact of the Chain', type: 'ritual' });
+  }
+  if (added.includes('pact_of_the_tome')) {
+    details.pact_of_the_tome = {
+      tome_cantrips: levelUpChoices.pact_tome_cantrips || [],
+      tome_rituals: levelUpChoices.pact_tome_rituals || [],
+    };
+    spells.push(...(levelUpChoices.pact_tome_cantrips || []).map((id) => ({ id, source: 'Pact of the Tome', type: 'cantrip' })));
+    spells.push(...(levelUpChoices.pact_tome_rituals || []).map((id) => ({ id, source: 'Pact of the Tome', type: 'ritual' })));
+  }
+
+  return { invocations, details, spells };
+}
+
+function mergeClassChoiceSpells(current = [], additions = []) {
+  const entries = [...(current || []), ...(additions || [])];
+  const byKey = new Map();
+  for (const entry of entries) {
+    const normalized = typeof entry === 'string' ? { id: entry } : entry;
+    if (!normalized?.id) continue;
+    byKey.set(`${normalizeId(normalized.id)}:${normalizeId(normalized.type || '')}`, normalized);
+  }
+  return [...byKey.values()];
 }
 
 function applyFightingStyleToDerivedStats(derivedStats = {}, characterSheet = {}, styleId = '') {

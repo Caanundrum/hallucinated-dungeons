@@ -211,7 +211,7 @@ function getAttackModeSources({
   return sources;
 }
 
-function resolveSavingThrow({ target = {}, ability, dc, rollDie, bonus = 0 } = {}) {
+function resolveSavingThrow({ target = {}, ability, dc, rollDie, bonus = 0, mode = null } = {}) {
   const normalizedAbility = normalizeCondition(ability);
   if ((normalizedAbility === 'str' || normalizedAbility === 'dex') && hasCondition(target, [...AUTO_FAIL_STR_DEX_SAVE_CONDITIONS])) {
     return {
@@ -225,14 +225,20 @@ function resolveSavingThrow({ target = {}, ability, dc, rollDie, bonus = 0 } = {
 
   const conditionModifier = getConditionD20Modifier(target);
   const totalBonus = Number(bonus || 0) + conditionModifier;
-  const natural = rollDie(20);
+  const first = rollDie(20);
+  const second = mode ? rollDie(20) : null;
+  const natural = mode === 'advantage'
+    ? Math.max(first, second)
+    : mode === 'disadvantage'
+      ? Math.min(first, second)
+      : first;
   const total = natural + totalBonus;
   return {
     natural,
     total,
     success: total >= Number(dc || 10),
     automaticFailure: false,
-    text: `${natural}${formatSigned(totalBonus)} = ${total}${conditionModifier ? ` (${formatConditionD20Sources(target).join(', ')})` : ''}`,
+    text: `${mode ? `${first}/${second} with ${mode}, using ${natural}` : natural}${formatSigned(totalBonus)} = ${total}${conditionModifier ? ` (${formatConditionD20Sources(target).join(', ')})` : ''}`,
   };
 }
 

@@ -1003,7 +1003,7 @@ function CharacterSheetModal({ character, content, levelUpBusy, onClose, onLevel
                 <div key={choiceId} className="sheet-line">
                   <strong>{choiceId.replaceAll('_', ' ')}</strong>
                   <span>{[
-                    String(optionId).replaceAll('_', ' '),
+                    formatClassChoiceValue(optionId),
                     ...Object.entries(classChoiceDetails[choiceId] || {}).map(([detailId, detailValue]) => `${detailId.replaceAll('_', ' ')}: ${Array.isArray(detailValue) ? detailValue.map(spellName).join(', ') : spellName(detailValue)}`),
                   ].join(' | ')}</span>
                 </div>
@@ -1385,6 +1385,11 @@ function formatEffectName(effect) {
   if (effect.id) return titleCase(String(effect.id).replaceAll('_', ' '));
   if (effect.target) return titleCase(String(effect.target).replaceAll('_', ' '));
   return 'Passive Effect';
+}
+
+function formatClassChoiceValue(value) {
+  const entries = Array.isArray(value) ? value : [value];
+  return entries.map((entry) => String(entry || '').replaceAll('_', ' ')).filter(Boolean).join(', ');
 }
 
 function isEquipmentEffect(effect = {}) {

@@ -590,6 +590,118 @@ test('Ranger Druidic Warrior conditionally requires and records two Druid cantri
   assert(result.characterSheet.spellcasting.cantrips_known.includes('produce_flame'));
 });
 
+test('Sorcerer level 2 requires Metamagic and two new prepared spells', () => {
+  const sheet = baseSheet({
+    identity: { class: 'sorcerer', class_name: 'Sorcerer', experience_points: 300, level_up_available: true },
+    spellcasting: {
+      ability: 'cha',
+      cantrips_known: ['fire_bolt', 'mage_hand', 'prestidigitation', 'sorcerous_burst'],
+      spells_prepared: ['magic_missile', 'shield'],
+      slots: { 1: 2 },
+    },
+    progression: { experience_points: 300 },
+  });
+  const preview = getLevelUpPreview(sheet, getContentBundle());
+
+  assert.equal(preview.canLevelUp, true);
+  assert.equal(preview.canApply, false);
+  assert.equal(preview.requiredChoices.find((choice) => choice.id === 'metamagic').options.length, 10);
+  assert.equal(preview.requiredChoices.find((choice) => choice.id === 'prepared_spells').count, 2);
+});
+
+test('applying Sorcerer level 2 records Metamagic, Sorcery Points, spells, and slots', () => {
+  const result = applyLevelUp({
+    characterSheet: baseSheet({
+      identity: { class: 'sorcerer', class_name: 'Sorcerer', experience_points: 300, level_up_available: true },
+      spellcasting: {
+        ability: 'cha',
+        cantrips_known: ['fire_bolt', 'mage_hand', 'prestidigitation', 'sorcerous_burst'],
+        spells_prepared: ['magic_missile', 'shield'],
+        slots: { 1: 2 },
+      },
+      progression: { experience_points: 300 },
+    }),
+    content: getContentBundle(),
+    payload: { choices: { metamagic: ['quickened_spell', 'transmuted_spell'], prepared_spells: ['chromatic_orb', 'mage_armor'] } },
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.characterSheet.class_choices.metamagic, ['quickened_spell', 'transmuted_spell']);
+  assert.equal(result.characterSheet.resources.sorcery_points.remaining, 2);
+  assert.equal(result.characterSheet.spellcasting.prepared_spells_count, 4);
+  assert(result.characterSheet.spellcasting.spells_prepared.includes('chromatic_orb'));
+  assert.equal(result.characterSheet.spellcasting.slots[1], 3);
+});
+
+test('Warlock level 2 requires two new invocations and one prepared spell', () => {
+  const sheet = baseSheet({
+    identity: { class: 'warlock', class_name: 'Warlock', experience_points: 300, level_up_available: true },
+    class_choices: { eldritch_invocation: 'pact_of_the_blade' },
+    spellcasting: { ability: 'cha', cantrips_known: ['eldritch_blast', 'mage_hand'], spells_prepared: ['hex', 'armor_of_agathys'], slots: { 1: 1 } },
+    progression: { experience_points: 300 },
+  });
+  const preview = getLevelUpPreview(sheet, getContentBundle());
+  const invocationChoice = preview.requiredChoices.find((choice) => choice.id === 'eldritch_invocations');
+
+  assert.equal(preview.canApply, false);
+  assert.equal(invocationChoice.options.some((option) => option.id === 'pact_of_the_blade'), false);
+  assert.equal(invocationChoice.options.length, 4);
+  assert.equal(preview.requiredChoices.find((choice) => choice.id === 'prepared_spells').count, 1);
+});
+
+test('applying Warlock level 2 records invocations, granted magic, Magical Cunning, and Pact slots', () => {
+  const result = applyLevelUp({
+    characterSheet: baseSheet({
+      identity: { class: 'warlock', class_name: 'Warlock', experience_points: 300, level_up_available: true },
+      class_choices: { eldritch_invocation: 'pact_of_the_blade' },
+      class_choice_details: { eldritch_invocation: { pact_weapon: 'spear' } },
+      spellcasting: { ability: 'cha', cantrips_known: ['eldritch_blast', 'mage_hand'], spells_prepared: ['hex', 'armor_of_agathys'], slots: { 1: 1 } },
+      progression: { experience_points: 300 },
+    }),
+    content: getContentBundle(),
+    payload: { choices: { eldritch_invocations: ['armor_of_shadows', 'eldritch_mind'], prepared_spells: ['charm_person'] } },
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.characterSheet.class_choices.eldritch_invocations, ['pact_of_the_blade', 'armor_of_shadows', 'eldritch_mind']);
+  assert.equal(result.characterSheet.resources.magical_cunning.remaining, 1);
+  assert.equal(result.characterSheet.spellcasting.slots[1], 2);
+  assert.equal(result.characterSheet.spellcasting.slots_max[1], 2);
+  assert.equal(result.characterSheet.spellcasting.prepared_spells_count, 3);
+  assert(result.characterSheet.class_choice_spells.some((spell) => spell.id === 'mage_armor' && spell.type === 'at_will'));
+});
+
+test('Warlock Pact of the Tome level-up choices become usable cantrips and rituals', () => {
+  const result = applyLevelUp({
+    characterSheet: baseSheet({
+      identity: { class: 'warlock', class_name: 'Warlock', experience_points: 300, level_up_available: true },
+      class_choices: { eldritch_invocation: 'armor_of_shadows' },
+      spellcasting: {
+        ability: 'cha',
+        cantrips_known: ['eldritch_blast', 'mage_hand'],
+        spells_prepared: ['hex', 'armor_of_agathys'],
+        slots: { 1: 1 },
+      },
+      progression: { experience_points: 300 },
+    }),
+    content: getContentBundle(),
+    payload: {
+      choices: {
+        eldritch_invocations: ['pact_of_the_tome', 'eldritch_mind'],
+        pact_tome_cantrips: ['fire_bolt', 'guidance', 'prestidigitation'],
+        pact_tome_rituals: ['find_familiar', 'identify'],
+        prepared_spells: ['charm_person'],
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert(result.characterSheet.spellcasting.cantrips_known.includes('guidance'));
+  assert(result.characterSheet.spellcasting.ritual_spells.includes('find_familiar'));
+  assert(result.characterSheet.class_choice_spells.some((spell) => spell.id === 'identify' && spell.type === 'ritual'));
+  assert.deepEqual(result.characterSheet.class_choice_details.pact_of_the_tome.tome_cantrips, ['fire_bolt', 'guidance', 'prestidigitation']);
+});
+
 test('fixed HP increase includes per-level HP bonuses', () => {
   const hp = getFixedHpIncrease(baseSheet({
     active_effects: [{ target: 'max_hp_per_level_bonus', value: 2 }],

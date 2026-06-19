@@ -1086,6 +1086,7 @@ function buildSpellcasting(draft, characterClass, content, abilityModifiers, cla
     ritual_spells: getClassChoiceSpellIds(classData.choiceSpells, 'ritual'),
     ...(config.spellbook_spells ? { spellbook_spells: spellbookKnown } : {}),
     slots: config.slots || {},
+    slots_max: config.slots || {},
   };
 }
 

@@ -79,6 +79,18 @@ function resolveSpellCast({ message, content, characterSheet, worldState = {} })
       spell_slots: nextSheet.spellcasting?.slots || castWorldState.player_stats?.spell_slots || {},
     },
   };
+  if (/\bspent level \d+ spell slot\b/i.test(legality.resourceNote || '') && nextWorldState.combat_state?.active) {
+    nextWorldState = {
+      ...nextWorldState,
+      combat_state: {
+        ...nextWorldState.combat_state,
+        turn_resources: {
+          ...(nextWorldState.combat_state.turn_resources || {}),
+          spell_slot_spent: true,
+        },
+      },
+    };
+  }
 
   const currentEffects = normalizeEffects(
     Array.isArray(castWorldState.active_effects)
@@ -188,9 +200,15 @@ function resolveSpellAttack({ spell, rule, characterSheet, worldState, rollDie }
     sources: attackSources,
   });
   const attackMode = lucky.advantageMode;
-  const attackRoll = rollD20WithMode(rollDie, attackMode);
-  const natural = attackRoll.natural;
-  const total = natural + attackBonus;
+  let attackRoll = rollD20WithMode(rollDie, attackMode);
+  let natural = attackRoll.natural;
+  let total = natural + attackBonus;
+  if (spell.metamagic?.seeking_reroll && natural !== 1 && natural !== 20 && total < Number(target.ac || 10)) {
+    const reroll = rollD20WithMode(rollDie, attackMode);
+    attackRoll = { ...reroll, text: `${attackRoll.text}; Seeking Spell reroll ${reroll.text}` };
+    natural = reroll.natural;
+    total = natural + attackBonus;
+  }
   const criticalHit = natural === 20;
   const criticalMiss = natural === 1;
   const hit = !criticalMiss && (criticalHit || total >= Number(target.ac || 10));
@@ -210,10 +228,11 @@ function resolveSpellAttack({ spell, rule, characterSheet, worldState, rollDie }
   let outcomeWorldState = lucky.worldState;
 
   if (hit) {
-    const damage = rollFormula(rule.damage, rollDie, { crit: criticalHit });
-    const applied = applyDamage({ target, amount: damage.total, damageType: rule.damage_type, source: spell.name });
+    const damage = rollFormula(rule.damage, rollDie, { crit: criticalHit, empoweredRerolls: spell.metamagic?.empowered_rerolls });
+    const damageType = spell.metamagic?.damage_type || rule.damage_type;
+    const applied = applyDamage({ target, amount: damage.total, damageType, source: spell.name });
     Object.assign(target, applied.target);
-    lines.push(`${criticalHit ? '**Critical hit.** ' : ''}Hit for ${applied.amount} ${rule.damage_type} damage${formatDamageAdjustment(applied.adjustment)}. ${target.name}: (${applied.beforeHp} -> ${target.hp} HP).`);
+    lines.push(`${criticalHit ? '**Critical hit.** ' : ''}Hit for ${applied.amount} ${damageType} damage${formatDamageAdjustment(applied.adjustment)}. ${target.name}: (${applied.beforeHp} -> ${target.hp} HP).`);
     const ancestry = applyGiantAncestryOnHit({
       message: worldState.__spell_message,
       target,
@@ -247,7 +266,10 @@ function resolveAutomaticDamageSpell({ spell, rule, worldState, rollDie }) {
   if (!context?.target) return noSpellTarget(worldState, spell);
   const { combat, target, activeCombat } = context;
 
-  const rolls = Array.from({ length: Number(rule.darts || 1) }, () => rollFormula(rule.damage, rollDie));
+  let rolls = Array.from({ length: Number(rule.darts || 1) }, () => rollFormula(rule.damage, rollDie));
+  if (spell.metamagic?.empowered_rerolls) {
+    rolls = empowerAutomaticDamageRolls(rolls, rule.damage, spell.metamagic.empowered_rerolls, rollDie);
+  }
   const total = rolls.reduce((sum, roll) => sum + roll.total, 0);
   const applied = applyDamage({ target, amount: total, damageType: rule.damage_type, source: spell.name });
   Object.assign(target, applied.target);
@@ -258,6 +280,21 @@ function resolveAutomaticDamageSpell({ spell, rule, worldState, rollDie }) {
   return finishSpellAction({ spell, worldState, combat, lines, activeCombat });
 }
 
+function empowerAutomaticDamageRolls(results = [], formula = '', rerollCount = 0, rollDie = defaultRollDie) {
+  const dieSides = Number(String(formula).match(/d(\d+)/i)?.[1] || 0);
+  if (!dieSides) return results;
+  const dice = results.flatMap((result, resultIndex) => (
+    (result.rolls || []).map((value, rollIndex) => ({ value, resultIndex, rollIndex }))
+  ));
+  const selected = dice.sort((left, right) => left.value - right.value).slice(0, Math.min(Number(rerollCount), dice.length));
+  const next = results.map((result) => ({ ...result, rolls: [...(result.rolls || [])] }));
+  for (const die of selected) next[die.resultIndex].rolls[die.rollIndex] = rollDie(dieSides);
+  return next.map((result) => ({
+    ...result,
+    total: result.rolls.reduce((sum, value) => sum + value, 0) + Number(result.modifier || 0),
+  }));
+}
+
 function resolveSavingThrowSpell({ spell, rule, characterSheet, worldState, rollDie }) {
   const context = getSpellTargetContext({ spell, spellCastMessage: worldState.__spell_message, worldState });
   if (!context?.target) return noSpellTarget(worldState, spell);
@@ -266,18 +303,19 @@ function resolveSavingThrowSpell({ spell, rule, characterSheet, worldState, roll
   const dcBonus = getActiveSpellSaveDcBonus(worldState, characterSheet);
   const dc = Number(characterSheet?.derived_stats?.spell_save_dc || 10) + dcBonus;
   const saveBonus = getTargetSaveBonus(target, rule.save);
-  const save = resolveSavingThrow({ target, ability: rule.save, dc, rollDie, bonus: saveBonus });
+  const save = resolveSavingThrow({ target, ability: rule.save, dc, rollDie, bonus: saveBonus, mode: spell.metamagic?.save_disadvantage ? 'disadvantage' : null });
   const success = save.success;
-  const damage = rollFormula(rule.damage, rollDie);
+  const damage = rollFormula(rule.damage, rollDie, { empoweredRerolls: spell.metamagic?.empowered_rerolls });
   const appliedDamage = success && rule.half_on_success ? Math.floor(damage.total / 2) : success ? 0 : damage.total;
-  const applied = applyDamage({ target, amount: appliedDamage, damageType: rule.damage_type, source: spell.name });
+  const damageType = spell.metamagic?.damage_type || rule.damage_type;
+  const applied = applyDamage({ target, amount: appliedDamage, damageType, source: spell.name });
   Object.assign(target, applied.target);
 
   const lines = [
     `You cast **${spell.name}** at ${target.name}. ${target.name} rolls a ${rule.save.toUpperCase()} save: ${save.automaticFailure ? save.text : `${save.text} vs DC ${dc}`}.`,
     success
-      ? `Save succeeds.${applied.amount ? ` ${target.name} still takes ${applied.amount} ${rule.damage_type} damage${formatDamageAdjustment(applied.adjustment)}. ${target.name}: (${applied.beforeHp} -> ${target.hp} HP).` : ' No damage is applied.'}`
-      : `Save fails. ${target.name} takes ${applied.amount} ${rule.damage_type} damage${formatDamageAdjustment(applied.adjustment)}. ${target.name}: (${applied.beforeHp} -> ${target.hp} HP).`,
+      ? `Save succeeds.${applied.amount ? ` ${target.name} still takes ${applied.amount} ${damageType} damage${formatDamageAdjustment(applied.adjustment)}. ${target.name}: (${applied.beforeHp} -> ${target.hp} HP).` : ' No damage is applied.'}`
+      : `Save fails. ${target.name} takes ${applied.amount} ${damageType} damage${formatDamageAdjustment(applied.adjustment)}. ${target.name}: (${applied.beforeHp} -> ${target.hp} HP).`,
   ];
   if (dcBonus) lines.push(`Spell save DC includes ${formatSigned(dcBonus)} from ${formatList(getActiveSpellSaveDcSources(worldState, characterSheet))}.`);
 
@@ -292,7 +330,7 @@ function resolveSaveEffectSpell({ spell, rule, characterSheet, worldState, rollD
   const dcBonus = getActiveSpellSaveDcBonus(worldState, characterSheet);
   const dc = Number(characterSheet?.derived_stats?.spell_save_dc || 10) + dcBonus;
   const saveBonus = getTargetSaveBonus(target, rule.save);
-  const save = resolveSavingThrow({ target, ability: rule.save, dc, rollDie, bonus: saveBonus });
+  const save = resolveSavingThrow({ target, ability: rule.save, dc, rollDie, bonus: saveBonus, mode: spell.metamagic?.save_disadvantage ? 'disadvantage' : null });
   const success = save.success;
   const lines = [
     `You cast **${spell.name}** at ${target.name}. ${target.name} rolls a ${rule.save.toUpperCase()} save: ${save.automaticFailure ? save.text : `${save.text} vs DC ${dc}`}.`,
@@ -749,7 +787,12 @@ function buildSpellEffect(characterSheet, spell, known, message = '', worldState
     guidance_skill: guidanceSkill,
     spellcasting_modifier: getSpellcastingModifier(characterSheet),
     mechanical_effect: spell.description,
-    rules_effects: getRulesEffectsForSpell(spell, { message }),
+    rules_effects: [
+      ...getRulesEffectsForSpell(spell, { message }),
+      ...(spell.metamagic?.options?.includes('extended_spell') && isConcentrationDuration(duration)
+        ? [{ target: 'saving_throw_advantage', ability: 'con', label: 'Extended Spell' }]
+        : []),
+    ],
     ...durationToRemaining(duration),
     ...(spell.id === 'shield' ? { expires_at_start_of_player_turn: true } : {}),
   };
@@ -938,8 +981,30 @@ function consumesCombatTurn(spell = {}) {
   return getSpellActionResource(spell) === 'action';
 }
 
-function rollFormula(formula, rollDie, { crit = false, spellMod = 0, rerollOnes = false } = {}) {
-  return rollDamageFormula(formula, rollDie, { crit, spellMod, rerollOnes });
+function rollFormula(formula, rollDie, { crit = false, spellMod = 0, rerollOnes = false, empoweredRerolls = 0 } = {}) {
+  const result = rollDamageFormula(formula, rollDie, { crit, spellMod, rerollOnes });
+  if (!empoweredRerolls || !result.rolls?.length) return result;
+  const dieSides = Number(String(formula).match(/d(\d+)/i)?.[1] || 0);
+  if (!dieSides) return result;
+  const rerollCount = Math.min(Number(empoweredRerolls), result.rolls.length);
+  const indexes = result.rolls
+    .map((value, index) => ({ value, index }))
+    .sort((left, right) => left.value - right.value)
+    .slice(0, rerollCount)
+    .map((entry) => entry.index);
+  const rolls = [...result.rolls];
+  const empowered = [];
+  for (const index of indexes) {
+    const replacement = rollDie(dieSides);
+    empowered.push({ from: rolls[index], to: replacement });
+    rolls[index] = replacement;
+  }
+  return {
+    ...result,
+    rolls,
+    total: rolls.reduce((sum, value) => sum + value, 0) + Number(result.modifier || 0),
+    empoweredRerolls: empowered,
+  };
 }
 
 function defaultRollDie(sides) {

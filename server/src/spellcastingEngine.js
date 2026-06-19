@@ -1,4 +1,5 @@
 const { getSpellActionResource } = require('./actionEconomy');
+const { applyMetamagicToCast } = require('./metamagicEngine');
 
 const GUIDANCE_SKILLS = [
   ['animal_handling', /\banimal\s+handling\b/i],
@@ -36,25 +37,46 @@ function resolveSpellCastLegality({ message, content = {}, characterSheet = {}, 
     };
   }
 
-  const timingBlock = validateSpellTiming({ spell, message, worldState, characterSheet });
-  if (timingBlock) {
+  const metamagic = applyMetamagicToCast({ message, spell, characterSheet });
+  if (!metamagic.ok) {
     return {
       matched: true,
       blocked: true,
       spell,
+      known,
+      reply: metamagic.reply,
+    };
+  }
+  const modifiedSpell = metamagic.spell;
+  const timingBlock = validateSpellTiming({ spell: modifiedSpell, message, worldState, characterSheet: metamagic.characterSheet });
+  if (timingBlock) {
+    return {
+      matched: true,
+      blocked: true,
+      spell: modifiedSpell,
       known,
       reply: timingBlock,
     };
   }
 
-  const resource = spendSpellResource(characterSheet, spell, known, { message });
+  const resource = spendSpellResource(metamagic.characterSheet, modifiedSpell, known, { message });
   if (!resource.ok) {
     return {
       matched: true,
       blocked: true,
-      spell,
+      spell: modifiedSpell,
       known,
       reply: resource.reply,
+    };
+  }
+
+  if (/^spent level \d+ spell slot$/i.test(resource.note || '') && worldState.combat_state?.turn_resources?.spell_slot_spent) {
+    return {
+      matched: true,
+      blocked: true,
+      spell: modifiedSpell,
+      known,
+      reply: 'You have already expended a spell slot on this turn. You can still cast a cantrip if your action economy permits it, but another slotted spell must wait until a later turn.',
     };
   }
 
@@ -62,10 +84,10 @@ function resolveSpellCastLegality({ message, content = {}, characterSheet = {}, 
     matched: true,
     blocked: false,
     message,
-    spell,
+    spell: modifiedSpell,
     known,
     characterSheet: resource.characterSheet,
-    resourceNote: resource.note,
+    resourceNote: [resource.note, ...(metamagic.notes || [])].filter(Boolean).join(' '),
   };
 }
 

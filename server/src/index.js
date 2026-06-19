@@ -367,6 +367,7 @@ function characterSheetToWorldStats(characterSheet, characterId = null) {
     conditions: stats.conditions || [],
     exhaustion_level: stats.exhaustion_level ?? null,
     spell_slots: characterSheet.spellcasting?.slots || {},
+    spell_slots_max: characterSheet.spellcasting?.slots_max || characterSheet.spellcasting?.slots || {},
     hit_dice: characterSheet.resources?.hit_dice || null,
     ammunition: buildCharacterAmmunitionState(characterSheet),
     weapon_name: primaryAttack?.name || '',
@@ -529,6 +530,10 @@ async function handleDeterministicSpellAction(socket, sessionId, message) {
   if (spellOutcome?.handled) {
     let finalWorldState = spellOutcome.worldState;
     let reply = spellOutcome.reply;
+    if (result.spell?.metamagic?.names?.length) {
+      const sorcery = result.characterSheet.resources?.sorcery_points;
+      reply = `${reply}\n\n**Metamagic:** ${result.spell.metamagic.names.join(' and ')}. Sorcery Points: ${sorcery?.remaining ?? '?'}/${sorcery?.max ?? '?'}.`;
+    }
     if (finalWorldState.combat_state?.active) {
       const continued = finishPlayerCombatAction({
         result: {
