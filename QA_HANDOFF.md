@@ -1,5 +1,37 @@
 # Hallucinated Dungeons QA Handoff
 
+## Latest QA Pass - 2026-06-19 Legacy Pact Weapon Repair Retest `f7baae9`
+
+Scope:
+
+- Retested the remaining already-leveled Pact Blade compatibility finding in production.
+- App-code commit under test: `f7baae9 Repair legacy Pact weapon attacks`; repo tip during QA: `ce09f10 Update QA_HANDOFF.md`.
+- Used the existing pre-fix `QA Warlock 2` rather than leveling a new character, which directly exercised the runtime repair path.
+- QA remained read-only for app code. Only this handoff was updated.
+
+Automated checks:
+
+- Server `npm.cmd test`: PASS, `541/541`.
+- Client `npm.cmd run lint`: PASS.
+- `git diff --check f7baae9^ f7baae9`: PASS.
+
+Verified fixed / passed in production:
+
+- Existing legacy sheet repaired on load. Attacks now contains both Dagger `+3, 1d4+1` and `Longsword (Pact Weapon) +5, 1d8+3`.
+- Class Choices still correctly displays `pact weapon: longsword`.
+- Exact Rules query returned attack `+5`, damage `1d8+3`, and Charisma as the Pact Longsword attack/damage ability.
+- Player-natural attack wording started combat normally and selected `Longsword (Pact Weapon)`.
+- Live attack resolution used the repaired `+5` bonus: natural 6 + 5 = 11 versus AC 12. The miss was correct and the player turn remained open.
+- Browser console warnings/errors remained empty.
+
+Findings for DEV:
+
+- No new blocker or compatibility issue found in this focused retest.
+
+Current recommendation:
+
+- Treat the remaining Pact Blade migration gap as fixed and the tested Sorcerer/Warlock level-2 package as production-passed. The old pact contract now includes its weapon attachment, attack math, and surprisingly punctual amendment.
+
 ## Latest QA Pass - 2026-06-19 Sorcerer/Warlock Regression Retest `a5d8bad`
 
 Scope:
