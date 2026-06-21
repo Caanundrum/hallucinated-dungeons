@@ -95,9 +95,12 @@ function validateCharacter(draft, content, { sessionId, campaignId, verifyRolled
   const activeEffects = [...buildActiveEffects(equipped, content), ...speciesData.effects, ...featEffects];
 
   const spellcasting = buildSpellcasting(draft, characterClass, content, abilityModifiers, classData);
-  const resources = buildClassResources(characterClass, content);
   const level = 1;
   const pb = proficiencyBonus(level);
+  const resources = mergeResourceBlocks(
+    buildClassResources(characterClass, content),
+    buildSpeciesResources(speciesData, content, pb),
+  );
   const maxHpBonus = activeEffects
     .filter((effect) => effect.target === 'max_hp_per_level_bonus')
     .reduce((sum, effect) => sum + Number(effect.value || 0) * level, 0);
@@ -1116,6 +1119,43 @@ function buildClassResources(characterClass, content) {
   }
   if (Object.keys(spellUses).length > 0) resources.spell_uses = spellUses;
   return resources;
+}
+
+function buildSpeciesResources(speciesData = {}, content, proficiency) {
+  const resources = {};
+  const forestSpeech = (speciesData.spells || []).find((spell) => (
+    spell.id === 'speak_with_animals'
+    && String(spell.source || '').toLowerCase().replace(/[^a-z0-9]+/g, '_') === 'forest_gnome'
+  ));
+  if (!forestSpeech) return resources;
+
+  const spell = byId(content.spells, forestSpeech.id);
+  const key = `species_spell:${forestSpeech.source}:${forestSpeech.id}`;
+  resources.spell_uses = {
+    [key]: {
+      name: spell?.name || forestSpeech.id,
+      spell_id: forestSpeech.id,
+      source: forestSpeech.source,
+      source_name: forestSpeech.source,
+      remaining: proficiency,
+      max: proficiency,
+      reset: 'long_rest',
+    },
+  };
+  return resources;
+}
+
+function mergeResourceBlocks(...blocks) {
+  return blocks.reduce((merged, block) => ({
+    ...merged,
+    ...block,
+    ...((merged.spell_uses || block.spell_uses) ? {
+      spell_uses: {
+        ...(merged.spell_uses || {}),
+        ...(block.spell_uses || {}),
+      },
+    } : {}),
+  }), {});
 }
 
 module.exports = {

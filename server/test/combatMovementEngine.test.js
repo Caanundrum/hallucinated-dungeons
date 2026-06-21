@@ -324,3 +324,28 @@ test('an Opportunity Attack that drops the player stops movement before feet are
   assert.equal(result.worldState.player_stats.last_movement, undefined);
   assert.match(result.reply, /stops your movement before you leave reach/);
 });
+
+test('Halfling Nimbleness records movement through a larger creature without allowing an occupied endpoint', () => {
+  const result = resolveCombatMovement({
+    message: "I move 10 feet through the Ogre's space.",
+    worldState: combatWorld({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', hp: 12, max_hp: 12, ac: 14, is_player: true, size: 'small' },
+          { name: 'Ogre', hp: 30, max_hp: 30, ac: 11, is_player: false, size: 'large', attack: { name: 'javelin', type: 'ranged' } },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      identity: { ...characterSheet.identity, species: 'halfling' },
+    },
+  });
+
+  assert.match(result.reply, /Halfling Nimbleness/);
+  assert.match(result.reply, /cannot end your movement there/);
+  assert.equal(result.worldState.player_stats.last_movement.speciesNote.includes('Halfling Nimbleness'), true);
+});

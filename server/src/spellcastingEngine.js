@@ -167,6 +167,7 @@ function getKnownSpellInfo(characterSheet = {}, spell = {}) {
       known: true,
       type: isCantrip ? 'origin_cantrip' : 'origin_spell',
       source,
+      ability: choice.ability || null,
       label: isCantrip ? 'Origin feat cantrip' : 'Origin feat spell',
     };
   }
@@ -289,13 +290,14 @@ function spendLimitedSpellUse(characterSheet = {}, spell = {}, known = {}) {
   const resourceType = known.type === 'class_feature_spell' ? 'class_feature' : known.type;
   const resourceKey = `${resourceType}:${known.source || 'default'}:${spell.id}`;
   const spellUses = characterSheet.resources?.spell_uses || {};
+  const defaultUses = getDefaultLimitedSpellUses(characterSheet, spell, known);
   const currentUse = spellUses[resourceKey] || {
     name: spell.name,
     spell_id: spell.id,
     source: known.source || 'default',
     source_name: known.label || 'limited spell use',
-    remaining: 1,
-    max: 1,
+    remaining: defaultUses,
+    max: defaultUses,
     reset: 'long_rest',
   };
   if (Number(currentUse.remaining || 0) <= 0) {
@@ -322,6 +324,22 @@ function spendLimitedSpellUse(characterSheet = {}, spell = {}, known = {}) {
       },
     },
   };
+}
+
+function getDefaultLimitedSpellUses(characterSheet = {}, spell = {}, known = {}) {
+  if (
+    known.type === 'species_spell'
+    && spell.id === 'speak_with_animals'
+    && normalizeSpellName(known.source) === 'forest gnome'
+  ) {
+    return getProficiencyBonus(characterSheet);
+  }
+  return 1;
+}
+
+function getProficiencyBonus(characterSheet = {}) {
+  const level = Number(characterSheet.identity?.level || characterSheet.derived_stats?.level || 1);
+  return Number(characterSheet.derived_stats?.proficiency_bonus || Math.floor((level - 1) / 4) + 2);
 }
 
 function buildSpellcastingSnapshot(characterSheet = {}, content = {}) {

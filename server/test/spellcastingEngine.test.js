@@ -73,6 +73,24 @@ test('Celestial-Touched Light is cast as a Charisma species cantrip without a sl
   assert.equal(result.resourceNote, 'cantrip/no slot');
 });
 
+test('Forest Gnome Speak with Animals has proficiency-based free uses before spell slots', () => {
+  const characterSheet = {
+    identity: { name: 'Pip', species: 'gnome', level: 5 },
+    derived_stats: { proficiency_bonus: 3 },
+    species_choices: { gnomish_lineage: 'forest', lineage_spell_ability: 'wis' },
+    species_spells: [{ id: 'speak_with_animals', source: 'Forest Gnome', ability: 'wis' }],
+    resources: {},
+    spellcasting: { slots: { 1: 1 } },
+  };
+  const known = getKnownSpellInfo(characterSheet, spell('speak_with_animals'));
+  const spent = spendSpellResource(characterSheet, spell('speak_with_animals'), known);
+
+  assert.equal(known.ability, 'wis');
+  assert.equal(spent.characterSheet.resources.spell_uses['species_spell:Forest Gnome:speak_with_animals'].remaining, 2);
+  assert.equal(spent.characterSheet.resources.spell_uses['species_spell:Forest Gnome:speak_with_animals'].max, 3);
+  assert.equal(spent.characterSheet.spellcasting.slots[1], 1);
+});
+
 test('natural trailing context does not become part of a known spell name', () => {
   const characterSheet = wizardSheet({
     spellcasting: {

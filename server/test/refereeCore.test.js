@@ -2483,6 +2483,45 @@ test('long rest resets HP, death saves, spell slots, and active effects', () => 
   assert.match(result.reply, /long rest/);
 });
 
+test('Elf Trance completes a long rest in four hours', () => {
+  const result = adjudicate({
+    message: 'I take a long rest using Trance.',
+    worldState: worldState({ time_state: { elapsed_minutes: 30 } }),
+    characterSheet: {
+      ...characterSheet,
+      identity: { ...characterSheet.identity, species: 'elf' },
+    },
+  });
+
+  assert.equal(result.worldState.time_state.elapsed_minutes, 270);
+  assert.match(result.reply, /4 hours of Trance/);
+});
+
+test('Halfling Naturally Stealthy records a Hide permission behind a larger creature', () => {
+  const result = adjudicate({
+    message: 'I hide behind the Ogre.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        turn_resources: { action_available: true, bonus_action_available: true, movement_remaining: 30 },
+        combatants: [
+          { name: 'Sir Testalot', hp: 12, max_hp: 12, ac: 16, is_player: true, size: 'small' },
+          { name: 'Ogre', hp: 30, max_hp: 30, ac: 11, is_player: false, size: 'large' },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      identity: { ...characterSheet.identity, species: 'halfling' },
+    },
+  });
+
+  assert.equal(result.worldState.pending_roll.species_hide_permission, 'Naturally Stealthy');
+  assert.match(result.reply, /Naturally Stealthy/);
+});
+
 test('server rejects typed roll results for pending rolls', () => {
   const result = adjudicate({
     message: '[ROLL RESULT: 99] I rolled very honestly.',

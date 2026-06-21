@@ -1132,3 +1132,54 @@ test('Innate Sorcery active effect affects sorcerer spell attacks and save DCs',
   assert.match(saveOutcome.reply, /vs DC 14/);
   assert.match(saveOutcome.reply, /Save fails/);
 });
+
+test('Tiefling spell attacks use the selected legacy ability instead of class spellcasting', () => {
+  const tiefling = casterSheet({
+    identity: { name: 'Ember', species: 'tiefling', level: 1, class: 'fighter' },
+    abilities: { modifiers: { wis: 2, int: 5 } },
+    derived_stats: { proficiency_bonus: 2, spell_attack_bonus: 9 },
+    species_spells: [{ id: 'fire_bolt', source: 'Infernal', ability: 'wis' }],
+    spellcasting: { ability: 'int', cantrips_known: [], spells_prepared: [], slots: {} },
+  });
+  const cast = resolveSpellCast({
+    message: 'I cast Fire Bolt at the Skeleton.',
+    content,
+    characterSheet: tiefling,
+    worldState: combatWorld(),
+  });
+  const outcome = resolveSpellOutcome({
+    spellCast: cast,
+    characterSheet: cast.characterSheet,
+    worldState: cast.worldState,
+    rollDie: sequenceRolls([8, 6]),
+  });
+
+  assert.match(outcome.reply, /8\+4 = 12 vs AC 12/);
+  assert.equal(outcome.worldState.combat_state.combatants.find((entry) => entry.name === 'Skeleton').hp, 4);
+});
+
+test('Tiefling saving-throw cantrips use the selected legacy ability for DC', () => {
+  const tiefling = casterSheet({
+    identity: { name: 'Vex', species: 'tiefling', level: 1, class: 'fighter' },
+    abilities: { modifiers: { cha: 3, int: 5 } },
+    derived_stats: { proficiency_bonus: 2, spell_save_dc: 20 },
+    species_spells: [{ id: 'poison_spray', source: 'Abyssal', ability: 'cha' }],
+    spellcasting: { ability: 'int', cantrips_known: [], spells_prepared: [], slots: {} },
+  });
+  const cast = resolveSpellCast({
+    message: 'I cast Poison Spray at the Skeleton.',
+    content,
+    characterSheet: tiefling,
+    worldState: combatWorld(),
+  });
+  const outcome = resolveSpellOutcome({
+    spellCast: cast,
+    characterSheet: cast.characterSheet,
+    worldState: cast.worldState,
+    rollDie: sequenceRolls([12, 6]),
+  });
+
+  assert.match(outcome.reply, /vs DC 13/);
+  assert.match(outcome.reply, /Save succeeds/);
+  assert.equal(outcome.worldState.combat_state.combatants.find((entry) => entry.name === 'Skeleton').hp, 10);
+});

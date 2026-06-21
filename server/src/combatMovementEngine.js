@@ -134,7 +134,7 @@ function resolveCombatMovement({
   const player = combat.combatants[playerIndex];
   if (!player) return blocked(worldState, 'Combat movement needs an active character in the initiative tracker.');
 
-  const movement = getMovementRecord({ message, combat, player, destination });
+  const movement = getMovementRecord({ message, combat, player, destination, characterSheet });
   if (!movement.ok) return blocked(worldState, movement.reply);
 
   const available = spendMovement(worldState, movement.feet, 'combat movement', characterSheet);
@@ -197,6 +197,7 @@ function finishCombatMovement({ opportunity, movement, characterSheet }) {
     : '';
   return resolved('referee_combat_movement', nextState, [
     ...opportunity.lines,
+    movement.speciesNote,
     `You move ${movement.feet} feet${movement.destinationText}. ${getRemainingMovement(nextState)} feet of movement remain.${assumption}`,
     'You can use another available combat resource or end your turn.',
   ], opportunity.damageEvents);
@@ -416,7 +417,7 @@ function getOpportunityAttackTrigger({
   };
 }
 
-function getMovementRecord({ message = '', combat = {}, player = {}, destination = null } = {}) {
+function getMovementRecord({ message = '', combat = {}, player = {}, destination = null, characterSheet = {} } = {}) {
   const from = getHexPosition(player);
   let feet = getDeclaredMovementFeet(message);
   let mode = 'scene_zone_assumption';
@@ -444,7 +445,26 @@ function getMovementRecord({ message = '', combat = {}, player = {}, destination
     from,
     to: destination ? { ...destination, q: Number(destination.q), r: Number(destination.r) } : null,
     destinationText,
+    speciesNote: getHalflingNimblenessNote({ message, combat, characterSheet }),
   };
+}
+
+function getHalflingNimblenessNote({ message = '', combat = {}, characterSheet = {} } = {}) {
+  if (normalizeId(characterSheet.identity?.species) !== 'halfling') return '';
+  if (!/\b(?:through|past|between|under)\b/i.test(String(message || ''))) return '';
+  const text = normalizeId(message);
+  const largerCreature = (combat.combatants || []).find((combatant) => (
+    !combatant.is_player
+    && text.includes(normalizeId(combatant.name))
+    && isLargerThanSmall(combatant.size)
+  ));
+  return largerCreature
+    ? `**Halfling Nimbleness:** you can move through ${largerCreature.name}'s space because it is larger than you, but you cannot end your movement there.`
+    : '';
+}
+
+function isLargerThanSmall(size = '') {
+  return ['medium', 'large', 'huge', 'gargantuan'].includes(normalizeId(size));
 }
 
 function recordMovement(worldState = {}, movement = {}) {

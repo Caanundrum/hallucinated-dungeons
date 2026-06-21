@@ -14,13 +14,16 @@ const {
   mergeWorldResources,
   spendResource,
 } = require('./resourceEngine');
-const { applyActiveEffectsToWorldState } = require('./spellEffectEngine');
+const { applyActiveEffectsToWorldState, tickActiveEffects } = require('./spellEffectEngine');
 const { resolveGiantAncestryAction } = require('./giantAncestryEngine');
 const { assertValidRulesEffects } = require('./refereeContracts');
 
 function resolveSpeciesFeatureAction({ message = '', worldState = {}, characterSheet = {}, rollDie = defaultRollDie } = {}) {
   const giantAncestry = resolveGiantAncestryAction({ message, worldState, characterSheet });
   if (giantAncestry) return giantAncestry;
+
+  const rockGnome = resolveRockGnomeDeviceAction({ message, worldState, characterSheet });
+  if (rockGnome) return rockGnome;
 
   const intent = getSpeciesFeatureIntent(message);
   if (!intent) return null;
@@ -197,7 +200,143 @@ function getSpeciesD20AdvantageSources({ characterSheet = {}, testType = '', abi
   if (species === 'dwarf' && /\b(?:poison|poisoned|venom|toxin)\b/.test(text)) sources.push('Dwarven Resilience');
   if (species === 'elf' && /\b(?:charm|charmed)\b/.test(text)) sources.push('Fey Ancestry');
   if (species === 'halfling' && /\b(?:fear|frighten|frightened)\b/.test(text)) sources.push('Brave');
+  if (species === 'goliath' && /\b(?:grapple|grappled)\b/.test(text)) sources.push('Powerful Build');
   return sources;
+}
+
+function resolveRockGnomeDeviceAction({ message = '', worldState = {}, characterSheet = {} } = {}) {
+  const intent = getRockGnomeDeviceIntent(message);
+  if (!intent) return null;
+  if (!isRockGnome(characterSheet)) {
+    return {
+      handled: true,
+      logType: 'species_rock_gnome_device_unavailable',
+      worldState,
+      reply: 'Clockwork devices belong to the Rock Gnome lineage, and this character sheet does not contain the required quantity of tiny gears.',
+    };
+  }
+
+  const devices = getRockGnomeDevices(worldState);
+  if (intent.mode === 'dismantle') {
+    const target = intent.deviceType
+      ? devices.find((device) => device.device_type === intent.deviceType)
+      : devices.length === 1 ? devices[0] : null;
+    if (!target) {
+      return {
+        handled: true,
+        logType: 'species_rock_gnome_device_target_needed',
+        worldState,
+        reply: devices.length
+          ? `Name which clockwork device to dismantle: ${devices.map((device) => device.name).join(', ')}.`
+          : 'You have no active Rock Gnome clockwork device to dismantle.',
+      };
+    }
+    const nextEffects = (worldState.active_effects || []).filter((effect) => effect.id !== target.id);
+    return {
+      handled: true,
+      logType: 'species_rock_gnome_device_dismantled',
+      worldState: applyActiveEffectsToWorldState(worldState, nextEffects, characterSheet),
+      reply: `You dismantle your **${target.name}**. It stops being useful and resumes its prior career as several very small objects.`,
+    };
+  }
+
+  if (worldState.combat_state?.active) {
+    return {
+      handled: true,
+      logType: 'species_rock_gnome_device_combat_blocked',
+      worldState,
+      reply: 'Creating a Rock Gnome clockwork device takes 10 minutes, which is considerably longer than one combat turn.',
+    };
+  }
+  if (!intent.deviceType) {
+    return {
+      handled: true,
+      logType: 'species_rock_gnome_device_choice_needed',
+      worldState,
+      reply: 'Choose a clockwork device: **Clockwork Toy**, **Fire Starter**, or **Music Box**.',
+    };
+  }
+  if (devices.length >= 3) {
+    return {
+      handled: true,
+      logType: 'species_rock_gnome_device_limit',
+      worldState,
+      reply: 'You already have three active Rock Gnome devices. Dismantle one or wait for one to expire before building another.',
+    };
+  }
+
+  const ticked = tickActiveEffects(worldState, { minutes: 10 }).worldState;
+  const serial = getNextRockGnomeDeviceSerial(ticked);
+  const config = ROCK_GNOME_DEVICES[intent.deviceType];
+  const effect = {
+    id: `rock_gnome_device_${serial}`,
+    name: config.name,
+    device_type: intent.deviceType,
+    source: actorName(characterSheet, ticked),
+    source_type: 'species_feature',
+    target: 'carried device',
+    duration: '8 hours',
+    concentration: false,
+    remaining_minutes: 480,
+    mechanical_effect: config.effect,
+    rules_effects: [],
+  };
+  const nextState = applyActiveEffectsToWorldState(ticked, [...(ticked.active_effects || []), effect], characterSheet);
+  return {
+    handled: true,
+    logType: 'species_rock_gnome_device_created',
+    worldState: {
+      ...nextState,
+      time_state: {
+        ...(nextState.time_state || {}),
+        elapsed_minutes: Number(nextState.time_state?.elapsed_minutes || 0) + 10,
+      },
+    },
+    reply: `You spend **10 minutes** creating a **${config.name}**. It functions for 8 hours. Active devices: ${devices.length + 1}/3.`,
+  };
+}
+
+const ROCK_GNOME_DEVICES = {
+  toy: { name: 'Clockwork Toy', effect: 'A clockwork animal, monster, or person moves 5 feet on the ground each turn in a random direction while active.' },
+  fire_starter: { name: 'Fire Starter', effect: 'The device produces a miniature flame that can light a candle, torch, or campfire.' },
+  music_box: { name: 'Music Box', effect: 'The device plays a single tune at moderate volume while open.' },
+};
+
+function getRockGnomeDeviceIntent(message = '') {
+  const text = String(message || '').toLowerCase();
+  const mentionsDevice = /\b(?:clockwork|device|toy|music box|fire starter)\b/.test(text);
+  if (!mentionsDevice) return null;
+  const dismantle = /\b(?:dismantle|disassemble|take apart|break down)\b/.test(text);
+  const create = /\b(?:create|make|build|craft|tinker|assemble)\b/.test(text);
+  if (!dismantle && !create) return null;
+  return {
+    mode: dismantle ? 'dismantle' : 'create',
+    deviceType: /\bmusic box\b/.test(text)
+      ? 'music_box'
+      : /\bfire starter\b/.test(text)
+        ? 'fire_starter'
+        : /\b(?:clockwork toy|toy)\b/.test(text)
+          ? 'toy'
+          : null,
+  };
+}
+
+function getRockGnomeDevices(worldState = {}) {
+  return (worldState.active_effects || []).filter((effect) => (
+    effect.source_type === 'species_feature' && String(effect.id || '').startsWith('rock_gnome_device_')
+  ));
+}
+
+function getNextRockGnomeDeviceSerial(worldState = {}) {
+  return (worldState.active_effects || []).reduce((highest, effect) => {
+    const serial = Number(String(effect.id || '').match(/^rock_gnome_device_(\d+)$/)?.[1] || 0);
+    return Math.max(highest, serial);
+  }, 0) + 1;
+}
+
+function isRockGnome(characterSheet = {}) {
+  return normalizeId(characterSheet.identity?.species) === 'gnome'
+    && normalizeId(characterSheet.species_choices?.gnomish_lineage) === 'rock';
 }
 
 function spendFeatureCost({ worldState = {}, characterSheet = {}, actionResource, actionLabel, resource, amount = 1 } = {}) {

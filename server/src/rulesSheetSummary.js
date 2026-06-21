@@ -36,7 +36,7 @@ function summarizeCharacterSheetForRules(characterSheet) {
   const speciesChoices = formatSpeciesChoices(characterSheet.species_choices);
   if (speciesChoices) lines.push(`Species choices: ${speciesChoices}`);
   if ((characterSheet.species_spells || []).length) {
-    lines.push(`Species spells: ${characterSheet.species_spells.map(formatSpeciesSpell).join(', ')}`);
+    lines.push(`Species spells: ${characterSheet.species_spells.map((spell) => formatSpeciesSpell(spell, characterSheet)).join(', ')}`);
   }
   if (Object.keys(saves).length) {
     lines.push(`Saving throws: ${Object.entries(saves).map(([key, save]) => `${key.toUpperCase()} ${fmtSigned(save.total)}${save.proficient ? ' proficient' : ''}`).join(', ')}`);
@@ -227,9 +227,13 @@ function formatSpeciesChoices(choices = {}) {
     .join(', ');
 }
 
-function formatSpeciesSpell(spell = {}) {
+function formatSpeciesSpell(spell = {}, characterSheet = {}) {
   if (typeof spell === 'string') return humanizeRuleTarget(spell);
-  return `${humanizeRuleTarget(spell.id)}${spell.ability ? ` (${String(spell.ability).toUpperCase()})` : ''}`;
+  if (!spell.ability) return humanizeRuleTarget(spell.id);
+  const ability = String(spell.ability).toLowerCase();
+  const modifier = Number(characterSheet.abilities?.modifiers?.[ability] || 0);
+  const proficiency = Number(characterSheet.derived_stats?.proficiency_bonus || 2);
+  return `${humanizeRuleTarget(spell.id)} (${ability.toUpperCase()}, attack ${fmtSigned(modifier + proficiency)}, DC ${8 + modifier + proficiency})`;
 }
 
 module.exports = {

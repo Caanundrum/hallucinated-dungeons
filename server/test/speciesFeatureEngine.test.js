@@ -188,4 +188,54 @@ test('species passive save advantages are data-independent referee inputs', () =
     ability: 'wis',
     reason: 'resist frightened',
   }), ['Brave']);
+  assert.deepEqual(getSpeciesD20AdvantageSources({
+    characterSheet: sheet('goliath'),
+    testType: 'saving_throw',
+    ability: 'dex',
+    reason: 'escape the grappled condition',
+  }), ['Powerful Build']);
+});
+
+test('Rock Gnome creates, limits, and dismantles deterministic clockwork devices', () => {
+  const rockGnome = sheet('gnome', {
+    species_choices: { gnomish_lineage: 'rock', lineage_spell_ability: 'int' },
+  });
+  let worldState = { time_state: { elapsed_minutes: 5 }, active_effects: [] };
+  for (const message of [
+    'I build a clockwork toy.',
+    'I create a fire starter device.',
+    'I assemble a music box.',
+  ]) {
+    const result = resolveSpeciesFeatureAction({ message, worldState, characterSheet: rockGnome });
+    worldState = result.worldState;
+  }
+  const blocked = resolveSpeciesFeatureAction({
+    message: 'I build another clockwork toy.',
+    worldState,
+    characterSheet: rockGnome,
+  });
+  const dismantled = resolveSpeciesFeatureAction({
+    message: 'I dismantle the music box.',
+    worldState,
+    characterSheet: rockGnome,
+  });
+
+  assert.equal(worldState.active_effects.filter((effect) => effect.id.startsWith('rock_gnome_device_')).length, 3);
+  assert.equal(worldState.time_state.elapsed_minutes, 35);
+  assert.match(blocked.reply, /three active/);
+  assert.equal(dismantled.worldState.active_effects.some((effect) => effect.device_type === 'music_box'), false);
+});
+
+test('Rock Gnome device creation takes ten minutes and is blocked during combat', () => {
+  const rockGnome = sheet('gnome', {
+    species_choices: { gnomish_lineage: 'rock', lineage_spell_ability: 'int' },
+  });
+  const result = resolveSpeciesFeatureAction({
+    message: 'I create a fire starter device.',
+    worldState: combatWorld(),
+    characterSheet: rockGnome,
+  });
+
+  assert.match(result.reply, /takes 10 minutes/);
+  assert.equal(result.worldState.active_effects, undefined);
 });

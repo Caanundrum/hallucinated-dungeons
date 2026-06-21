@@ -397,9 +397,78 @@ test('validates every 2024 species and applies species-level rules', () => {
     if (species.id === 'elf' && speciesChoices.elven_lineage === 'drow') {
       assert.equal(sheet.derived_stats.senses.darkvision, 120);
       assert.equal(sheet.species_spells.some((spell) => spell.id === 'dancing_lights'), true);
+      assert.equal(sheet.species_spells.find((spell) => spell.id === 'dancing_lights').ability, speciesChoices.lineage_spell_ability);
+    }
+    if (species.id === 'gnome' && speciesChoices.gnomish_lineage === 'forest') {
+      assert.equal(sheet.species_spells.find((spell) => spell.id === 'minor_illusion').ability, speciesChoices.lineage_spell_ability);
+      const speech = sheet.resources.spell_uses['species_spell:Forest Gnome:speak_with_animals'];
+      assert.equal(speech.remaining, 2);
+      assert.equal(speech.max, 2);
     }
     if (species.id === 'tiefling') {
-      assert.equal(sheet.species_spells.some((spell) => spell.id === 'thaumaturgy'), true);
+      assert.equal(sheet.species_spells.find((spell) => spell.id === 'thaumaturgy').ability, speciesChoices.legacy_spell_ability);
+      assert.equal(sheet.species_spells.find((spell) => spell.id === 'poison_spray').ability, speciesChoices.legacy_spell_ability);
+      assert.deepEqual(sheet.resistances, ['poison']);
+    }
+    if (species.id === 'orc') {
+      assert.equal(sheet.derived_stats.senses.darkvision, 120);
+    }
+    if (species.id === 'goliath') {
+      assert.equal(sheet.derived_stats.speed, 35);
+    }
+  }
+});
+
+test('every species option applies its spells, resistances, and derived effects', () => {
+  const content = getContentBundle();
+  const background = content.backgrounds.find((item) => item.id === 'soldier');
+
+  for (const species of content.species) {
+    const defaults = speciesChoicesFor(species);
+    for (const choice of (species.choices || []).filter((entry) => entry.type === 'option')) {
+      for (const option of choice.options || []) {
+        const choices = { ...defaults, [choice.id]: option.id };
+        const speciesSkills = (species.choices || [])
+          .filter((entry) => entry.type === 'skill')
+          .map((entry) => choices[entry.id]);
+        const excluded = new Set([...(background.skills || []), ...speciesSkills]);
+        const sheet = validateCharacter(baseDraft({
+          speciesId: species.id,
+          speciesChoices: choices,
+          backgroundId: background.id,
+          backgroundToolChoices: backgroundToolChoicesFor(background, content),
+          abilityScores: {
+            str: 15,
+            dex: 13,
+            con: 14,
+            int: 8,
+            wis: 12,
+            cha: 10,
+            backgroundBonus: { str: 2, dex: 1 },
+          },
+          selectedSkills: fighterSkillsExcluding(excluded),
+          humanSkillId: species.id === 'human' ? 'perception' : '',
+          humanOriginFeatId: species.id === 'human' ? 'alert' : '',
+          featSkillChoices: {},
+          magicInitiateChoices: {},
+        }), content);
+
+        assert.equal(sheet.species_choices[choice.id], option.id, `${species.id}.${choice.id}.${option.id}`);
+        for (const resistance of option.resistances || []) {
+          assert.equal(sheet.resistances.includes(resistance), true, `${option.id} resistance ${resistance}`);
+        }
+        for (const spellId of option.spells || []) {
+          const speciesSpell = sheet.species_spells.find((spell) => spell.id === spellId);
+          assert.ok(speciesSpell, `${option.id} spell ${spellId}`);
+          if (choices.lineage_spell_ability || choices.legacy_spell_ability) {
+            assert.equal(speciesSpell.ability, choices.lineage_spell_ability || choices.legacy_spell_ability);
+          }
+        }
+        for (const effect of option.effects || []) {
+          if (effect.target === 'darkvision_override') assert.equal(sheet.derived_stats.senses.darkvision, effect.value);
+          if (effect.target === 'speed_bonus') assert.equal(sheet.derived_stats.speed, species.speed + effect.value);
+        }
+      }
     }
   }
 });

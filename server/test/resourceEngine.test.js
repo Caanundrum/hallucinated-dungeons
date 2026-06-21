@@ -287,3 +287,16 @@ test('builds proficiency-scaled Dragonborn, Dwarf, and Goliath species resources
   assert.equal(buildResourceState({ identity: { species: 'dwarf' }, derived_stats }).stonecunning.max, 2);
   assert.equal(buildResourceState({ identity: { species: 'goliath' }, derived_stats }).giant_ancestry.max, 2);
 });
+
+test('repairs Forest Gnome Speak with Animals uses on legacy sheets', () => {
+  const resources = buildResourceState({
+    identity: { species: 'gnome', level: 5 },
+    derived_stats: { proficiency_bonus: 3 },
+    species_choices: { gnomish_lineage: 'forest' },
+  });
+  const speech = resources.spell_uses['species_spell:Forest Gnome:speak_with_animals'];
+
+  assert.equal(speech.remaining, 3);
+  assert.equal(speech.max, 3);
+  assert.equal(speech.reset, 'long_rest');
+});

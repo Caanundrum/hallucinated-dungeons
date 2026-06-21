@@ -94,7 +94,8 @@ test('DM2 sheet summary distinguishes a Wizard spellbook from prepared spells', 
 test('DM2 sheet summary exposes species senses, choices, resistances, and magic', () => {
   const celestial = summarizeCharacterSheetForRules({
     identity: { name: 'Halo', species: 'celestial_touched', level: 1 },
-    derived_stats: { senses: { darkvision: 60 } },
+    abilities: { modifiers: { cha: 3 } },
+    derived_stats: { senses: { darkvision: 60 }, proficiency_bonus: 2 },
     resistances: ['radiant', 'necrotic'],
     species_spells: [{ id: 'light', ability: 'cha' }],
   });
@@ -107,7 +108,7 @@ test('DM2 sheet summary exposes species senses, choices, resistances, and magic'
 
   assert.match(celestial, /Senses: Darkvision 60 ft/);
   assert.match(celestial, /Damage resistances: radiant, necrotic/);
-  assert.match(celestial, /Species spells: light \(CHA\)/);
+  assert.match(celestial, /Species spells: light \(CHA, attack \+5, DC 13\)/);
   assert.match(dragonborn, /Species choices: draconic ancestry: blue/);
   assert.match(dragonborn, /Damage resistances: lightning/);
 });

@@ -292,6 +292,9 @@ function parseRollRequest(message) {
 function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCombat }) {
   const check = intent.check;
   const hideAction = isHideActionCheck({ rule_action: intent.ruleAction, skill: check.skill, intent: intent.raw });
+  const speciesHideSource = hideAction
+    ? getSpeciesHidePermissionSource({ message: intent.raw, worldState, characterSheet })
+    : '';
   const conditionSubject = getPlayerConditionSubject(characterSheet, worldState);
   const sensoryBlock = getSensoryCheckBlock({
     subject: conditionSubject,
@@ -372,6 +375,7 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
     dc_source: dcAssessment.source,
     intent: intent.raw,
     rule_action: hideAction ? 'hide' : intent.ruleAction || null,
+    species_hide_permission: speciesHideSource || null,
     ...buildDiscoveryPendingMetadata({ intent, worldState }),
     ...buildSocialPendingMetadata({ intent, worldState }),
     consumes: inCombat ? combatConsumeKey : 'exploration',
@@ -391,8 +395,20 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
       ...nextWorldState,
       pending_roll: pendingRoll,
     },
-    reply: `Make a DC ${dc} ${check.label}.${formatAdvantageModeText(pendingRoll.advantage_mode, pendingRoll.advantage_sources)}${bonus ? ` Add ${bonus.die} from ${bonus.label}.` : ''}${combatConsumeText} [CHECK: id=${pendingRoll.id}${check.skill ? ` skill=${check.skill}` : ''} ability=${check.ability} modifier=${modifier.total} breakdown="${sanitizeTagValue(modifier.breakdown)}"${formatBonusDieTag(bonus)}]`,
+    reply: `Make a DC ${dc} ${check.label}.${speciesHideSource ? ` **${speciesHideSource}** permits this Hide attempt behind the larger creature.` : ''}${formatAdvantageModeText(pendingRoll.advantage_mode, pendingRoll.advantage_sources)}${bonus ? ` Add ${bonus.die} from ${bonus.label}.` : ''}${combatConsumeText} [CHECK: id=${pendingRoll.id}${check.skill ? ` skill=${check.skill}` : ''} ability=${check.ability} modifier=${modifier.total} breakdown="${sanitizeTagValue(modifier.breakdown)}"${formatBonusDieTag(bonus)}]`,
   };
+}
+
+function getSpeciesHidePermissionSource({ message = '', worldState = {}, characterSheet = {} } = {}) {
+  if (normalizeId(characterSheet.identity?.species) !== 'halfling') return '';
+  if (!/\b(?:behind|obscured by|use .* as cover)\b/i.test(String(message || ''))) return '';
+  const text = normalizeId(message);
+  const creature = (worldState.combat_state?.combatants || []).find((combatant) => (
+    !combatant.is_player
+    && text.includes(normalizeId(combatant.name))
+    && ['medium', 'large', 'huge', 'gargantuan'].includes(normalizeId(combatant.size))
+  ));
+  return creature ? 'Naturally Stealthy' : '';
 }
 
 function spendCombatCheckResource({ worldState = {}, characterSheet = {}, check = {}, hideAction = false, message = '' } = {}) {
@@ -1288,12 +1304,15 @@ function resolveRest({ restIntent, worldState, characterSheet, rollDie = default
     };
   }
 
-  const ticked = tickActiveEffects(worldState, { minutes: restIntent.minutes });
+  const restMinutes = restIntent.type === 'long' && isElfCharacter(characterSheet)
+    ? 4 * 60
+    : restIntent.minutes;
+  const ticked = tickActiveEffects(worldState, { minutes: restMinutes });
   const baseState = {
     ...ticked.worldState,
     time_state: {
       ...(ticked.worldState.time_state || {}),
-      elapsed_minutes: Number(ticked.worldState.time_state?.elapsed_minutes || 0) + restIntent.minutes,
+      elapsed_minutes: Number(ticked.worldState.time_state?.elapsed_minutes || 0) + restMinutes,
       scene_time: restIntent.type === 'long' ? 'after a long rest' : 'after a short rest',
     },
   };
@@ -1306,7 +1325,7 @@ function resolveRest({ restIntent, worldState, characterSheet, rollDie = default
     ? ` Expired effects: ${ticked.expiredEffects.map((effect) => effect.name || effect.id).join(', ')}.`
     : '';
   const reply = restIntent.type === 'long'
-    ? `You complete a **long rest**. HP, death saves, spell slots, and once-per-rest spell uses reset.${restResult.note ? ` ${restResult.note}` : ''}${expired}`
+    ? `You complete a **long rest**${isElfCharacter(characterSheet) ? ' through 4 hours of Trance' : ''}. HP, death saves, spell slots, and once-per-rest spell uses reset.${restResult.note ? ` ${restResult.note}` : ''}${expired}`
     : `You complete a **short rest**. Time passes, short-rest resources refresh where your sheet supports them, and active durations tick down.${restResult.note ? ` ${restResult.note}` : ''}${expired}`;
 
   return {
@@ -1315,6 +1334,10 @@ function resolveRest({ restIntent, worldState, characterSheet, rollDie = default
     worldState: nextState,
     reply,
   };
+}
+
+function isElfCharacter(characterSheet = {}) {
+  return normalizeId(characterSheet.identity?.species) === 'elf';
 }
 
 function resolveTimePassage({ timeIntent, worldState }) {

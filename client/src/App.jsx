@@ -892,6 +892,15 @@ function CharacterSheetModal({ character, content, levelUpBusy, onClose, onLevel
     if (!spell) return spellName(spellId);
     return `${spell.name}: ${spell.description} (${spell.casting_time}, ${spell.range}, ${spell.duration})`;
   };
+  const speciesSpellSummary = (entry) => {
+    const spellId = entry.id || entry;
+    const summary = spellSummary(spellId);
+    if (!entry.ability) return summary;
+    const ability = String(entry.ability).toLowerCase();
+    const modifier = Number(abilities.modifiers?.[ability] || 0);
+    const proficiency = Number(derived.proficiency_bonus || 2);
+    return `${summary} [${ability.toUpperCase()} - Attack ${fmtMod(modifier + proficiency)}, DC ${8 + modifier + proficiency}]`;
+  };
   const magicInitiateRows = Object.entries(magicInitiate).map(([source, choice]) => ({
     source,
     label: source === 'background_feat' ? 'Background Magic Initiate' : 'Human Magic Initiate',
@@ -1066,7 +1075,7 @@ function CharacterSheetModal({ character, content, levelUpBusy, onClose, onLevel
             {speciesSpells.length > 0 && (
               <div className="sheet-line">
                 <strong>Species Spells</strong>
-                <span>{speciesSpells.map((spell) => spellSummary(spell.id || spell)).join(' | ')}</span>
+                <span>{speciesSpells.map(speciesSpellSummary).join(' | ')}</span>
               </div>
             )}
             {Number(senses.darkvision || 0) > 0 && (

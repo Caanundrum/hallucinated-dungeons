@@ -424,6 +424,22 @@ function applySpeciesResourceDefaults(resources, characterSheet = {}, worldResou
   if (speciesId === 'goliath') {
     defaults.giant_ancestry = { ...RESOURCE_DEFINITIONS.giant_ancestry, remaining: proficiency, max: proficiency };
   }
+  if (speciesId === 'gnome' && normalizeId(characterSheet.species_choices?.gnomish_lineage) === 'forest') {
+    const key = 'species_spell:Forest Gnome:speak_with_animals';
+    const current = resources.spell_uses?.[key];
+    resources.spell_uses = {
+      ...(resources.spell_uses || {}),
+      [key]: current || {
+        name: 'Speak with Animals',
+        spell_id: 'speak_with_animals',
+        source: 'Forest Gnome',
+        source_name: 'Forest Gnome',
+        remaining: proficiency,
+        max: proficiency,
+        reset: 'long_rest',
+      },
+    };
+  }
 
   for (const [key, definition] of Object.entries(defaults)) {
     if (resources[key]) continue;

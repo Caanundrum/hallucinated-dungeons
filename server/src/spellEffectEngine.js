@@ -144,6 +144,7 @@ function resolveSpellCast({ message, content, characterSheet, worldState = {} })
     blocked: false,
     message,
     spell,
+    known,
     characterSheet: nextSheet,
     worldState: nextWorldState,
     resourceNote: legality.resourceNote,
@@ -155,6 +156,7 @@ function resolveSpellOutcome({ spellCast, characterSheet, worldState = {}, rollD
   if (!spell) return null;
 
   const rule = SPELL_OUTCOMES[spell.id];
+  const known = spellCast.known || {};
   const stateWithMessage = clearResolvedCombatState({
     ...worldState,
     __spell_message: spellCast.message || '',
@@ -165,19 +167,19 @@ function resolveSpellOutcome({ spellCast, characterSheet, worldState = {}, rollD
   }
 
   if (rule.type === 'spell_attack') {
-    return resolveSpellAttack({ spell, rule, characterSheet, worldState: stateWithMessage, rollDie });
+    return resolveSpellAttack({ spell, rule, known, characterSheet, worldState: stateWithMessage, rollDie });
   }
   if (rule.type === 'automatic_damage') {
     return resolveAutomaticDamageSpell({ spell, rule, worldState: stateWithMessage, rollDie });
   }
   if (rule.type === 'saving_throw') {
-    return resolveSavingThrowSpell({ spell, rule, characterSheet, worldState: stateWithMessage, rollDie });
+    return resolveSavingThrowSpell({ spell, rule, known, characterSheet, worldState: stateWithMessage, rollDie });
   }
   if (rule.type === 'save_effect') {
-    return resolveSaveEffectSpell({ spell, rule, characterSheet, worldState: stateWithMessage, rollDie });
+    return resolveSaveEffectSpell({ spell, rule, known, characterSheet, worldState: stateWithMessage, rollDie });
   }
   if (rule.type === 'healing') {
-    return resolveHealingSpell({ spell, rule, characterSheet, worldState: stateWithMessage, rollDie });
+    return resolveHealingSpell({ spell, rule, known, characterSheet, worldState: stateWithMessage, rollDie });
   }
   if (rule.type === 'sleep_pool') {
     return resolveSleepSpell({ spell, rule, worldState: stateWithMessage, rollDie });
@@ -186,14 +188,14 @@ function resolveSpellOutcome({ spellCast, characterSheet, worldState = {}, rollD
   return null;
 }
 
-function resolveSpellAttack({ spell, rule, characterSheet, worldState, rollDie }) {
+function resolveSpellAttack({ spell, rule, known = {}, characterSheet, worldState, rollDie }) {
   const context = getSpellTargetContext({ spell, spellCastMessage: worldState.__spell_message, worldState, characterSheet });
   if (!context?.target) return noSpellTarget(worldState, spell);
   let { combat, target } = context;
   const { activeCombat } = context;
 
   const attacker = getPlayerCombatant(combat, characterSheet, worldState);
-  const baseAttackBonus = Number(characterSheet?.derived_stats?.spell_attack_bonus || 0);
+  const baseAttackBonus = getSpellAttackBonus(characterSheet, known);
   const activeAttackBonus = getActiveSpellAttackBonus(worldState, characterSheet);
   const conditionAttackBonus = getConditionD20Modifier(attacker);
   const attackBonus = baseAttackBonus + activeAttackBonus + conditionAttackBonus;
@@ -306,13 +308,13 @@ function empowerAutomaticDamageRolls(results = [], formula = '', rerollCount = 0
   }));
 }
 
-function resolveSavingThrowSpell({ spell, rule, characterSheet, worldState, rollDie }) {
+function resolveSavingThrowSpell({ spell, rule, known = {}, characterSheet, worldState, rollDie }) {
   const context = getSpellTargetContext({ spell, spellCastMessage: worldState.__spell_message, worldState });
   if (!context?.target) return noSpellTarget(worldState, spell);
   const { combat, target, activeCombat } = context;
 
   const dcBonus = getActiveSpellSaveDcBonus(worldState, characterSheet);
-  const dc = Number(characterSheet?.derived_stats?.spell_save_dc || 10) + dcBonus;
+  const dc = getSpellSaveDc(characterSheet, known) + dcBonus;
   const saveBonus = getTargetSaveBonus(target, rule.save);
   const save = resolveSavingThrow({ target, ability: rule.save, dc, rollDie, bonus: saveBonus, mode: spell.metamagic?.save_disadvantage ? 'disadvantage' : null });
   const success = save.success;
@@ -333,13 +335,13 @@ function resolveSavingThrowSpell({ spell, rule, characterSheet, worldState, roll
   return finishSpellAction({ spell, worldState, combat, lines, activeCombat });
 }
 
-function resolveSaveEffectSpell({ spell, rule, characterSheet, worldState, rollDie }) {
+function resolveSaveEffectSpell({ spell, rule, known = {}, characterSheet, worldState, rollDie }) {
   const context = getSpellTargetContext({ spell, spellCastMessage: worldState.__spell_message, worldState });
   if (!context?.target) return noSpellTarget(worldState, spell);
   const { combat, target, activeCombat } = context;
 
   const dcBonus = getActiveSpellSaveDcBonus(worldState, characterSheet);
-  const dc = Number(characterSheet?.derived_stats?.spell_save_dc || 10) + dcBonus;
+  const dc = getSpellSaveDc(characterSheet, known) + dcBonus;
   const saveBonus = getTargetSaveBonus(target, rule.save);
   const save = resolveSavingThrow({ target, ability: rule.save, dc, rollDie, bonus: saveBonus, mode: spell.metamagic?.save_disadvantage ? 'disadvantage' : null });
   const success = save.success;
@@ -424,10 +426,10 @@ function resolveSleepSpell({ spell, rule, worldState, rollDie }) {
   return finishSpellAction({ spell, worldState: effectState, combat: effectState.combat_state, lines, activeCombat });
 }
 
-function resolveHealingSpell({ spell, rule, characterSheet, worldState, rollDie }) {
+function resolveHealingSpell({ spell, rule, known = {}, characterSheet, worldState, rollDie }) {
   const combat = cloneCombatState(worldState.combat_state);
   const player = combat.combatants.find((combatant) => combatant.is_player) || null;
-  const spellMod = getSpellcastingModifier(characterSheet);
+  const spellMod = getSpellcastingModifier(characterSheet, known);
   const healing = rollFormula(rule.healing, rollDie, {
     spellMod,
     rerollOnes: hasOriginFeat(characterSheet, 'healer'),
@@ -807,7 +809,7 @@ function buildSpellEffect(characterSheet, spell, known, message = '', worldState
     duration,
     concentration: isConcentrationDuration(duration),
     guidance_skill: guidanceSkill,
-    spellcasting_modifier: getSpellcastingModifier(characterSheet),
+    spellcasting_modifier: getSpellcastingModifier(characterSheet, known),
     mechanical_effect: spell.description,
     rules_effects: [
       ...getRulesEffectsForSpell(spell, { message }),
@@ -994,9 +996,24 @@ function getTargetSaveBonus(target = {}, ability) {
   );
 }
 
-function getSpellcastingModifier(characterSheet = {}) {
-  const ability = characterSheet.spellcasting?.ability;
+function getSpellcastingModifier(characterSheet = {}, known = {}) {
+  const ability = known.ability || characterSheet.spellcasting?.ability;
   return Number(characterSheet.abilities?.modifiers?.[ability] || 0);
+}
+
+function getSpellAttackBonus(characterSheet = {}, known = {}) {
+  if (!known.ability) return Number(characterSheet.derived_stats?.spell_attack_bonus || 0);
+  return getProficiencyBonus(characterSheet) + getSpellcastingModifier(characterSheet, known);
+}
+
+function getSpellSaveDc(characterSheet = {}, known = {}) {
+  if (!known.ability) return Number(characterSheet.derived_stats?.spell_save_dc || 10);
+  return 8 + getProficiencyBonus(characterSheet) + getSpellcastingModifier(characterSheet, known);
+}
+
+function getProficiencyBonus(characterSheet = {}) {
+  const level = Number(characterSheet.identity?.level || characterSheet.derived_stats?.level || 1);
+  return Number(characterSheet.derived_stats?.proficiency_bonus || Math.floor((level - 1) / 4) + 2);
 }
 
 function consumesCombatTurn(spell = {}) {
