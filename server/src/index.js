@@ -48,7 +48,10 @@ const {
   answerInventoryCountQuestion,
   formatCarriedInventoryForRules,
 } = require('./rulesInventoryAnswers');
-const { answerResourceCountQuestion } = require('./rulesResourceAnswers');
+const {
+  answerResourceCountQuestion,
+  resourceAnswerCoversQuestion,
+} = require('./rulesResourceAnswers');
 const { shouldAllowModerationFalsePositive } = require('./safetyFalsePositive');
 const {
   applyProgressionAwards,
@@ -1746,9 +1749,17 @@ io.on('connection', (socket) => {
           await db.updateWorldState(sessionId, ws);
         }
         if (ws) {
-          deterministicRulesReply = answerResourceCountQuestion(message, ws)
-            || answerInventoryCountQuestion(message, ws);
+          const resourceAnswer = answerResourceCountQuestion(message, ws);
+          const resourceAnswerComplete = resourceAnswer && resourceAnswerCoversQuestion(message);
+          deterministicRulesReply = resourceAnswerComplete
+            ? resourceAnswer
+            : !resourceAnswer
+              ? answerInventoryCountQuestion(message, ws)
+              : '';
           const contextParts = [];
+          if (resourceAnswer && !resourceAnswerComplete) {
+            contextParts.push(`Authoritative resource portion of this mixed question: ${resourceAnswer}`);
+          }
           if (ws.current_location) {
             contextParts.push(`Current location: ${ws.current_location}`);
           }

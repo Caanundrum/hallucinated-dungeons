@@ -5,7 +5,10 @@ process.env.SUPABASE_SERVICE_ROLE_KEY ||= 'test-key';
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { answerResourceCountQuestion } = require('../src/rulesResourceAnswers');
+const {
+  answerResourceCountQuestion,
+  resourceAnswerCoversQuestion,
+} = require('../src/rulesResourceAnswers');
 
 const worldState = {
   player_stats: {
@@ -54,6 +57,17 @@ test('answers every named resource in a combined exact resource question', () =>
   assert.match(reply, /Action Surge 0\/1 uses left/);
   assert.match(reply, /Second Wind 1\/2 uses left/);
   assert.ok(reply.indexOf('Action Surge') < reply.indexOf('Second Wind'));
+});
+
+test('resource shortcut yields mixed questions so DM2 can answer every requested sheet fact', () => {
+  assert.equal(resourceAnswerCoversQuestion('How many Breath Weapon uses do I have left?'), true);
+  assert.equal(resourceAnswerCoversQuestion(
+    'How many Breath Weapon uses do I have, and what are my ancestry, damage type, resistance, and Darkvision?',
+  ), false);
+  assert.equal(resourceAnswerCoversQuestion('What is my AC and how many Action Surge uses remain?'), false);
+  assert.equal(resourceAnswerCoversQuestion(
+    'What are my exact Action Surge, Second Wind, and spell slot resources remaining and max?',
+  ), true);
 });
 
 test('includes spell slots in combined resource questions', () => {

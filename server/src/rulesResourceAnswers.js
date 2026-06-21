@@ -47,6 +47,23 @@ function answerResourceCountQuestion(message = '', worldState = {}) {
   return `Current sheet state: ${entries[0]}`;
 }
 
+function resourceAnswerCoversQuestion(message = '') {
+  const text = normalizeText(message);
+  if (!isResourceQuestion(text)) return false;
+  return !asksForNonResourceSheetFacts(text);
+}
+
+function asksForNonResourceSheetFacts(text = '') {
+  return [
+    /\b(?:ancestry|lineage|species|race)\b/,
+    /\b(?:damage type|resistance|resistances|immunity|immunities|vulnerability|vulnerabilities)\b/,
+    /\b(?:darkvision|blindsight|tremorsense|truesight|sense|senses|vision)\b/,
+    /\b(?:armor class|ac|hit points|hp|speed|initiative)\b/,
+    /\b(?:attack bonus|damage bonus|weapon attack|weapon attacks|equipped weapon|equipped weapons|skill|skills|ability score|ability scores|saving throw|saving throws)\b/,
+    /\b(?:what does|how does|describe|description|trait|traits|feature details|spell details)\b/,
+  ].some((pattern) => pattern.test(text));
+}
+
 function formatResourceEntry(key, resource = {}, text = '') {
   const name = resource.name || titleCase(key);
   const remaining = formatNumber(resource.remaining);
@@ -230,4 +247,5 @@ function escapeRegExp(value = '') {
 
 module.exports = {
   answerResourceCountQuestion,
+  resourceAnswerCoversQuestion,
 };
