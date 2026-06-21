@@ -1,5 +1,36 @@
 # Hallucinated Dungeons QA Handoff
 
+## Latest QA Pass - 2026-06-21 Mixed Dragonborn Rules Fix Retest `f97470a`
+
+Scope:
+
+- Retested the combined Dragonborn Rules-answer finding from the first species pair pass.
+- App-code commit under test: `f97470a Preserve mixed rules question context`; repo tip during QA: `6ad4149 Update QA_HANDOFF.md`.
+- Reused the fresh production character `QA Dragonborn` with Blue Draconic Ancestry.
+- QA remained read-only for app code. Only this handoff was updated.
+
+Automated checks:
+
+- Server `npm.cmd test`: PASS, `550/550`.
+- Client `npm.cmd run lint`: PASS.
+- `git diff --check f97470a^ f97470a`: PASS.
+- Browser console warnings/errors: none.
+
+Verified fixed / passed in production:
+
+- The exact previously failing mixed question now returns every requested fact in one answer.
+- The response correctly reported Blue Dragonborn ancestry, Lightning Breath Weapon damage, `2/2` uses remaining with max 2 and long-rest reset, Lightning resistance, and Darkvision 60 ft.
+- The resource count remained authoritative while the non-resource sheet facts were preserved for the full Rules response.
+- New automated coverage confirms resource-only questions still use the deterministic shortcut while mixed resource/sheet questions continue through the full answer path.
+
+Findings for DEV:
+
+- No remaining issue found in this focused retest.
+
+Current recommendation:
+
+- Treat the combined Rules-answer defect as fixed. Celestial-Touched and Dragonborn may both be considered production-passed within the tested scope. The shortcut now answers its part without commandeering the whole conversation.
+
 ## Latest QA Pass - 2026-06-21 Celestial-Touched / Dragonborn Production QA `5d34f9a`
 
 Scope:
