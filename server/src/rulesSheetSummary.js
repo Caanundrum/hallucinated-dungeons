@@ -55,6 +55,9 @@ function summarizeCharacterSheetForRules(characterSheet) {
     const cantrips = spellcasting.cantrips_known || [];
     const spells = spellcasting.spells_prepared || [];
     lines.push(`Spellcasting: ${spellcasting.ability.toUpperCase()}, attack ${fmtSigned(derived.spell_attack_bonus)}, DC ${derived.spell_save_dc ?? '--'}, slots ${formatSpellSlots(spellcasting.slots)}, cantrips ${formatList(cantrips)}, level 1 ${formatList(spells)}`);
+    if ((spellcasting.spellbook_spells || []).length) {
+      lines.push(`Spellbook: ${formatList(spellcasting.spellbook_spells)}. Prepared from spellbook: ${formatList(spells)}`);
+    }
     if ((spellcasting.class_choice_spells || characterSheet.class_choice_spells || []).length) {
       lines.push(`Class choice spells: ${(spellcasting.class_choice_spells || characterSheet.class_choice_spells).map((entry) => `${entry.id} from ${entry.source || 'class choice'}`).join(', ')}`);
     }

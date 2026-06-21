@@ -22,6 +22,7 @@ const SUPPORTED_LEVEL_UP_MECHANICS = new Set([
   'magical_cunning',
   'metamagic',
   'reckless_attack',
+  'scholar',
   'paladin_smite',
   'tactical_mind',
   'turn_undead',
@@ -315,20 +316,22 @@ function buildRequiredChoicePreviews({
       ...choice,
       selected,
       active: isRequiredChoiceActive(choice, selections),
-      options: getChoiceOptions({ choice, characterSheet, content, classId }),
+      options: getChoiceOptions({ choice, characterSheet, content, classId, selections }),
     };
   });
 }
 
-function getChoiceOptions({ choice = {}, characterSheet = {}, content = {}, classId = '' } = {}) {
+function getChoiceOptions({ choice = {}, characterSheet = {}, content = {}, classId = '', selections = {} } = {}) {
   if (choice.type === 'skill') {
     const existingExpertise = new Set((characterSheet.expertise_skills || []).map(normalizeId));
     const skillData = characterSheet.derived_stats?.skill_modifiers || {};
+    const scholarSkills = new Set(['arcana', 'history', 'investigation', 'medicine', 'nature', 'religion']);
     return (content.skills || [])
       .filter((skill) => {
         const data = skillData[skill.id];
         if (!data?.proficient) return false;
         if (isExpertiseChoice(choice) && (data.expertise || existingExpertise.has(skill.id))) return false;
+        if (normalizeId(choice.id) === 'scholar_skill' && !scholarSkills.has(normalizeId(skill.id))) return false;
         return true;
       })
       .map((skill) => ({
@@ -360,6 +363,38 @@ function getChoiceOptions({ choice = {}, characterSheet = {}, content = {}, clas
         name: spell.name || titleCase(spell.id),
         description: spell.description || '',
         meta: `Level ${spell.level} - ${spell.casting_time || 'Action'} - ${spell.duration || 'Instant'}`,
+      }));
+  }
+
+  if (choice.type === 'wizard_spell') {
+    const spellbook = new Set((characterSheet.spellcasting?.spellbook_spells || []).map(normalizeId));
+    return (content.spells || [])
+      .filter((spell) => Number(spell.level || 0) === 1)
+      .filter((spell) => (spell.classes || []).map(normalizeId).includes('wizard'))
+      .filter((spell) => !spellbook.has(normalizeId(spell.id)))
+      .map((spell) => ({
+        id: spell.id,
+        name: spell.name || titleCase(spell.id),
+        description: spell.description || '',
+        meta: `Level 1 spellbook addition - ${spell.casting_time || 'Action'} - ${spell.duration || 'Instant'}`,
+      }));
+  }
+
+  if (choice.type === 'wizard_prepared_spell') {
+    const spellbook = new Set((characterSheet.spellcasting?.spellbook_spells || []).map(normalizeId));
+    const prepared = new Set((characterSheet.spellcasting?.spells_prepared || []).map(normalizeId));
+    return (content.spells || [])
+      .filter((spell) => Number(spell.level || 0) === 1)
+      .filter((spell) => (spell.classes || []).map(normalizeId).includes('wizard'))
+      .filter((spell) => !prepared.has(normalizeId(spell.id)))
+      .map((spell) => ({
+        id: spell.id,
+        name: spell.name || titleCase(spell.id),
+        description: spell.description || '',
+        meta: spellbook.has(normalizeId(spell.id)) ? 'Already in spellbook' : 'Select as a spellbook addition first',
+        ...(!spellbook.has(normalizeId(spell.id)) ? {
+          requires_choice: { choice_id: 'spellbook_spells', option_id: spell.id },
+        } : {}),
       }));
   }
 
@@ -461,7 +496,9 @@ function validateRequiredChoices(requiredChoices = [], selections = {}) {
       continue;
     }
 
-    const validIds = new Set((choice.options || []).map((option) => normalizeId(option.id)));
+    const validIds = new Set((choice.options || [])
+      .filter((option) => isChoiceOptionAvailable(option, selections))
+      .map((option) => normalizeId(option.id)));
     const invalid = selected.filter((id) => !validIds.has(normalizeId(id)));
     if (invalid.length > 0) {
       blockers.push(blocker(
@@ -472,6 +509,14 @@ function validateRequiredChoices(requiredChoices = [], selections = {}) {
     }
   }
   return blockers;
+}
+
+function isChoiceOptionAvailable(option = {}, selections = {}) {
+  const requirement = option.requires_choice;
+  if (!requirement) return true;
+  return (selections[requirement.choice_id] || [])
+    .map(normalizeId)
+    .includes(normalizeId(requirement.option_id));
 }
 
 function buildLeveledDerivedStats({
@@ -670,7 +715,11 @@ function mergeResources(current = {}, advancementResources = {}, extra = {}) {
 function mergeSpellcasting(current, advancementSpellcasting, levelUpChoices = {}, cantripAdditions = []) {
   if (!current && !advancementSpellcasting) return null;
   if (!advancementSpellcasting) return current;
-  const preparedAdditions = levelUpChoices.prepared_spells || [];
+  const preparedAdditions = [
+    ...(levelUpChoices.prepared_spells || []),
+    ...(levelUpChoices.prepared_spell || []),
+  ];
+  const spellbookAdditions = levelUpChoices.spellbook_spells || [];
   return {
     ...(current || {}),
     ...(advancementSpellcasting.cantrips !== undefined ? { cantrips_count: advancementSpellcasting.cantrips } : {}),
@@ -699,6 +748,14 @@ function mergeSpellcasting(current, advancementSpellcasting, levelUpChoices = {}
         ...(advancementSpellcasting.always_prepared_spells || []),
       ]),
     ],
+    ...((current || {}).spellbook_spells || advancementSpellcasting.spellbook_spells_add ? {
+      spellbook_spells: [
+        ...new Set([
+          ...((current || {}).spellbook_spells || []),
+          ...spellbookAdditions,
+        ]),
+      ],
+    } : {}),
     slots: {
       ...((current || {}).slots || {}),
       ...(advancementSpellcasting.slots || {}),

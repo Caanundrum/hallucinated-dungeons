@@ -1,5 +1,5 @@
 {
-  "version": "4C.6-H32",
+  "version": "4C.6-H33",
   "status_definitions": {
     "implemented": "Exposed and mechanically enforced for the current supported level/scope.",
     "partial": "Exposed and partially enforced, but missing at least one meaningful rules interaction.",
@@ -92,6 +92,8 @@
     "font_of_magic": "implemented",
     "metamagic": "partial",
     "magical_cunning": "implemented",
+    "scholar": "implemented",
+    "wizard_spellbook_advancement": "implemented",
     "ritual_adept": "implemented",
     "arcane_recovery": "implemented"
   },

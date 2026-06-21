@@ -1189,7 +1189,9 @@ function LevelUpModal({ preview, error, busy, onClose, onConfirm }) {
   const hardBlockers = blockers.filter((entry) => !choiceBlockerTypes.has(entry.type));
   const choicesComplete = activeRequiredChoices.every((choice) => {
     const selected = choiceSelections[choice.id] || [];
-    return selected.length === Number(choice.count || 0);
+    const optionById = new Map((choice.options || []).map((option) => [option.id, option]));
+    return selected.length === Number(choice.count || 0)
+      && selected.every((optionId) => isLevelUpOptionAvailable(optionById.get(optionId), choiceSelections));
   });
   const canApply = Boolean(preview?.canApply || (canLevelUp && hardBlockers.length === 0 && choicesComplete));
 
@@ -1267,7 +1269,7 @@ function LevelUpModal({ preview, error, busy, onClose, onConfirm }) {
                       <span>Choose {choice.count}</span>
                     </div>
                     <div className="level-up-choice-grid">
-                      {(choice.options || []).map((option) => {
+                      {(choice.options || []).filter((option) => isLevelUpOptionAvailable(option, choiceSelections)).map((option) => {
                         const selected = (choiceSelections[choice.id] || []).includes(option.id);
                         return (
                           <button
@@ -1324,6 +1326,13 @@ function isLevelUpChoiceActive(choice = {}, selections = {}) {
   const selected = selections[condition.choice_id] || [];
   const required = String(condition.includes || condition.equals || '').toLowerCase();
   return required ? selected.includes(required) : true;
+}
+
+function isLevelUpOptionAvailable(option, selections = {}) {
+  if (!option) return false;
+  const requirement = option.requires_choice;
+  if (!requirement) return true;
+  return (selections[requirement.choice_id] || []).includes(requirement.option_id);
 }
 
 function SheetStat({ label, value }) {

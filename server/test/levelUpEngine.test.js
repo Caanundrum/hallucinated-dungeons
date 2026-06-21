@@ -748,6 +748,62 @@ test('runtime repair adds the chosen Pact weapon attack to an already-leveled le
   assert.strictEqual(repairPactWeaponAttack(repaired, getContentBundle()), repaired);
 });
 
+test('Wizard level 2 requires Scholar, two spellbook additions, and one legal prepared spell', () => {
+  const sheet = baseSheet({
+    identity: { class: 'wizard', class_name: 'Wizard', experience_points: 300, level_up_available: true },
+    proficiencies: { skills: ['arcana', 'investigation', 'persuasion'] },
+    spellcasting: {
+      ability: 'int',
+      cantrips_known: ['fire_bolt', 'mage_hand', 'prestidigitation'],
+      spellbook_spells: ['magic_missile', 'shield', 'detect_magic', 'identify', 'mage_armor', 'sleep'],
+      spells_prepared: ['magic_missile', 'shield', 'detect_magic', 'sleep'],
+      slots: { 1: 2 },
+    },
+    progression: { experience_points: 300 },
+    derived_stats: {
+      skill_modifiers: {
+        arcana: { ability: 'int', proficient: true, expertise: false, total: 5 },
+        investigation: { ability: 'int', proficient: true, expertise: false, total: 5 },
+        persuasion: { ability: 'cha', proficient: true, expertise: false, total: 2 },
+      },
+    },
+  });
+
+  const preview = getLevelUpPreview(sheet, getContentBundle());
+  const scholar = preview.requiredChoices.find((choice) => choice.id === 'scholar_skill');
+  const prepared = preview.requiredChoices.find((choice) => choice.id === 'prepared_spell');
+  assert.equal(preview.canApply, false);
+  assert.deepEqual(scholar.options.map((option) => option.id).sort(), ['arcana', 'investigation']);
+  assert.equal(prepared.options.find((option) => option.id === 'identify').requires_choice, undefined);
+  assert.deepEqual(prepared.options.find((option) => option.id === 'burning_hands').requires_choice, {
+    choice_id: 'spellbook_spells',
+    option_id: 'burning_hands',
+  });
+
+  const forged = applyLevelUp({
+    characterSheet: sheet,
+    content: getContentBundle(),
+    payload: { choices: { scholar_skill: ['persuasion'], spellbook_spells: ['burning_hands', 'charm_person'], prepared_spell: ['burning_hands'] } },
+  });
+  assert.equal(forged.ok, false);
+
+  const result = applyLevelUp({
+    characterSheet: sheet,
+    content: getContentBundle(),
+    payload: { choices: { scholar_skill: ['arcana'], spellbook_spells: ['burning_hands', 'charm_person'], prepared_spell: ['burning_hands'] } },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.characterSheet.identity.level, 2);
+  assert.equal(result.characterSheet.spellcasting.spellbook_spells.length, 8);
+  assert.equal(result.characterSheet.spellcasting.spellbook_spells.includes('burning_hands'), true);
+  assert.equal(result.characterSheet.spellcasting.spells_prepared.length, 5);
+  assert.equal(result.characterSheet.spellcasting.spells_prepared.includes('burning_hands'), true);
+  assert.equal(result.characterSheet.spellcasting.slots[1], 3);
+  assert.equal(result.characterSheet.spellcasting.slots_max[1], 3);
+  assert.equal(result.characterSheet.expertise_skills.includes('arcana'), true);
+  assert.equal(result.characterSheet.derived_stats.skill_modifiers.arcana.expertise, true);
+});
+
 test('Warlock Pact of the Tome level-up choices become usable cantrips and rituals', () => {
   const result = applyLevelUp({
     characterSheet: baseSheet({

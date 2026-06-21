@@ -489,6 +489,12 @@
             "label": "Spellbook Additions",
             "type": "wizard_spell",
             "count": 2
+          },
+          {
+            "id": "prepared_spell",
+            "label": "Additional Prepared Spell",
+            "type": "wizard_prepared_spell",
+            "count": 1
           }
         ],
         "spellcasting": {

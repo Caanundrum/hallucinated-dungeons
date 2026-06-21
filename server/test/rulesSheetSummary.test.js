@@ -74,3 +74,19 @@ test('DM2 sheet summary exposes the selected Pact of the Blade weapon', () => {
   assert.match(summary, /Pact weapon: longsword/);
   assert.match(summary, /uses Charisma for attack and damage/);
 });
+
+test('DM2 sheet summary distinguishes a Wizard spellbook from prepared spells', () => {
+  const summary = summarizeCharacterSheetForRules({
+    identity: { name: 'Mira', class: 'wizard', class_name: 'Wizard', level: 2 },
+    derived_stats: { spell_attack_bonus: 5, spell_save_dc: 13 },
+    spellcasting: {
+      ability: 'int',
+      slots: { 1: 3 },
+      spellbook_spells: ['magic_missile', 'shield', 'identify'],
+      spells_prepared: ['magic_missile', 'shield'],
+    },
+  });
+
+  assert.match(summary, /Spellbook: magic_missile, shield, identify/);
+  assert.match(summary, /Prepared from spellbook: magic_missile, shield/);
+});
