@@ -1,5 +1,43 @@
 # Hallucinated Dungeons QA Handoff
 
+## Latest QA Pass - 2026-06-20 Wizard Level 2 Production QA `ee7bb34`
+
+Scope:
+
+- Tested the deployed Wizard level 2 package at `https://hallucinated-dungeons.vercel.app/`.
+- Created fresh visible-UI character `QA Wizard 2`, raised it to the level-up threshold through the production QA hook, and exercised level-up and class mechanics with player-natural actions.
+- App-code commit under test: `ee7bb34 Add Wizard level 2 mechanics`.
+- QA remained read-only for app code. Only this handoff was updated.
+
+Automated checks:
+
+- Server `npm.cmd test`: PASS, `543/543`.
+- Client `npm.cmd run lint`: PASS.
+- `git diff --check ee7bb34^ ee7bb34`: PASS.
+- Browser console warnings/errors: none.
+
+Verified passed in production:
+
+- Fresh Wizard creation correctly recorded 3 cantrips, a 6-spell spellbook, 4 prepared spells, Sage Magic Initiate choices, and Arcana/History/Investigation/Insight proficiencies.
+- Level-up stayed blocked until all three required groups were complete: one Scholar skill, two spellbook additions, and one additional prepared spell.
+- Scholar offered only eligible proficient scholarly skills: Arcana, History, and Investigation. Insight was correctly excluded.
+- Additional Prepared Spell initially showed only unprepared spells already in the spellbook. Selecting Burning Hands as a spellbook addition made Burning Hands available as the dependent prepared-spell choice.
+- Applying level 2 produced HP `14/14`, Arcana expertise `+7`, an 8-spell spellbook, 5 prepared spells, and level 1 slots `3/3`.
+- Mage Armor spent a slot and raised the unarmored Wizard from AC 11 to AC 14 during live combat.
+- Magic Missile automatically hit, dealt 9 force damage, ended combat, and awarded 25 XP.
+- Arcane Recovery restored exactly one level 1 slot on the first short rest: slots moved from `1/3` to `2/3`, and Rules reported Arcane Recovery `0/1` afterward.
+- A later short rest did not restore another slot. After another exact spell cast, slots remained `1/3` and Arcane Recovery remained `0/1`.
+- Ritual-capable Detect Magic cast from the spellbook without consuming a slot and expired on the following short rest.
+
+Findings for DEV:
+
+- **P2 - Natural spell target/context wording is swallowed into the spell name.** Player input `I cast Burning Hands harmlessly out over the empty water.` was rejected because the resolver searched for `Burning Hands Harmlessly Out Over The Emp`. The app then claimed that invented full phrase was not on the sheet, even though Burning Hands was prepared. The exact input `I cast Burning Hands.` succeeded and spent a slot. Expected: match the longest known spell-name prefix, then treat the remaining words as target/context. Add regression coverage for natural forms such as `I cast Burning Hands at the shape`, `I cast Magic Missile at the goblin`, and harmless environmental casting.
+- **P3 - Dependent prepared-spell helper text remains stale after the prerequisite is selected.** After selecting Burning Hands under Spellbook Additions, it correctly appeared under Additional Prepared Spell, but its helper text still said `Select as a spellbook addition first`. Expected: once the prerequisite is selected, show neutral/confirmed wording such as `Selected spellbook addition`.
+
+Current recommendation:
+
+- Wizard level 2 mechanics are production-functional and the class package may proceed, but fix the P2 natural spell-name parser before treating ordinary player phrasing as reliable. The Wizard passed the rules exam; the sentence parser ate the margin notes.
+
 ## Latest QA Pass - 2026-06-19 Legacy Pact Weapon Repair Retest `f7baae9`
 
 Scope:
