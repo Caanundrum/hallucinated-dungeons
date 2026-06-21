@@ -1,5 +1,37 @@
 # Hallucinated Dungeons QA Handoff
 
+## Latest QA Pass - 2026-06-20 Wizard Fix Retest `6169af7`
+
+Scope:
+
+- Retested both Wizard findings from the `ee7bb34` production pass against the deployed app.
+- App-code commit under test: `6169af7 Fix natural spell casting phrases`; repo tip during QA: `acb51c6 Update QA_HANDOFF.md`.
+- Reused `QA Wizard 2` for the live spell cast and created fresh level-1 `QA Wizard Helper` for the visible dependent-choice state.
+- QA remained read-only for app code. Only this handoff was updated.
+
+Automated checks:
+
+- Server `npm.cmd test`: PASS, `544/544`.
+- Client `npm.cmd run lint`: PASS.
+- `git diff --check 6169af7^ 6169af7`: PASS.
+- Browser console warnings/errors: none.
+
+Verified fixed / passed in production:
+
+- P2 natural spell phrasing is fixed. `I cast Burning Hands harmlessly out over the empty water.` resolved to `Burning Hands` instead of treating the trailing context as part of the spell name.
+- The natural cast spent the slot correctly. A fresh exact Rules query reported level 1 Wizard slots `0/3` immediately afterward.
+- P3 dependent-choice helper text is fixed in the visible level-up UI. After selecting Burning Hands under Spellbook Additions, Additional Prepared Spell displayed Burning Hands with `Selected spellbook addition`.
+- The dependent option still appeared only after its spellbook prerequisite was selected; existing unprepared spellbook options remained labeled `Already in spellbook`.
+- The new automated regression covers natural Burning Hands and Magic Missile forms with trailing targets/context.
+
+Findings for DEV:
+
+- No remaining issue found in this focused retest.
+
+Current recommendation:
+
+- Treat both Wizard findings as fixed and the Wizard level 2 package as production-passed. The parser now recognizes the spell before reading the Wizard's stage directions, which is a healthier division of labor.
+
 ## Latest QA Pass - 2026-06-20 Wizard Level 2 Production QA `ee7bb34`
 
 Scope:
