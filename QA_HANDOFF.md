@@ -1,5 +1,44 @@
 # Hallucinated Dungeons QA Handoff
 
+## Latest QA Pass - 2026-06-21 Celestial-Touched / Dragonborn Production QA `5d34f9a`
+
+Scope:
+
+- Tested the first species mechanics pair on production: Celestial-Touched and Dragonborn.
+- App-code commit under test: `5d34f9a Complete first species mechanics pair`; repo tip during QA: `f17dad5 Update QA_HANDOFF.md`.
+- Created fresh visible-UI Fighters `QA Celestial` and `QA Dragonborn`; selected Blue Draconic Ancestry for the Dragonborn.
+- QA remained read-only for app code. Only this handoff was updated.
+
+Automated checks:
+
+- Server `npm.cmd test`: PASS, `549/549`.
+- Client `npm.cmd run lint`: PASS.
+- `git diff --check 5d34f9a^ 5d34f9a`: PASS.
+- Browser console warnings/errors: none.
+
+Verified passed in production:
+
+- Celestial-Touched creation and saved sheet show Darkvision 60 ft, Radiant and Necrotic resistance, Healing Hands, and Light as a species spell.
+- The exact Rules answer returned Darkvision 60 ft, both resistances, and Light as CHA-based species magic.
+- `I use Healing Hands on myself.` at full HP correctly preserved the use and action and reported `12/12` HP.
+- `I cast Light on my shield.` succeeded for the noncaster Fighter and created the expected active Light effect on the shield.
+- Blue Dragonborn creation and saved sheet show `Draconic Ancestry: Blue`, Lightning resistance, Darkvision 60 ft, and the Breath Weapon feature.
+- Breath Weapon outside an active encounter was blocked before spending anything; the fresh Rules resource answer remained `2/2` uses.
+- A separate sheet-fact question correctly returned Blue ancestry, Lightning resistance, and Darkvision 60 ft.
+- Automated coverage passed for live Healing Hands healing, Dragonborn DEX-save damage, absent-target no-spend behavior, ancestry damage enforcement, and level-based breath scaling.
+
+Findings for DEV:
+
+- **P2 - Combined Dragonborn Rules questions are truncated by resource routing.** Asking `What are my exact Draconic Ancestry, Breath Weapon damage type and uses remaining and max, damage resistance, and Darkvision range? Use my current sheet.` returned only `Breath Weapon 2/2 uses left`. A second wording that said to ignore resource counts still returned only the resource. Removing the words `Breath Weapon` allowed the Rules panel to answer Blue ancestry, Lightning resistance, and Darkvision 60 ft correctly. Expected: resource handling should answer the resource portion and preserve the remaining requested sheet facts, as combined class-resource queries already do.
+
+Coverage note:
+
+- The current shared scene had no living enemy, so the live Dragonborn damage/save path could not be exercised without inventing a target. The production no-target guard was verified, and the damage path is covered by the passing automated suite.
+
+Current recommendation:
+
+- Celestial-Touched is production-passed. Dragonborn creation, sheet state, and guardrails pass, but fix the P2 combined Rules-answer routing before closing the pair completely. The breath weapon knows what color dragon it came from; the Rules shortcut briefly forgets to mention it.
+
 ## Latest QA Pass - 2026-06-20 Wizard Fix Retest `6169af7`
 
 Scope:
