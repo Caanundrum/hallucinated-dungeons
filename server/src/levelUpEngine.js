@@ -391,7 +391,7 @@ function getChoiceOptions({ choice = {}, characterSheet = {}, content = {}, clas
         id: spell.id,
         name: spell.name || titleCase(spell.id),
         description: spell.description || '',
-        meta: spellbook.has(normalizeId(spell.id)) ? 'Already in spellbook' : 'Select as a spellbook addition first',
+        meta: spellbook.has(normalizeId(spell.id)) ? 'Already in spellbook' : 'Selected spellbook addition',
         ...(!spellbook.has(normalizeId(spell.id)) ? {
           requires_choice: { choice_id: 'spellbook_spells', option_id: spell.id },
         } : {}),

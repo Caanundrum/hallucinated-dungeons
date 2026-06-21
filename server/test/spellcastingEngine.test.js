@@ -54,6 +54,30 @@ test('prepared class spells spend slots while cantrips do not', () => {
   assert.equal(cantrip.characterSheet.spellcasting.slots[1], 2);
 });
 
+test('natural trailing context does not become part of a known spell name', () => {
+  const characterSheet = wizardSheet({
+    spellcasting: {
+      ability: 'int',
+      cantrips_known: [],
+      spellbook_spells: ['burning_hands', 'magic_missile'],
+      spells_prepared: ['burning_hands', 'magic_missile'],
+      slots: { 1: 3 },
+    },
+  });
+  const cases = [
+    ['I cast Burning Hands harmlessly out over the empty water.', 'burning_hands'],
+    ['I cast Burning Hands at the shape.', 'burning_hands'],
+    ['I cast Magic Missile at the goblin.', 'magic_missile'],
+  ];
+
+  for (const [message, spellId] of cases) {
+    const result = resolveSpellCastLegality({ message, content, characterSheet, worldState: {} });
+    assert.equal(result.blocked, false, message);
+    assert.equal(result.spell.id, spellId, message);
+    assert.equal(result.characterSheet.spellcasting.slots[1], 2, message);
+  }
+});
+
 test('Quickened Spell spends Sorcery Points and changes an Action spell to a Bonus Action', () => {
   const result = resolveSpellCastLegality({
     message: 'I cast Magic Missile at the skeleton with Quickened Spell.',

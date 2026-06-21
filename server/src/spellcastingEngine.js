@@ -92,8 +92,16 @@ function resolveSpellCastLegality({ message, content = {}, characterSheet = {}, 
 }
 
 function getCastSpellFromMessage(message, content = {}) {
-  const match = String(message || '').match(/\bcast\s+(?:the\s+)?([a-z][a-z' -]{2,40})/i);
+  const match = String(message || '').match(/\bcast\s+(?:the\s+)?([a-z][a-z' -]{2,120})/i);
   if (!match) return null;
+  const spokenTail = normalizeSpellName(match[1]);
+  const knownPrefix = (content.spells || [])
+    .map((spell) => ({ spell, names: [normalizeSpellName(spell.name), normalizeSpellName(spell.id)].filter(Boolean) }))
+    .flatMap(({ spell, names }) => names.map((name) => ({ spell, name })))
+    .filter(({ name }) => spokenTail === name || spokenTail.startsWith(`${name} `))
+    .sort((left, right) => right.name.length - left.name.length)[0];
+  if (knownPrefix) return knownPrefix.spell;
+
   const spoken = normalizeSpellName(match[1].replace(/\b(on|at|toward|towards|to|for|with|and|as|using)\b.*$/i, ''));
   if (!spoken) return null;
   const spell = (content.spells || []).find((item) => normalizeSpellName(item.name) === spoken || normalizeSpellName(item.id) === spoken);
