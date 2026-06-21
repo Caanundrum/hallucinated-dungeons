@@ -52,6 +52,16 @@ function resolveHealingHands({ message = '', worldState = {}, characterSheet = {
     };
   }
 
+  const currentHp = getActiveCharacterHp(worldState, characterSheet);
+  if (currentHp.hp >= currentHp.maxHp) {
+    return {
+      handled: true,
+      logType: 'species_healing_hands_full_hp',
+      worldState,
+      reply: `Healing Hands is not spent because you are already at full HP (${currentHp.hp}/${currentHp.maxHp}). Celestial power is precious; dramatic hand placement is free.`,
+    };
+  }
+
   const spent = spendFeatureCost({ worldState, characterSheet, actionResource: 'action', actionLabel: 'Healing Hands', resource: 'healing_hands' });
   if (!spent.ok) return spent.result;
 
@@ -93,12 +103,9 @@ function resolveBreathWeapon({ message = '', worldState = {}, characterSheet = {
     };
   }
 
-  const spent = spendFeatureCost({ worldState, characterSheet, actionResource: 'action', actionLabel: 'Breath Weapon', resource: 'breath_weapon' });
-  if (!spent.ok) return spent.result;
-
-  const combat = cloneCombat(spent.worldState.combat_state);
-  const target = findCombatTarget(combat, message);
-  if (!target) {
+  const initialCombat = cloneCombat(worldState.combat_state);
+  const initialTarget = findCombatTarget(initialCombat, message);
+  if (!initialTarget) {
     return {
       handled: true,
       logType: 'species_breath_weapon_target_needed',
@@ -108,10 +115,26 @@ function resolveBreathWeapon({ message = '', worldState = {}, characterSheet = {
   }
 
   const damageType = getDragonbornDamageType(characterSheet);
+  const declaredDamageType = getDeclaredBreathDamageType(message);
+  if (declaredDamageType && declaredDamageType !== damageType) {
+    return {
+      handled: true,
+      logType: 'species_breath_weapon_wrong_ancestry',
+      worldState,
+      reply: `Your Draconic Ancestry produces ${damageType} damage, not ${declaredDamageType}. Breath Weapon is not spent; declare the ${damageType} breath against a present target.`,
+    };
+  }
+
+  const spent = spendFeatureCost({ worldState, characterSheet, actionResource: 'action', actionLabel: 'Breath Weapon', resource: 'breath_weapon' });
+  if (!spent.ok) return spent.result;
+
+  const combat = cloneCombat(spent.worldState.combat_state);
+  const target = combat.combatants.find((combatant) => combatant.name === initialTarget.name);
   const dc = 8 + Number(characterSheet.abilities?.modifiers?.con || 0) + getProficiencyBonus(characterSheet);
   const saveBonus = Number(target.saves?.dex ?? target.save_modifiers?.dex ?? target.ability_modifiers?.dex ?? 0);
   const save = resolveSavingThrow({ target, ability: 'dex', dc, rollDie, bonus: saveBonus });
-  const damage = rollDamageFormula('1d10', rollDie);
+  const damageFormula = getBreathWeaponDamageFormula(characterSheet);
+  const damage = rollDamageFormula(damageFormula, rollDie);
   const amount = save.success ? Math.floor(damage.total / 2) : damage.total;
   const applied = applyDamage({ target, amount, damageType, source: 'Breath Weapon' });
   Object.assign(target, applied.target);
@@ -124,7 +147,7 @@ function resolveBreathWeapon({ message = '', worldState = {}, characterSheet = {
       ...spent.worldState,
       combat_state: combat,
     },
-    reply: `You use **Breath Weapon** on ${target.name}. ${target.name} makes a DEX save: ${save.text} vs DC ${dc}. ${save.success ? 'Success halves the damage.' : 'Failure takes the full blast.'} ${damage.total} rolled becomes ${applied.amount} ${damageType} damage${formatDamageAdjustment(applied.adjustment)}. ${target.name}: (${applied.beforeHp} -> ${applied.afterHp} HP). Uses left: ${remainingResourceText(spent.worldState, characterSheet, 'breath_weapon')}.`,
+    reply: `You replace one attack with **Breath Weapon** against ${target.name}. ${target.name} makes a DEX save: ${save.text} vs DC ${dc}. ${save.success ? 'Success halves the damage.' : 'Failure takes the full blast.'} ${damageFormula} rolls ${damage.total}, becoming ${applied.amount} ${damageType} damage${formatDamageAdjustment(applied.adjustment)}. ${target.name}: (${applied.beforeHp} -> ${applied.afterHp} HP). Uses left: ${remainingResourceText(spent.worldState, characterSheet, 'breath_weapon')}.`,
   };
 }
 
@@ -263,7 +286,38 @@ function remainingResourceText(worldState = {}, characterSheet = {}, resource) {
 function findCombatTarget(combat = {}, message = '') {
   const enemies = (combat.combatants || []).filter((combatant) => !combatant.is_player && Number(combatant.hp) > 0);
   const text = normalizeId(message);
-  return enemies.find((enemy) => text.includes(normalizeId(enemy.name))) || (enemies.length === 1 ? enemies[0] : null);
+  const namedTarget = enemies.find((enemy) => text.includes(normalizeId(enemy.name)));
+  if (namedTarget) return namedTarget;
+  if (hasExplicitBreathTarget(message)) return null;
+  return enemies.length === 1 ? enemies[0] : null;
+}
+
+function hasExplicitBreathTarget(message = '') {
+  return /\b(?:at|against|toward|towards|on)\s+(?:the\s+|a\s+|an\s+)?[a-z][a-z '-]*/i.test(String(message || ''));
+}
+
+function getDeclaredBreathDamageType(message = '') {
+  const match = String(message || '').toLowerCase().match(/\b(?:breathe?|breath(?:\s+weapon)?)\s+(?:of\s+)?(acid|cold|fire|lightning|poison)\b/);
+  return match?.[1] || null;
+}
+
+function getBreathWeaponDamageFormula(characterSheet = {}) {
+  const level = Number(characterSheet.identity?.level || characterSheet.derived_stats?.level || 1);
+  if (level >= 17) return '4d10';
+  if (level >= 11) return '3d10';
+  if (level >= 5) return '2d10';
+  return '1d10';
+}
+
+function getActiveCharacterHp(worldState = {}, characterSheet = {}) {
+  const player = worldState.combat_state?.active
+    ? worldState.combat_state.combatants?.find((combatant) => combatant.is_player)
+    : null;
+  const maxHp = Number(player?.max_hp ?? worldState.player_stats?.max_hp ?? characterSheet.derived_stats?.max_hp ?? 1);
+  return {
+    hp: Number(player?.hp ?? worldState.player_stats?.hp ?? characterSheet.derived_stats?.hp ?? maxHp),
+    maxHp,
+  };
 }
 
 function getDragonbornDamageType(characterSheet = {}) {

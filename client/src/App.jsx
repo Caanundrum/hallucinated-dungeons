@@ -872,6 +872,8 @@ function CharacterSheetModal({ character, content, levelUpBusy, onClose, onLevel
   const tools = character.proficiencies?.tools || [];
   const speciesSpells = character.species_spells || [];
   const resistances = character.resistances || [];
+  const speciesChoices = character.species_choices || {};
+  const senses = derived.senses || {};
   const classChoices = character.class_choices || {};
   const classChoiceDetails = character.class_choice_details || {};
   const classChoiceSpells = character.class_choice_spells || character.spellcasting?.class_choice_spells || [];
@@ -1065,6 +1067,18 @@ function CharacterSheetModal({ character, content, levelUpBusy, onClose, onLevel
               <div className="sheet-line">
                 <strong>Species Spells</strong>
                 <span>{speciesSpells.map((spell) => spellSummary(spell.id || spell)).join(' | ')}</span>
+              </div>
+            )}
+            {Number(senses.darkvision || 0) > 0 && (
+              <div className="sheet-line">
+                <strong>Senses</strong>
+                <span>Darkvision {senses.darkvision} ft</span>
+              </div>
+            )}
+            {Object.keys(speciesChoices).length > 0 && (
+              <div className="sheet-line">
+                <strong>Species Choices</strong>
+                <span>{Object.entries(speciesChoices).map(([choice, value]) => `${titleCase(choice)}: ${titleCase(value)}`).join(' | ')}</span>
               </div>
             )}
           </section>

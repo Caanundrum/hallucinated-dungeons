@@ -55,6 +55,27 @@ test('Celestial-Touched Healing Hands spends its Magic Action and heals proficie
   assert.match(result.reply, /regain 5 HP/);
 });
 
+test('Celestial-Touched Healing Hands does not spend its action or use at full HP', () => {
+  const worldState = combatWorld({
+    player_stats: { hp: 12, max_hp: 12, armor_class: 14, speed: 30 },
+    combat_state: {
+      ...combatWorld().combat_state,
+      combatants: combatWorld().combat_state.combatants.map((entry) => (
+        entry.is_player ? { ...entry, hp: 12 } : entry
+      )),
+    },
+  });
+  const result = resolveSpeciesFeatureAction({
+    message: 'Use Healing Hands on myself.',
+    worldState,
+    characterSheet: sheet('celestial_touched'),
+  });
+
+  assert.equal(result.worldState.player_stats.resources, undefined);
+  assert.equal(result.worldState.combat_state.turn_resources, undefined);
+  assert.match(result.reply, /not spent.*full HP/i);
+});
+
 test('Orc Adrenaline Rush spends a Bonus Action, grants Dash movement, and grants temporary HP', () => {
   const result = resolveSpeciesFeatureAction({
     message: 'Use Adrenaline Rush.',
@@ -86,6 +107,43 @@ test('Dragonborn Breath Weapon spends an Action and applies ancestry damage afte
   assert.equal(result.worldState.combat_state.turn_resources.action_available, false);
   assert.equal(cultist.hp, 1);
   assert.match(result.reply, /7 lightning damage/);
+});
+
+test('Dragonborn Breath Weapon rejects an explicitly absent target without spending anything', () => {
+  const result = resolveSpeciesFeatureAction({
+    message: 'Use Breath Weapon on the dragon.',
+    worldState: combatWorld(),
+    characterSheet: sheet('dragonborn', {
+      species_choices: { draconic_ancestry: 'blue' },
+    }),
+  });
+
+  assert.equal(result.worldState.player_stats.resources, undefined);
+  assert.equal(result.worldState.combat_state.turn_resources, undefined);
+  assert.match(result.reply, /Name a living enemy/);
+});
+
+test('Dragonborn Breath Weapon enforces ancestry damage and future damage scaling', () => {
+  const wrongType = resolveSpeciesFeatureAction({
+    message: 'I breathe fire at the Cultist.',
+    worldState: combatWorld(),
+    characterSheet: sheet('dragonborn', {
+      species_choices: { draconic_ancestry: 'blue' },
+    }),
+  });
+  const scaled = resolveSpeciesFeatureAction({
+    message: 'I breathe lightning at the Cultist.',
+    worldState: combatWorld(),
+    characterSheet: sheet('dragonborn', {
+      identity: { name: 'Ari', species: 'dragonborn', level: 5 },
+      species_choices: { draconic_ancestry: 'blue' },
+    }),
+    rollDie: sequenceRolls([4, 5, 6]),
+  });
+
+  assert.match(wrongType.reply, /lightning damage, not fire/i);
+  assert.equal(wrongType.worldState.player_stats.resources, undefined);
+  assert.match(scaled.reply, /2d10 rolls 11/);
 });
 
 test('Dwarf Stonecunning requires stone and adds a timed Tremorsense effect', () => {

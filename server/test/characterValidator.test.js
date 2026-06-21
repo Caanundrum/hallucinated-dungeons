@@ -379,6 +379,21 @@ test('validates every 2024 species and applies species-level rules', () => {
       assert.equal(sheet.derived_stats.skill_modifiers[skillId].proficient, true);
     }
     if (species.id === 'dwarf') assert.equal(sheet.derived_stats.max_hp, 13);
+    if (species.id === 'celestial_touched') {
+      assert.equal(sheet.derived_stats.senses.darkvision, 60);
+      assert.deepEqual(sheet.resistances.sort(), ['necrotic', 'radiant']);
+      assert.deepEqual(sheet.species_spells.find((spell) => spell.id === 'light'), {
+        id: 'light',
+        source: 'Light Bearer',
+        ability: 'cha',
+      });
+    }
+    if (species.id === 'dragonborn') {
+      const ancestry = species.choices[0].options.find((option) => option.id === speciesChoices.draconic_ancestry);
+      assert.equal(sheet.derived_stats.senses.darkvision, 60);
+      assert.deepEqual(sheet.resistances, [ancestry.damage_type]);
+      assert.equal(sheet.species_choices.draconic_ancestry, ancestry.id);
+    }
     if (species.id === 'elf' && speciesChoices.elven_lineage === 'drow') {
       assert.equal(sheet.derived_stats.senses.darkvision, 120);
       assert.equal(sheet.species_spells.some((spell) => spell.id === 'dancing_lights'), true);

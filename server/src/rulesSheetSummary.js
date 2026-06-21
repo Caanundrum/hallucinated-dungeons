@@ -28,6 +28,16 @@ function summarizeCharacterSheetForRules(characterSheet) {
   if (abilities.final_scores) {
     lines.push(`Ability scores: ${Object.entries(abilities.final_scores).map(([key, score]) => `${key.toUpperCase()} ${score} (${fmtSigned(abilities.modifiers?.[key])})`).join(', ')}`);
   }
+  const senses = formatSenses(derived.senses);
+  if (senses) lines.push(`Senses: ${senses}`);
+  if ((characterSheet.resistances || []).length) {
+    lines.push(`Damage resistances: ${characterSheet.resistances.join(', ')}`);
+  }
+  const speciesChoices = formatSpeciesChoices(characterSheet.species_choices);
+  if (speciesChoices) lines.push(`Species choices: ${speciesChoices}`);
+  if ((characterSheet.species_spells || []).length) {
+    lines.push(`Species spells: ${characterSheet.species_spells.map(formatSpeciesSpell).join(', ')}`);
+  }
   if (Object.keys(saves).length) {
     lines.push(`Saving throws: ${Object.entries(saves).map(([key, save]) => `${key.toUpperCase()} ${fmtSigned(save.total)}${save.proficient ? ' proficient' : ''}`).join(', ')}`);
   }
@@ -199,6 +209,27 @@ function formatSpellSlots(slots = {}) {
 
 function formatList(value) {
   return Array.isArray(value) && value.length ? value.join(', ') : 'none';
+}
+
+function formatSenses(senses = {}) {
+  const entries = [];
+  if (Number(senses.darkvision || 0) > 0) entries.push(`Darkvision ${senses.darkvision} ft`);
+  for (const [sense, range] of Object.entries(senses || {})) {
+    if (['darkvision', 'special'].includes(sense) || !range) continue;
+    entries.push(`${humanizeRuleTarget(sense)} ${range} ft`);
+  }
+  return entries.join(', ');
+}
+
+function formatSpeciesChoices(choices = {}) {
+  return Object.entries(choices || {})
+    .map(([choice, value]) => `${humanizeRuleTarget(choice)}: ${humanizeRuleTarget(value)}`)
+    .join(', ');
+}
+
+function formatSpeciesSpell(spell = {}) {
+  if (typeof spell === 'string') return humanizeRuleTarget(spell);
+  return `${humanizeRuleTarget(spell.id)}${spell.ability ? ` (${String(spell.ability).toUpperCase()})` : ''}`;
 }
 
 module.exports = {

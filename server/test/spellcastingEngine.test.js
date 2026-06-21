@@ -54,6 +54,25 @@ test('prepared class spells spend slots while cantrips do not', () => {
   assert.equal(cantrip.characterSheet.spellcasting.slots[1], 2);
 });
 
+test('Celestial-Touched Light is cast as a Charisma species cantrip without a slot', () => {
+  const result = resolveSpellCastLegality({
+    message: 'I cast Light on my shield.',
+    content,
+    characterSheet: {
+      identity: { name: 'Halo', species: 'celestial_touched', level: 1 },
+      species_spells: [{ id: 'light', source: 'Light Bearer', ability: 'cha' }],
+      abilities: { modifiers: { cha: 3 } },
+      spellcasting: null,
+    },
+    worldState: {},
+  });
+
+  assert.equal(result.blocked, false);
+  assert.equal(result.known.type, 'species_spell');
+  assert.equal(result.known.ability, 'cha');
+  assert.equal(result.resourceNote, 'cantrip/no slot');
+});
+
 test('natural trailing context does not become part of a known spell name', () => {
   const characterSheet = wizardSheet({
     spellcasting: {

@@ -1,5 +1,5 @@
 {
-  "version": "4C.6-H33",
+  "version": "4C.6-H34",
   "status_definitions": {
     "implemented": "Exposed and mechanically enforced for the current supported level/scope.",
     "partial": "Exposed and partially enforced, but missing at least one meaningful rules interaction.",
@@ -125,9 +125,9 @@
     "halfling.brave": "implemented",
     "orc.adrenaline_rush": "implemented",
     "orc.relentless_endurance": "implemented",
-    "dragonborn.breath_weapon": "partial",
+    "dragonborn.breath_weapon": "implemented",
     "goliath.giant_ancestry": "implemented",
-    "celestial_touched.healing_hands": "partial"
+    "celestial_touched.healing_hands": "implemented"
   },
   "spells": {
     "armor_of_agathys": "implemented",

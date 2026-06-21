@@ -151,7 +151,15 @@ function getKnownSpellInfo(characterSheet = {}, spell = {}) {
       label: `${classChoiceSpell.source || 'class choice'} spell`,
     };
   }
-  if (speciesSpell) return { known: true, type: 'species_spell', source: speciesSpell.source, label: `${speciesSpell.source || 'species'} spell` };
+  if (speciesSpell) {
+    return {
+      known: true,
+      type: 'species_spell',
+      source: speciesSpell.source,
+      ability: speciesSpell.ability || null,
+      label: `${speciesSpell.source || 'species'} spell`,
+    };
+  }
   if (originEntry) {
     const [source, choice] = originEntry;
     const isCantrip = (choice.cantrips || []).includes(spell.id);
