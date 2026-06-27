@@ -1,5 +1,45 @@
 # Hallucinated Dungeons QA Handoff
 
+## Latest QA Pass - 2026-06-26 Remaining Species Production QA `76818f7`
+
+Scope:
+
+- Tested the remaining level-1 species package: Dwarf, Elf, Gnome, Goliath, Halfling, Human, Orc, and Tiefling.
+- App-code commit under test: `76818f7 Complete remaining level 1 species mechanics`; repo tip during QA: `b16ad6a Update QA_HANDOFF.md`.
+- Reviewed every remaining species in the deployed creation UI, created fresh production characters `QA Rock Gnome` and `QA Tiefling`, exercised their new live mechanics, and cross-checked all species/lineage branches against the automated mechanics matrix.
+- QA remained read-only for app code. Only this handoff was updated.
+
+Automated checks:
+
+- Server `npm.cmd test`: PASS, `560/560`.
+- Client `npm.cmd run lint`: PASS.
+- `git diff --check 76818f7^ 76818f7`: PASS.
+- Browser console warnings/errors: none.
+
+Production and automated coverage:
+
+- **Dwarf:** Production creation displays Darkvision 120 ft, Poison resistance/Poisoned advantage, +1 HP per level, and Stonecunning. Automated coverage passes max-HP math, poison defense, stone requirement, timed Tremorsense, and resource behavior.
+- **Elf:** Production creation exposes Keen Senses, Drow/High/Wood lineage, spell ability, charm-save advantage, and Trance. Automated coverage passes every lineage's spells/effects, chosen spell ability, and four-hour long rest.
+- **Gnome:** Production creation exposes Forest/Rock lineage and chosen spell ability. Fresh Rock Gnome built Clockwork Toy, Fire Starter, and Music Box in ten-minute increments; the fourth device was blocked at 3/3 and named Music Box dismantling succeeded. Automated coverage passes combat construction blocking, all device lifecycle rules, Gnomish Cunning, Forest Gnome Minor Illusion, and proficiency-based Speak with Animals uses before slots.
+- **Goliath:** Production creation exposes all six Giant Ancestries, 35-ft speed, Powerful Build, and later Large Form. Automated coverage passes each ancestry action/resource path, grapple-ending advantage, speed, and future level hooks.
+- **Halfling:** Production creation displays Brave, Nimbleness, Luck, and Naturally Stealthy. Automated coverage passes fear advantage, natural-1 reroll, movement through larger creatures without occupied endpoints, and larger-creature Hide permission.
+- **Human:** Production creation still exposes size, Skillful, Versatile, and Resourceful. Existing production characters plus the current suite continue to cover chosen skill/Origin feat and long-rest Heroic Inspiration.
+- **Orc:** Production creation still exposes Adrenaline Rush, Darkvision 120 ft, and Relentless Endurance. Existing production characters plus the current suite continue to cover Bonus Action Dash/temp HP, rest recovery, fatal-damage safeguard, and massive-damage exception.
+- **Tiefling:** Fresh Infernal Tiefling saved Fire resistance, Darkvision 60 ft, Infernal legacy, and CHA spell ability. Sheet displayed Thaumaturgy and Fire Bolt at CHA attack `+2`, DC `10`; natural Thaumaturgy casting succeeded. Automated coverage passes Abyssal/Chthonic/Infernal resistances and spells plus selected-ability attack/DC math.
+- Automated validation also iterates every selectable species option and confirms its spells, resistances, and derived effects. No option branch was skipped.
+
+Findings for DEV:
+
+- **P3 - Thaumaturgy natural-language effect target is grammatically malformed.** `I cast Thaumaturgy to make my voice boom.` succeeded mechanically, but narration said `It is now affecting make my voice boom.` Expected a natural target/effect phrase such as `Your voice now booms` or simply confirmation that Thaumaturgy is active. This appears to be generic spell-context wording rather than a Tiefling mechanics failure.
+
+Coverage boundary:
+
+- Live production actions concentrated on the newly completed high-risk Rock Gnome and Tiefling seams. Dwarf, Elf, Goliath, Halfling, Human, and Orc production creation surfaces were inspected, while their deterministic combat/rest/save edge cases were verified by the passing automated suite rather than manufacturing eight separate encounters.
+
+Current recommendation:
+
+- Treat all remaining species mechanics as production-functional within the tested scope. The P3 Thaumaturgy sentence should be cleaned up, but it does not block species completion. The species roster is mechanically assembled; one supernatural voice currently enters the room before its grammar does.
+
 ## Latest QA Pass - 2026-06-21 Mixed Dragonborn Rules Fix Retest `f97470a`
 
 Scope:
