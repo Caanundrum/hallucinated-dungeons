@@ -1,5 +1,37 @@
 # Hallucinated Dungeons QA Handoff
 
+## Latest QA Pass - 2026-06-27 Resolved-Event Delivery Retest `2bc55d4`
+
+Scope:
+
+- Retested the three unchanged production acceptance cases after `2bc55d4 Guarantee resolved event narration delivery`.
+- Railway `/health` confirmed release `ddd7b1030c256dceb083e15068a5e4a6b0c1fab5` with narration pipeline `resolved-event-v2`.
+- Used existing production characters `QA Celestial` and `QA Tiefling` and verified player-facing narration plus authoritative sheet effects.
+- QA remained read-only for app code. Only this handoff was updated.
+
+Automated checks:
+
+- Server `npm.cmd test`: PASS, `570/570`.
+- Client `npm.cmd run lint`: PASS.
+- `git diff --check 2bc55d4^ 2bc55d4`: PASS.
+- Browser console warnings/errors: none.
+
+Production results:
+
+- **PASS:** `I cast Light on my shield.` produced sensory narration describing a cool, steady glow blooming across the shield and illuminating the surroundings. The sheet retained `Light`, duration `1 hour`, `600 rounds left`.
+- **PARTIAL:** `I cast Thaumaturgy to make my voice boom.` produced strong sensory narration: the voice rolled over Lantern Bridge like a struck bell, the air shivered, and the voice became deep and carrying. The sheet retained `Thaumaturgy`, duration `Up to 1 minute`, `10 rounds left`. However, the GM did not ask what the character says; it ended with the generic `What do you do?` prompt.
+- **PASS:** `I cast Thaumaturgy and shout, "Open the gate!"` preserved and narrated the exact supplied words without asking for them again.
+- No deterministic receipt or empty GM response appeared in this retest.
+
+Findings for DEV:
+
+- **P3 - No-dialogue voice manifestation omits the requested follow-up.** When the player declares a booming voice but supplies no words, the narration should end by naturally asking what they say. The current response narrates generic `Your words` despite no words being supplied, then falls back to `What do you do?`.
+- Acceptance wording remains: establish the changed voice, then ask a focused question such as `What do you call out?` Do not invent the character's words. The supplied-dialogue branch must continue to avoid that question.
+
+Current recommendation:
+
+- Close the prior P1 delivery failure: resolved-event narration now reaches production and preserves mechanics. Fix the remaining P3 prompt distinction before declaring the original utility-magic experience finding completely closed. The narrator is finally performing; it merely forgot to hand the player the microphone.
+
 ## Latest QA Pass - 2026-06-27 Resolved-Event Narration Production Retest `8a06a30`
 
 Scope:
