@@ -1,5 +1,69 @@
 # Hallucinated Dungeons QA Handoff
 
+## Latest QA Finding - 2026-06-26 Utility Magic Resolves as a Status Message
+
+Player action observed:
+
+- `I cast Thaumaturgy to make my voice boom.`
+
+Production response:
+
+- `You cast Thaumaturgy. The effect is active on QA Tiefling. Its effect is now active in the scene: Create a minor supernatural sign such as booming voice, tremors, or altered flames.`
+
+Finding for DEV:
+
+- **P2 - Successful utility magic is mechanically acknowledged but not fictionally narrated.** The response repeats rules/state facts instead of describing the declared result. It never says that the character's voice booms, gives the scene any sensory reaction, or invites the player to provide the words they want amplified. The grammar regression is fixed, but the result still feels like a debug/status report rather than a GM response.
+
+Expected behavior:
+
+- Keep the server-owned active effect and duration authoritative, but do not use that internal state summary as the main GM narration.
+- Narrate the specific declared manifestation: the character's voice deepens or rolls across the area with supernatural force, with a restrained scene reaction when appropriate.
+- When the player supplies the words, narrate those words booming; do not ask a redundant follow-up.
+- When the player specifies only the manifestation, as in this test, establish it and ask naturally what they say, for example: `Your next words will carry with supernatural force. What do you call out?`
+- Do not invent speech for the player, targets, consequences, fear effects, damage, or mechanical benefits the spell does not grant.
+- Preserve concise deterministic mechanics text as optional supporting detail, not as a substitute for narration.
+
+Acceptance checks:
+
+- `I cast Thaumaturgy to make my voice boom.` produces sensory narration and a natural prompt for what the character says.
+- `I cast Thaumaturgy and shout, "Open the gate!"` narrates the supplied line booming without asking what the player says.
+- `I cast Light on my shield.` narrates the shield illuminating rather than merely reporting an active effect.
+- The character sheet and Rules view still report exact active-effect state and duration.
+
+Recommendation:
+
+- Address this narration handoff before beginning level 3. It is a shared utility-spell experience issue, so otherwise every new non-damage ability risks arriving with the bedside manner of a database receipt.
+
+## Latest QA Pass - 2026-06-26 Thaumaturgy Wording Retest `054bc31`
+
+Scope:
+
+- Retested the exact production failure from the remaining-species pass after deployment of `054bc31 Fix utility spell purpose narration`.
+- Reused the fresh Infernal Tiefling `QA Tiefling` and submitted the same natural player action: `I cast Thaumaturgy to make my voice boom.`
+- QA remained read-only for app code. Only this handoff was updated.
+
+Automated checks:
+
+- Server `npm.cmd test`: PASS, `562/562`.
+- Client `npm.cmd run lint`: PASS.
+- `git diff --check 054bc31^ 054bc31`: PASS.
+- Browser console warnings/errors: none.
+
+Verified fixed / passed in production:
+
+- Thaumaturgy still cast successfully and created the active effect.
+- Production now replies: `The effect is active on QA Tiefling.`
+- The malformed wording `It is now affecting make my voice boom` no longer appears.
+- Automated coverage also confirms explicit real targets remain intact, including `I cast Light on the shield to make it glow.`
+
+Findings for DEV:
+
+- No remaining issue found in this focused retest.
+
+Current recommendation:
+
+- Close the remaining-species package as production-passed within the tested scope. The next coherent development milestone is level 3 progression, beginning with the shared advancement/subclass framework before class-by-class mechanics. The supernatural voice has recovered its grammar and may now address the dungeon professionally.
+
 ## Latest QA Pass - 2026-06-26 Remaining Species Production QA `76818f7`
 
 Scope:
