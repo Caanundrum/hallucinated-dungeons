@@ -505,6 +505,9 @@ function formatUtilitySpellEffectSummary(spell = {}, worldState = {}) {
     .map((rule) => `${rule.die} ${String(rule.target || 'bonus').replaceAll('_', ' ')}`);
   if (bonusDice.length) return `The active benefit is ${bonusDice.join(', ')}${targetText}.`;
 
+  if (targetLabel && targetLabel === effect.source) {
+    return `The effect is active on ${targetLabel}.`;
+  }
   return targetLabel ? `It is now affecting ${targetLabel}.` : '';
 }
 
@@ -700,11 +703,25 @@ function inferSpellTargetName(message = '', worldState = {}, spell = {}) {
     return null;
   }
 
-  const targetMatch = String(message || '').match(/\b(?:at|on|toward|towards|to)\s+(?:the\s+|a\s+|an\s+)?([a-z][a-z' -]{1,40}?)(?:\s+(?:with|while|because|before|after|and|then|using|for)\b|[.!?]|$)/i);
+  const input = String(message || '');
+  const targetMatch = input.match(/\b(?:at|on|toward|towards)\s+(?:the\s+|a\s+|an\s+)?([a-z][a-z' -]{1,40}?)(?:\s+(?:with|while|because|before|after|and|then|using|for|to)\b|[.!?]|$)/i);
   const rawTarget = targetMatch?.[1] ? cleanTargetName(targetMatch[1]) : '';
   if (rawTarget) return rawTarget;
 
   const present = worldState.scene_presence?.present_npcs || [];
+  const combatants = worldState.combat_state?.combatants || [];
+  const knownTargets = [
+    ...present,
+    ...combatants.map((combatant) => combatant.name),
+  ].filter(Boolean);
+  const toMatch = input.match(/\bto\s+(?:the\s+|a\s+|an\s+)?([a-z][a-z' -]{1,40}?)(?:\s+(?:with|while|because|before|after|and|then|using|for)\b|[.!?]|$)/i);
+  const toCandidate = toMatch?.[1] ? cleanTargetName(toMatch[1]) : '';
+  const knownTarget = toCandidate
+    ? knownTargets.find((name) => targetNamesMatch(name, toCandidate))
+    : null;
+  if (knownTarget) return knownTarget;
+  if (toMatch) return '';
+
   if (present.length === 1) return present[0];
   return '';
 }
@@ -796,9 +813,12 @@ function buildSpellEffect(characterSheet, spell, known, message = '', worldState
   const actor = characterSheet.identity?.name || 'active character';
   const duration = normalizeSpellDuration(spell);
   const guidanceSkill = spell.id === 'guidance' ? inferGuidanceSkill(message) : null;
+  const inferredTarget = inferSpellTargetName(message, worldState, spell);
   const targetName = spell.range === 'Self' || isSelfTargetedSpellMessage(message)
     ? actor
-    : inferSpellTargetName(message, worldState, spell) || firstEnemy(worldState.combat_state || {})?.name || 'current scene target';
+    : inferredTarget
+      || firstEnemy(worldState.combat_state || {})?.name
+      || (spell.attack_type === 'utility' ? actor : 'current scene target');
   return {
     id: spell.id,
     name: spell.name,
