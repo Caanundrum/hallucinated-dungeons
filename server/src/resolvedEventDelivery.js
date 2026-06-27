@@ -24,11 +24,25 @@ function isUsableNarration(text, fallbackReply = '') {
   return !fallback || narration !== fallback;
 }
 
+function enforceRequiredEnding(reply, requiredEnding = '') {
+  const ending = String(requiredEnding || '').trim();
+  if (!ending) return String(reply || '').trim();
+
+  const current = String(reply || '').trim();
+  if (normalizeComparableText(current).endsWith(normalizeComparableText(ending))) return current;
+
+  const withoutGenericQuestion = current
+    .replace(/(?:\r?\n){1,}\s*(?:\*\*)?what\b[^?\r\n]{0,120}\?(?:\*\*)?\s*$/i, '')
+    .trim();
+  return [withoutGenericQuestion, ending].filter(Boolean).join('\n\n');
+}
+
 async function completeResolvedEventDelivery({
   primaryGenerate,
   recoveryGenerate,
   moderate,
   fallbackReply,
+  requiredEnding,
   persist,
   emit,
 } = {}) {
@@ -84,6 +98,7 @@ async function completeResolvedEventDelivery({
     source = 'deterministic_fallback';
     reply = fallback;
   }
+  reply = enforceRequiredEnding(reply, requiredEnding);
 
   const metadata = {
     source,
@@ -99,5 +114,6 @@ async function completeResolvedEventDelivery({
 
 module.exports = {
   completeResolvedEventDelivery,
+  enforceRequiredEnding,
   isUsableNarration,
 };

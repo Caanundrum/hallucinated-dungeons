@@ -69,6 +69,7 @@ function createResolvedEventNarrationAction({ message = '', result = {}, charact
     skipSpatialGuard: true,
     skipNarrativeClock: true,
     fallbackReply: result.reply,
+    deliveryRequirements: result.narrationRequirements || null,
     narrativeFrame: buildResolvedEventNarrativeFrame({
       message,
       result,

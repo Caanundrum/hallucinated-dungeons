@@ -7,6 +7,7 @@ const assert = require('node:assert/strict');
 
 const {
   completeResolvedEventDelivery,
+  enforceRequiredEnding,
   isUsableNarration,
 } = require('../src/resolvedEventDelivery');
 
@@ -80,4 +81,30 @@ test('double generation failure still persists and emits a non-empty determinist
 test('receipt comparison ignores markdown and whitespace-only differences', () => {
   assert.equal(isUsableNarration('  You cast **Light**.  ', 'You cast Light.'), false);
   assert.equal(isUsableNarration('Your shield blooms with steady gold light.', 'You cast Light.'), true);
+});
+
+test('focused ending replaces a generic GM question and is persisted and emitted', async () => {
+  const persisted = [];
+  const emitted = [];
+  const result = await completeResolvedEventDelivery({
+    primaryGenerate: async () => ({
+      text: 'Your voice swells with supernatural force, ready to roll across the gate.\n\nWhat do you do?',
+    }),
+    recoveryGenerate: async () => ({ text: 'unused' }),
+    moderate: async (reply) => reply,
+    fallbackReply: 'You cast Thaumaturgy.',
+    requiredEnding: 'What do you call out?',
+    persist: async (reply) => persisted.push(reply),
+    emit: async (reply) => emitted.push(reply),
+  });
+
+  assert.doesNotMatch(result.reply, /What do you do\?/i);
+  assert.match(result.reply, /What do you call out\?$/i);
+  assert.equal(persisted[0], result.reply);
+  assert.equal(emitted[0], result.reply);
+});
+
+test('focused ending is not duplicated when narration already uses it', () => {
+  const reply = 'Your voice becomes thunder.\n\nWhat do you call out?';
+  assert.equal(enforceRequiredEnding(reply, 'What do you call out?'), reply);
 });

@@ -143,3 +143,19 @@ test('shared narration frame preserves authoritative mechanics and forbids a sec
   assert.match(frame, /do not invent player speech/i);
   assert.match(frame, /warm light gathering around the wound/i);
 });
+
+test('resolved event action carries deterministic delivery requirements', () => {
+  const action = createResolvedEventNarrationAction({
+    message: 'I make my voice boom.',
+    result: {
+      handled: true,
+      logType: 'spell_utility',
+      reply: 'Thaumaturgy is active.',
+      worldState: { player_stats: { name: 'Vex' } },
+      narrationRequirements: { focusedPrompt: 'What do you call out?' },
+    },
+    characterSheet: fighter,
+  });
+
+  assert.deepEqual(action.deliveryRequirements, { focusedPrompt: 'What do you call out?' });
+});

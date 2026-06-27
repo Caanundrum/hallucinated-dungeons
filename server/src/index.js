@@ -1681,6 +1681,7 @@ io.on('connection', (socket) => {
           })),
           moderate: moderateAssistantReply,
           fallbackReply: spellAction.fallbackReply,
+          requiredEnding: spellAction.deliveryRequirements?.focusedPrompt,
           persist: async (reply) => {
             await db.saveMessage(sessionId, 'dm1', reply, currentTurn);
             return db.incrementSessionTurn(sessionId);

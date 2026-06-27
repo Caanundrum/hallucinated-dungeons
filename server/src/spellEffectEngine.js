@@ -479,8 +479,22 @@ function resolveUtilitySpell({ spell, worldState }) {
     worldState: stripInternalState(worldState),
     reply,
     narrationGuidance: buildUtilitySpellNarrationGuidance({ spell, worldState }),
+    narrationRequirements: getUtilitySpellNarrationRequirements({ spell, worldState }),
     consumesTurn: consumesCombatTurn(spell),
   };
+}
+
+function getUtilitySpellNarrationRequirements({ spell = {}, worldState = {} } = {}) {
+  const declaredAction = String(worldState.__spell_message || '').trim();
+  const requestsVoiceManifestation = spell.id === 'thaumaturgy'
+    && /\b(?:voice|boom|booming|speak|speech|shout|yell|call out)\b/i.test(declaredAction);
+  if (!requestsVoiceManifestation || hasSuppliedSpeech(declaredAction)) return null;
+  return { focusedPrompt: 'What do you call out?' };
+}
+
+function hasSuppliedSpeech(message = '') {
+  if (/["“][^"”]+["”]/.test(message)) return true;
+  return /\b(?:say|shout|yell|call out|declare|announce)\b\s*(?:,|:)?\s+\S.+[.!?]?$/i.test(message);
 }
 
 function buildUtilitySpellNarrationGuidance({ spell = {}, worldState = {} } = {}) {

@@ -908,6 +908,7 @@ test('utility spell purpose clauses are not mistaken for targets', () => {
   assert.match(outcome.narrationGuidance, /narrate the specific manifestation/i);
   assert.match(outcome.narrationGuidance, /voice manifestation but supplied no words/i);
   assert.match(outcome.narrationGuidance, /do not invent player speech/i);
+  assert.equal(outcome.narrationRequirements.focusedPrompt, 'What do you call out?');
 });
 
 test('utility spells still preserve explicit on-target phrasing', () => {
@@ -953,6 +954,7 @@ test('utility spell narration preserves supplied speech without requesting it ag
   assert.equal(cast.blocked, false);
   assert.match(outcome.narrationGuidance, /Open the gate!/i);
   assert.match(outcome.narrationGuidance, /preserve and narrate those words without asking/i);
+  assert.equal(outcome.narrationRequirements, null);
 });
 
 test('Sleep applies the asleep condition when the HP pool covers the target', () => {
