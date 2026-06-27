@@ -28,6 +28,7 @@ const {
   applyActiveEffectsToCharacterSheet,
 } = require('./spellEffectEngine');
 const { createResolvedEventNarrationAction } = require('./resolvedEventNarration');
+const { completeResolvedEventDelivery } = require('./resolvedEventDelivery');
 const {
   buildEquipmentActiveEffects,
   syncEquipmentEffectsToWorldState,
@@ -102,6 +103,8 @@ app.use(express.json());
 const activeDm1Sessions = new Set();
 const characterRollAttempts = new Map();
 const liveCharacterSockets = new Map();
+const RELEASE_SHA = process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT_SHA || 'local';
+const NARRATION_PIPELINE_VERSION = 'resolved-event-v2';
 
 if ((process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT) && !process.env.SESSION_TOKEN_SECRET) {
   throw new Error('SESSION_TOKEN_SECRET is required in production.');
@@ -162,6 +165,16 @@ const DM1_PROMPT = fs.readFileSync(
 const DM2_PROMPT = fs.readFileSync(
   path.join(__dirname, '../prompts/dm2.txt'), 'utf8'
 );
+const RESOLVED_EVENT_RECOVERY_PROMPT = [
+  'You are the Game Master narrator for an original fantasy d20 adventure.',
+  'The user message contains a RESOLVED RULES EVENT produced by an authoritative referee.',
+  'Write concise second-person, in-world narration of that completed result.',
+  'Preserve every mechanical fact, target, resource, duration, roll, damage, healing, HP, condition, and turn outcome exactly.',
+  'Do not repeat the deterministic receipt as your answer. Translate it into sensory fiction.',
+  'Do not request another roll, invent player speech, change the ruling, add consequences, or offer unsupported benefits.',
+  'If exact player dialogue is supplied, preserve it. If only a booming-voice manifestation is requested, establish the changed voice and ask what the character says.',
+  'Respond only with player-facing narration.',
+].join('\n');
 
 // ── Async post-response pipeline ───────────────────────────────────────────
 // Fires after DM1 response is already emitted to the client.
@@ -1652,6 +1665,53 @@ io.on('connection', (socket) => {
 
       socket.emit('dm1_typing', true);
 
+      if (spellAction.fallbackReply) {
+        const delivery = await completeResolvedEventDelivery({
+          primaryGenerate: () => retryWithBackoff(() => ai.generateText({
+            model:     DM1_MODEL,
+            maxTokens: 2048,
+            system:    systemPrompt,
+            messages,
+          })),
+          recoveryGenerate: () => retryWithBackoff(() => ai.generateText({
+            model:     UTILITY_MODEL,
+            maxTokens: 1024,
+            system:    RESOLVED_EVENT_RECOVERY_PROMPT,
+            messages:  [{ role: 'user', content: dmPlayerMessage }],
+          })),
+          moderate: moderateAssistantReply,
+          fallbackReply: spellAction.fallbackReply,
+          persist: async (reply) => {
+            await db.saveMessage(sessionId, 'dm1', reply, currentTurn);
+            return db.incrementSessionTurn(sessionId);
+          },
+          emit: async (reply, metadata) => {
+            socket.emit('dm1_typing', false);
+            socket.emit('dm1_response', { message: reply, narrationSource: metadata.source });
+          },
+        });
+        const deliveryModel = delivery.source === 'primary'
+          ? DM1_MODEL
+          : delivery.source === 'recovery'
+            ? UTILITY_MODEL
+            : 'deterministic';
+        await db.logDmCall({
+          sessionId,
+          dm:           'dm1_resolved_event',
+          model:        deliveryModel,
+          playerInput:  message,
+          fullPrompt:   `${systemPrompt}\n\n[MESSAGES]: ${JSON.stringify(messages)}\n\n[DELIVERY]: ${JSON.stringify({ source: delivery.source, errors: delivery.errors })}`,
+          dmResponse:   delivery.reply,
+          inputTokens:  delivery.inputTokens,
+          outputTokens: delivery.outputTokens,
+        }).catch(console.error);
+
+        socket.emit('dm1_typing', true);
+        await runPostResponsePipeline(sessionId, message, delivery.reply, delivery.persistenceResult, socket).catch(console.error);
+        socket.emit('dm1_typing', false);
+        return;
+      }
+
       let dm1Reply, inputTokens, outputTokens;
       try {
         const response = await retryWithBackoff(() => ai.generateText({
@@ -1667,41 +1727,33 @@ io.on('connection', (socket) => {
       } catch (apiErr) {
         // DM1 API failure — emit error, leave orphaned player_dm1 in DB,
         // do NOT increment session_turn (spec §12).
-        if (spellAction.fallbackReply) {
-          console.error('DM1 resolved-event narration error; using deterministic fallback:', apiErr.message);
-          dm1Reply = spellAction.fallbackReply;
-          inputTokens = null;
-          outputTokens = null;
-        } else {
-          console.error('DM1 API error:', apiErr.message);
-          socket.emit('dm1_typing', false);
-          socket.emit('error', { message: 'The Game Master encountered an error. Please try again.' });
+        console.error('DM1 API error:', apiErr.message);
+        socket.emit('dm1_typing', false);
+        socket.emit('error', { message: 'The Game Master encountered an error. Please try again.' });
 
-          // Store assembled prompt; append error details (spec §12)
-          const fullPromptForLog = [
-            systemPrompt,
-            '[MESSAGES]: ' + JSON.stringify(messages),
-            '[ERROR]: '    + (apiErr.message || String(apiErr)),
-          ].join('\n\n');
+        // Store assembled prompt; append error details (spec §12)
+        const fullPromptForLog = [
+          systemPrompt,
+          '[MESSAGES]: ' + JSON.stringify(messages),
+          '[ERROR]: '    + (apiErr.message || String(apiErr)),
+        ].join('\n\n');
 
-          await db.logDmCall({
-            sessionId,
-            dm:           'dm1',
-            model:        DM1_MODEL,
-            playerInput:  message,
-            fullPrompt:   fullPromptForLog,
-            dmResponse:   null,
-            inputTokens:  null,
-            outputTokens: null,
-          }).catch(console.error);
-          return;
-        }
+        await db.logDmCall({
+          sessionId,
+          dm:           'dm1',
+          model:        DM1_MODEL,
+          playerInput:  message,
+          fullPrompt:   fullPromptForLog,
+          dmResponse:   null,
+          inputTokens:  null,
+          outputTokens: null,
+        }).catch(console.error);
+        return;
       }
 
       dm1Reply = await moderateAssistantReply(
         dm1Reply,
-        spellAction.fallbackReply
-          || 'The Game Master lowers the screen and stares at you over it. That idea has been denied entry to the campaign, the tavern, and polite society. Try something else.'
+        'The Game Master lowers the screen and stares at you over it. That idea has been denied entry to the campaign, the tavern, and polite society. Try something else.'
       );
 
       const narrativeClock = spellAction.skipNarrativeClock
@@ -2098,11 +2150,16 @@ app.post('/qa/level-up-ready', async (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    release: RELEASE_SHA,
+    narrationPipeline: NARRATION_PIPELINE_VERSION,
+  });
 });
 
 // ── Start server ───────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log(`Hallucinated Dungeons server running on port ${PORT}`);
+  console.log(`Hallucinated Dungeons server running on port ${PORT}; release=${RELEASE_SHA}; narration=${NARRATION_PIPELINE_VERSION}`);
 });
