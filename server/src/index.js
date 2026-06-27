@@ -27,6 +27,7 @@ const {
   resolveSpellOutcome,
   applyActiveEffectsToCharacterSheet,
 } = require('./spellEffectEngine');
+const { createResolvedEventNarrationAction } = require('./resolvedEventNarration');
 const {
   buildEquipmentActiveEffects,
   syncEquipmentEffectsToWorldState,
@@ -566,10 +567,6 @@ async function handleDeterministicSpellAction(socket, sessionId, message) {
     finalWorldState = progressed.worldState;
     reply = progressed.reply;
     await db.updateWorldState(sessionId, finalWorldState);
-    await db.saveMessage(sessionId, 'player_dm1', message, currentTurn);
-    await db.saveMessage(sessionId, 'dm1', reply, currentTurn);
-    await db.incrementSessionTurn(sessionId);
-    socket.emit('dm1_response', { message: reply });
     await db.logDmCall({
       sessionId,
       dm:           spellOutcome.logType || 'spell_referee',
@@ -580,6 +577,23 @@ async function handleDeterministicSpellAction(socket, sessionId, message) {
       inputTokens:  null,
       outputTokens: null,
     }).catch(console.error);
+    const narrationAction = createResolvedEventNarrationAction({
+      message,
+      result: {
+        ...spellOutcome,
+        worldState: finalWorldState,
+        reply,
+      },
+      characterSheet: saved.character_sheet,
+    });
+    if (narrationAction) {
+      await syncCharacterFromWorldState(socket, sessionId, { forceEmit: true }).catch(console.error);
+      return narrationAction;
+    }
+    await db.saveMessage(sessionId, 'player_dm1', message, currentTurn);
+    await db.saveMessage(sessionId, 'dm1', reply, currentTurn);
+    await db.incrementSessionTurn(sessionId);
+    socket.emit('dm1_response', { message: reply });
     await syncCharacterFromWorldState(socket, sessionId, { forceEmit: true }).catch(console.error);
     return { matched: true, handled: true };
   }
@@ -1499,6 +1513,7 @@ io.on('connection', (socket) => {
       });
       let refereeNarrativeFrame = '';
       let refereeSkipSpatialGuard = false;
+      let resolvedRefereeAction = null;
       if (referee?.handled) {
         const progressed = await applyProgressionAfterReferee({
           socket,
@@ -1510,10 +1525,11 @@ io.on('connection', (socket) => {
           currentTurn,
         });
         await db.updateWorldState(sessionId, progressed.worldState);
-        await db.saveMessage(sessionId, 'player_dm1', message, currentTurn);
-        await db.saveMessage(sessionId, 'dm1', progressed.reply, currentTurn);
-        const newTurn = await db.incrementSessionTurn(sessionId);
-        socket.emit('dm1_response', { message: progressed.reply });
+        const resolvedResult = {
+          ...referee,
+          worldState: progressed.worldState,
+          reply: progressed.reply,
+        };
         await db.logDmCall({
           sessionId,
           dm:           referee.logType || 'referee_core',
@@ -1531,24 +1547,44 @@ io.on('connection', (socket) => {
           outputTokens: null,
         }).catch(console.error);
         await syncCharacterFromWorldState(socket, sessionId).catch(console.error);
-        if (newTurn > 0 && newTurn % 50 === 0) {
-          await chapterSummarizer.summarize(sessionId, newTurn).catch(console.error);
+
+        resolvedRefereeAction = createResolvedEventNarrationAction({
+          message,
+          result: resolvedResult,
+          characterSheet: activeCharacter?.character_sheet || null,
+        });
+        if (!resolvedRefereeAction) {
+          await db.saveMessage(sessionId, 'player_dm1', message, currentTurn);
+          await db.saveMessage(sessionId, 'dm1', progressed.reply, currentTurn);
+          const newTurn = await db.incrementSessionTurn(sessionId);
+          socket.emit('dm1_response', { message: progressed.reply });
+          if (newTurn > 0 && newTurn % 50 === 0) {
+            await chapterSummarizer.summarize(sessionId, newTurn).catch(console.error);
+          }
+          return;
         }
-        return;
+        activeWorldState = progressed.worldState;
       }
-      if (referee?.worldState) {
+      if (!resolvedRefereeAction && referee?.worldState) {
         activeWorldState = referee.worldState;
         refereeNarrativeFrame = referee.narrativeFrame || '';
         refereeSkipSpatialGuard = Boolean(referee.skipSpatialGuard);
       }
 
-      const spellAction = await handleDeterministicSpellAction(socket, sessionId, message);
+      const spellAction = resolvedRefereeAction || await handleDeterministicSpellAction(socket, sessionId, message);
       if (spellAction.handled) {
         return;
       }
       let effectiveWorldState = spellAction.worldState || activeWorldState;
 
-      const mechanics = resolvePreNarration({ message, worldState: effectiveWorldState });
+      const mechanics = spellAction.skipPreNarration
+        ? {
+            handled: false,
+            worldState: effectiveWorldState,
+            skipSpatialGuard: true,
+            narrativeFrame: '',
+          }
+        : resolvePreNarration({ message, worldState: effectiveWorldState });
       if (mechanics.worldState && mechanics.worldState !== effectiveWorldState) {
         effectiveWorldState = mechanics.worldState;
         await db.updateWorldState(sessionId, effectiveWorldState);
@@ -1571,7 +1607,7 @@ io.on('connection', (socket) => {
         return;
       }
 
-      if (!(refereeSkipSpatialGuard || mechanics.skipSpatialGuard)) {
+      if (!(refereeSkipSpatialGuard || spellAction.skipSpatialGuard || mechanics.skipSpatialGuard)) {
         let spatialIssue = checkSpatialAction(message, effectiveWorldState);
         if (spatialIssue) {
           const recentHistory = await db.getRollingWindow(sessionId, 8).catch(() => []);
@@ -1601,7 +1637,7 @@ io.on('connection', (socket) => {
 
       // Save player message with pre-increment turn_number
       await db.saveMessage(sessionId, 'player_dm1', message, currentTurn);
-      const narrativeFrame = [refereeNarrativeFrame, mechanics.narrativeFrame].filter(Boolean).join('\n');
+      const narrativeFrame = [refereeNarrativeFrame, spellAction.narrativeFrame, mechanics.narrativeFrame].filter(Boolean).join('\n');
       const dmPlayerMessage = narrativeFrame
         ? `${message}\n\n${narrativeFrame}`
         : message;
@@ -1631,41 +1667,51 @@ io.on('connection', (socket) => {
       } catch (apiErr) {
         // DM1 API failure — emit error, leave orphaned player_dm1 in DB,
         // do NOT increment session_turn (spec §12).
-        console.error('DM1 API error:', apiErr.message);
-        socket.emit('dm1_typing', false);
-        socket.emit('error', { message: 'The Game Master encountered an error. Please try again.' });
+        if (spellAction.fallbackReply) {
+          console.error('DM1 resolved-event narration error; using deterministic fallback:', apiErr.message);
+          dm1Reply = spellAction.fallbackReply;
+          inputTokens = null;
+          outputTokens = null;
+        } else {
+          console.error('DM1 API error:', apiErr.message);
+          socket.emit('dm1_typing', false);
+          socket.emit('error', { message: 'The Game Master encountered an error. Please try again.' });
 
-        // Store assembled prompt; append error details (spec §12)
-        const fullPromptForLog = [
-          systemPrompt,
-          '[MESSAGES]: ' + JSON.stringify(messages),
-          '[ERROR]: '    + (apiErr.message || String(apiErr)),
-        ].join('\n\n');
+          // Store assembled prompt; append error details (spec §12)
+          const fullPromptForLog = [
+            systemPrompt,
+            '[MESSAGES]: ' + JSON.stringify(messages),
+            '[ERROR]: '    + (apiErr.message || String(apiErr)),
+          ].join('\n\n');
 
-        await db.logDmCall({
-          sessionId,
-          dm:           'dm1',
-          model:        DM1_MODEL,
-          playerInput:  message,
-          fullPrompt:   fullPromptForLog,
-          dmResponse:   null,
-          inputTokens:  null,
-          outputTokens: null,
-        }).catch(console.error);
-        return;
+          await db.logDmCall({
+            sessionId,
+            dm:           'dm1',
+            model:        DM1_MODEL,
+            playerInput:  message,
+            fullPrompt:   fullPromptForLog,
+            dmResponse:   null,
+            inputTokens:  null,
+            outputTokens: null,
+          }).catch(console.error);
+          return;
+        }
       }
 
       dm1Reply = await moderateAssistantReply(
         dm1Reply,
-        'The Game Master lowers the screen and stares at you over it. That idea has been denied entry to the campaign, the tavern, and polite society. Try something else.'
+        spellAction.fallbackReply
+          || 'The Game Master lowers the screen and stares at you over it. That idea has been denied entry to the campaign, the tavern, and polite society. Try something else.'
       );
 
-      const narrativeClock = advanceNarrativeTime({
-        message,
-        dmReply: dm1Reply,
-        worldState: effectiveWorldState || worldStateRow?.state || db.DEFAULT_WORLD_STATE,
-        characterSheet: activeCharacter?.character_sheet || null,
-      });
+      const narrativeClock = spellAction.skipNarrativeClock
+        ? { worldState: effectiveWorldState, replySuffix: '' }
+        : advanceNarrativeTime({
+            message,
+            dmReply: dm1Reply,
+            worldState: effectiveWorldState || worldStateRow?.state || db.DEFAULT_WORLD_STATE,
+            characterSheet: activeCharacter?.character_sheet || null,
+          });
       if (narrativeClock.replySuffix) {
         dm1Reply += narrativeClock.replySuffix;
       }

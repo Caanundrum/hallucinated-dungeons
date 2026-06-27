@@ -471,14 +471,33 @@ function resolveHealingSpell({ spell, rule, known = {}, characterSheet, worldSta
 
 function resolveUtilitySpell({ spell, worldState }) {
   const effectSummary = formatUtilitySpellEffectSummary(spell, worldState);
+  const reply = `You cast **${spell.name}**.${effectSummary ? ` ${effectSummary}` : ''} Its effect is now active in the scene: ${spell.description}`;
   return {
     handled: true,
     logType: 'spell_utility',
     spell,
     worldState: stripInternalState(worldState),
-    reply: `You cast **${spell.name}**.${effectSummary ? ` ${effectSummary}` : ''} Its effect is now active in the scene: ${spell.description}`,
+    reply,
+    narrationGuidance: buildUtilitySpellNarrationGuidance({ spell, worldState }),
     consumesTurn: consumesCombatTurn(spell),
   };
+}
+
+function buildUtilitySpellNarrationGuidance({ spell = {}, worldState = {} } = {}) {
+  const effect = normalizeEffects(worldState.active_effects || []).find((item) => item.id === spell.id);
+  const declaredAction = String(worldState.__spell_message || '').trim();
+  const target = String(effect?.target || '').trim() || 'no separate target recorded';
+  const duration = String(effect?.duration || spell.duration || 'not recorded').trim();
+  return [
+    `Declared action: ${declaredAction || `Cast ${spell.name || 'the utility spell'}`}`,
+    `Spell: ${spell.name || 'Unknown utility spell'}`,
+    `Established target or focus: ${target}`,
+    `Authoritative duration: ${duration}`,
+    `Rules boundary: ${spell.description || 'Use only the recorded spell effect.'}`,
+    'Narrate the specific manifestation the player declared with concise sensory, in-world detail. Show what visibly or audibly changes instead of reciting the spell description or reporting that an effect is active.',
+    'If the player supplied exact spoken words, preserve and narrate those words without asking what they say. If the player requested a voice manifestation but supplied no words, establish how their voice changes and naturally ask what they say.',
+    'Do not invent player speech, a new target, damage, fear, conditions, forced reactions, or any other benefit not granted by the recorded spell.',
+  ].join('\n');
 }
 
 function formatUtilitySpellEffectSummary(spell = {}, worldState = {}) {

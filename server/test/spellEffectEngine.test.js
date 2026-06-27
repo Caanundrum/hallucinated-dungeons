@@ -905,6 +905,9 @@ test('utility spell purpose clauses are not mistaken for targets', () => {
   assert.equal(cast.worldState.active_effects.find((effect) => effect.id === 'thaumaturgy')?.target, 'Vex');
   assert.match(outcome.reply, /effect is active on Vex/i);
   assert.doesNotMatch(outcome.reply, /affecting make my voice boom/i);
+  assert.match(outcome.narrationGuidance, /narrate the specific manifestation/i);
+  assert.match(outcome.narrationGuidance, /voice manifestation but supplied no words/i);
+  assert.match(outcome.narrationGuidance, /do not invent player speech/i);
 });
 
 test('utility spells still preserve explicit on-target phrasing', () => {
@@ -917,9 +920,39 @@ test('utility spells still preserve explicit on-target phrasing', () => {
     characterSheet: sheet,
     worldState: worldState(),
   });
+  const outcome = resolveSpellOutcome({
+    spellCast: cast,
+    characterSheet: cast.characterSheet,
+    worldState: cast.worldState,
+  });
 
   assert.equal(cast.blocked, false);
   assert.equal(cast.worldState.active_effects.find((effect) => effect.id === 'light')?.target, 'shield');
+  assert.match(outcome.narrationGuidance, /Established target or focus: shield/i);
+  assert.match(outcome.narrationGuidance, /sensory, in-world detail/i);
+});
+
+test('utility spell narration preserves supplied speech without requesting it again', () => {
+  const tiefling = casterSheet({
+    identity: { name: 'Vex', species: 'tiefling', level: 1, class: 'wizard', class_name: 'Wizard' },
+    species_spells: [{ id: 'thaumaturgy', source: 'Infernal Legacy', ability: 'cha' }],
+    spellcasting: { ability: 'int', cantrips_known: [], spells_prepared: [], slots: {} },
+  });
+  const cast = resolveSpellCast({
+    message: 'I cast Thaumaturgy and shout, "Open the gate!"',
+    content,
+    characterSheet: tiefling,
+    worldState: worldState(),
+  });
+  const outcome = resolveSpellOutcome({
+    spellCast: cast,
+    characterSheet: cast.characterSheet,
+    worldState: cast.worldState,
+  });
+
+  assert.equal(cast.blocked, false);
+  assert.match(outcome.narrationGuidance, /Open the gate!/i);
+  assert.match(outcome.narrationGuidance, /preserve and narrate those words without asking/i);
 });
 
 test('Sleep applies the asleep condition when the HP pool covers the target', () => {
