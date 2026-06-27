@@ -1,5 +1,37 @@
 # Hallucinated Dungeons QA Handoff
 
+## Latest QA Pass - 2026-06-27 Resolved-Event Narration Production Retest `8a06a30`
+
+Scope:
+
+- Retested the utility-magic narration acceptance cases after `8a06a30 Route resolved mechanics through GM narration` was pushed.
+- Used existing production characters `QA Tiefling` and `QA Celestial` on a fresh production connection.
+- QA remained read-only for app code. Only this handoff was updated.
+
+Automated checks:
+
+- Server `npm.cmd test`: PASS, `566/566`.
+- Client `npm.cmd run lint`: PASS.
+- `git diff --check 8a06a30^ 8a06a30`: PASS.
+- Browser console warnings/errors: none.
+
+Production results:
+
+- **FAIL:** `I cast Thaumaturgy to make my voice boom.` returned the deterministic receipt: `You cast Thaumaturgy. The effect is active on QA Tiefling. Its effect is now active in the scene: Create a minor supernatural sign such as booming voice, tremors, or altered flames.` It did not narrate the booming voice or ask what the character says.
+- **FAIL:** `I cast Thaumaturgy and shout, "Open the gate!"` returned the same deterministic receipt. It did not narrate the supplied words and did not preserve them in the GM response.
+- **FAIL:** `I cast Light on my shield.` returned: `You cast Light. It is now affecting my shield. Its effect is now active in the scene: Make an object shine with steady magical light.` It did not narrate the shield illuminating.
+- One repeated no-dialogue Thaumaturgy attempt also appended an empty GM paragraph after the prior receipt, indicating that at least one production path may enter the narration handoff without delivering usable text.
+
+Finding for DEV:
+
+- **P1 - The resolved-event narration change is not functioning end to end in production.** Unit tests prove that narration frames and guidance are constructed, but all three live acceptance cases still deliver the deterministic fallback/status receipt, with one empty-response occurrence. The production socket/model/deployment path must be traced from `createResolvedEventNarrationAction` through DM1 completion, moderation, persistence, and `dm1_response` emission.
+- Confirm that Railway is actually running `8a06a30`; production currently exposes no build identifier, so QA cannot distinguish a stale backend deployment from a live integration failure using the UI or health endpoint alone.
+- Add an integration-level assertion that a handled resolved event reaches the DM1 narration call and that a non-empty narrated response, rather than `fallbackReply`, is persisted and emitted. Unit assertions on prompt construction alone do not cover the player-visible contract.
+
+Current recommendation:
+
+- Do not close the narration finding and do not begin level 3 yet. Fix or confirm the production deployment/integration path, then repush for the same three exact acceptance tests. The narrator has received excellent stage directions but is still reading the clipboard aloud.
+
 ## Latest QA Finding - 2026-06-26 Utility Magic Resolves as a Status Message
 
 Player action observed:
