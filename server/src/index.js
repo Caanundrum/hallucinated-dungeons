@@ -1298,9 +1298,10 @@ io.on('connection', (socket) => {
   });
 
   // Phase 4D: level-up preview and guarded apply.
-  socket.on('get_level_up_preview', async ({ sessionId, sessionToken } = {}) => {
+  socket.on('get_level_up_preview', async ({ sessionId, sessionToken, requestId = null, payload = {} } = {}) => {
     if (!hasValidSocketSession(socket, sessionId, sessionToken)) {
       socket.emit('level_up_error', {
+        requestId,
         message: 'Your level-up preview could not be opened for this session. Please refresh.',
       });
       return;
@@ -1310,6 +1311,7 @@ io.on('connection', (socket) => {
       const character = await db.getCharacterForSession(sessionId);
       if (!character?.character_sheet) {
         socket.emit('level_up_error', {
+          requestId,
           message: 'Choose or create a character before leveling up.',
         });
         return;
@@ -1317,11 +1319,13 @@ io.on('connection', (socket) => {
 
       socket.emit('level_up_preview', {
         characterId: character.id,
-        preview: getLevelUpPreview(character.character_sheet, getContentBundle()),
+        requestId,
+        preview: getLevelUpPreview(character.character_sheet, getContentBundle(), { payload }),
       });
     } catch (err) {
       console.error('get_level_up_preview error:', err);
       socket.emit('level_up_error', {
+        requestId,
         message: 'The level-up table jammed. Try again in a moment.',
       });
     }

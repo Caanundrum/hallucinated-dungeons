@@ -193,6 +193,7 @@ function App() {
   const rulesEndRef = useRef(null);
   const currentCharacterRef = useRef(null);
   const creatingCharacterRef = useRef(false);
+  const levelUpPreviewRequestRef = useRef(0);
 
   useEffect(() => {
     currentCharacterRef.current = currentCharacter;
@@ -356,13 +357,15 @@ function App() {
       }
     });
 
-    socket.on('level_up_preview', ({ preview } = {}) => {
+    socket.on('level_up_preview', ({ preview, requestId } = {}) => {
+      if (requestId && requestId !== levelUpPreviewRequestRef.current) return;
       setLevelUpBusy(false);
       setLevelUpError(null);
       setLevelUpPreview(preview || null);
     });
 
-    socket.on('level_up_error', ({ message, preview } = {}) => {
+    socket.on('level_up_error', ({ message, preview, requestId } = {}) => {
+      if (requestId && requestId !== levelUpPreviewRequestRef.current) return;
       setLevelUpBusy(false);
       setLevelUpError(message || 'Level up is not available yet.');
       if (preview) setLevelUpPreview(preview);
@@ -554,7 +557,21 @@ function App() {
     }
     setLevelUpBusy(true);
     setLevelUpError(null);
-    socket.emit('get_level_up_preview', { sessionId, sessionToken });
+    const requestId = ++levelUpPreviewRequestRef.current;
+    socket.emit('get_level_up_preview', { sessionId, sessionToken, requestId });
+  }, [sessionId, sessionToken]);
+
+  const handleRefreshLevelUpPreview = useCallback((choices = {}) => {
+    if (!sessionId || !sessionToken) return;
+    setLevelUpBusy(true);
+    setLevelUpError(null);
+    const requestId = ++levelUpPreviewRequestRef.current;
+    socket.emit('get_level_up_preview', {
+      sessionId,
+      sessionToken,
+      requestId,
+      payload: { choices },
+    });
   }, [sessionId, sessionToken]);
 
   const handleConfirmLevelUp = useCallback((payload = {}) => {
@@ -847,6 +864,7 @@ function App() {
           busy={levelUpBusy}
           onClose={handleCloseLevelUp}
           onConfirm={handleConfirmLevelUp}
+          onChoicesChange={handleRefreshLevelUpPreview}
         />
       )}
     </div>
@@ -1206,7 +1224,7 @@ function buildInitialLevelUpChoices(preview) {
   return initialSelections;
 }
 
-function LevelUpModal({ preview, error, busy, onClose, onConfirm }) {
+function LevelUpModal({ preview, error, busy, onClose, onConfirm, onChoicesChange }) {
   const blockers = preview?.blockers || [];
   const canLevelUp = Boolean(preview?.canLevelUp);
   const requiredChoices = preview?.requiredChoices || [];
@@ -1223,18 +1241,18 @@ function LevelUpModal({ preview, error, busy, onClose, onConfirm }) {
   const canApply = Boolean(preview?.canApply || (canLevelUp && hardBlockers.length === 0 && choicesComplete));
 
   const toggleChoice = (choice, optionId) => {
-    setChoiceSelections((current) => {
-      const selected = current[choice.id] || [];
-      const exists = selected.includes(optionId);
-      const count = Number(choice.count || 0);
-      const nextSelected = exists
-        ? selected.filter((id) => id !== optionId)
-        : [...selected, optionId].slice(Math.max(0, selected.length + 1 - count));
-      return {
-        ...current,
-        [choice.id]: nextSelected,
-      };
-    });
+    const selected = choiceSelections[choice.id] || [];
+    const exists = selected.includes(optionId);
+    const count = Number(choice.count || 0);
+    const nextSelected = exists
+      ? selected.filter((id) => id !== optionId)
+      : [...selected, optionId].slice(Math.max(0, selected.length + 1 - count));
+    const nextSelections = {
+      ...choiceSelections,
+      [choice.id]: nextSelected,
+    };
+    setChoiceSelections(nextSelections);
+    onChoicesChange?.(nextSelections);
   };
 
   const submitLevelUp = () => {
