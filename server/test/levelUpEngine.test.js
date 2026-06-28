@@ -905,7 +905,7 @@ test('level 3 subclass foundation covers every class with one legal SRD option',
   }
 });
 
-test('fighter level 3 preview validates subclass ownership and remains mechanics-gated', () => {
+test('fighter level 3 preview validates subclass ownership and is apply-ready after Champion selection', () => {
   const sheet = baseSheet({
     identity: { level: 2, experience_points: 900, level_up_available: true },
     progression: { experience_points: 900 },
@@ -931,7 +931,8 @@ test('fighter level 3 preview validates subclass ownership and remains mechanics
   });
   assert.equal(selected.selectedSubclass.name, 'Champion');
   assert.deepEqual(selected.features.map((feature) => feature.name), ['Improved Critical', 'Remarkable Athlete']);
-  assert(selected.blockers.some((entry) => entry.type === 'unsupported_mechanic' && entry.mechanic === 'fighter_level_3'));
+  assert.equal(selected.canApply, true);
+  assert.deepEqual(selected.blockers, []);
 });
 
 test('shared level 3 apply path persists subclass identity, features, and history when mechanics are ready', () => {
@@ -981,4 +982,33 @@ test('barbarian level 3 skill choice becomes an authoritative proficiency', () =
   assert(result.characterSheet.proficiencies.skills.includes('survival'));
   assert.equal(result.characterSheet.derived_stats.skill_modifiers.survival.proficient, true);
   assert.equal(result.characterSheet.derived_stats.skill_modifiers.survival.total, 3);
+});
+
+test('Rogue level 3 applies Thief movement, Steady Aim, and 2d6 Sneak Attack data', () => {
+  const content = getContentBundle();
+  const sheet = baseSheet({
+    identity: { class: 'rogue', class_name: 'Rogue', level: 2, experience_points: 900, level_up_available: true },
+    progression: { experience_points: 900 },
+    derived_stats: { level: 2, speed: 30 },
+  });
+  const preview = getLevelUpPreview(sheet, content, { choices: { subclass: ['thief'] } });
+
+  assert.equal(preview.canApply, true);
+  assert.deepEqual(preview.features.map((feature) => feature.name), [
+    'Steady Aim',
+    'Sneak Attack (2d6)',
+    'Fast Hands',
+    'Second-Story Work',
+  ]);
+
+  const result = applyLevelUp({
+    characterSheet: sheet,
+    content,
+    payload: { choices: { subclass: ['thief'] } },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.characterSheet.identity.subclass, 'thief');
+  assert.equal(result.characterSheet.derived_stats.sneak_attack_dice, '2d6');
+  assert.equal(result.characterSheet.derived_stats.climb_speed, 30);
+  assert.equal(result.characterSheet.derived_stats.jump_ability, 'dex');
 });

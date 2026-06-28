@@ -162,20 +162,25 @@ function classEntry(item, catalog) {
 }
 
 function subclassEntry(item) {
+  const status = statusFrom(item.mechanics_status || STATUS.DEFERRED);
   const featureEntries = Object.entries(item.level_features || {}).flatMap(([level, features]) => (
-    (features || []).map((feature) => simpleEntry('subclass_feature', feature.id, feature.name, STATUS.DEFERRED, {
+    (features || []).map((feature) => simpleEntry('subclass_feature', feature.id, feature.name, status, {
       description: feature.description || '',
       parent_id: item.id,
       parent_name: item.name,
       level: Number(level),
-      implementation: 'Cataloged and mechanically gated until this class level package is implemented.',
+      implementation: status === STATUS.IMPLEMENTED
+        ? 'Implemented through the shared subclass, action, check, movement, and combat rules pipelines.'
+        : 'Cataloged and mechanically gated until this class level package is implemented.',
     }))
   ));
-  return simpleEntry('subclass', item.id, item.name, STATUS.DEFERRED, {
+  return simpleEntry('subclass', item.id, item.name, status, {
     description: item.description || '',
     class_id: item.class_id,
     unlock_level: Number(item.unlock_level || 3),
-    implementation: 'Legal selection, ownership validation, persistence, and display are implemented; runtime features remain gated.',
+    implementation: status === STATUS.IMPLEMENTED
+      ? 'Selection, persistence, display, and current-level runtime features are implemented.'
+      : 'Legal selection, ownership validation, persistence, and display are implemented; runtime features remain gated.',
     children: featureEntries,
   });
 }

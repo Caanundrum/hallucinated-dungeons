@@ -69,6 +69,7 @@ test('matrix flags the foundation gaps that block leveling work', () => {
   assert.equal(spells.get('divine_smite').status, STATUS.IMPLEMENTED);
   assert.equal(classes.get('paladin').status, STATUS.PARTIAL);
   assert.equal(classes.get('wizard').status, STATUS.PARTIAL);
-  assert.equal(subclasses.get('champion').status, STATUS.DEFERRED);
-  assert(subclasses.get('champion').children.every((feature) => feature.status === STATUS.DEFERRED));
+  assert.equal(subclasses.get('champion').status, STATUS.IMPLEMENTED);
+  assert(subclasses.get('champion').children.every((feature) => feature.status === STATUS.IMPLEMENTED));
+  assert.equal(subclasses.get('thief').status, STATUS.IMPLEMENTED);
 });

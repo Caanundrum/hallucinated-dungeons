@@ -33,6 +33,10 @@ const {
   buildUnarmedAttack,
   rollWeaponDamage,
 } = require('./originFeatEngine');
+const {
+  getWeaponCriticalThreshold,
+  grantRemarkableAthleteMovement,
+} = require('./subclassFeatureEngine');
 const { applyHelpToAttack } = require('./helpActionEngine');
 const { clearPlayerHidden } = require('./hiddenStateEngine');
 const { getAutoD20RerollRules } = require('./resourceEngine');
@@ -167,7 +171,7 @@ function resolvePlayerOpportunityAttack({
     rollDie,
   });
   const natural = attackRoll.natural;
-  const criticalHit = natural === 20;
+  const criticalHit = natural >= getWeaponCriticalThreshold(characterSheet);
   const criticalMiss = natural === 1;
   const hit = !criticalMiss && (criticalHit || attackRoll.total >= Number(defender.ac || 10));
   const consumeEffectIds = [...(attackRoll.bonusDice?.expireEffectIds || [])];
@@ -235,6 +239,12 @@ function resolvePlayerOpportunityAttack({
     nextCombat = nextWorldState.combat_state;
     defender = findCombatantByName(nextCombat, defender.name) || defender;
     attacker = nextCombat.combatants?.find((combatant) => combatant.is_player) || attacker;
+  }
+
+  if (criticalHit && getWeaponCriticalThreshold(characterSheet) === 19) {
+    nextWorldState = grantRemarkableAthleteMovement({ ...nextWorldState, combat_state: nextCombat }, characterSheet);
+    nextCombat = nextWorldState.combat_state;
+    lines.push('**Remarkable Athlete:** you can immediately move up to half your Speed without provoking Opportunity Attacks.');
   }
 
   return {

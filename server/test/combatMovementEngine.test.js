@@ -45,6 +45,36 @@ function combatWorld(overrides = {}) {
   };
 }
 
+test('Remarkable Athlete critical movement avoids Opportunity Attacks and spends its own pool', () => {
+  const result = resolveCombatMovement({
+    message: 'I move 15 feet away from the cultist.',
+    worldState: combatWorld({
+      combat_state: {
+        ...combatWorld().combat_state,
+        turn_resources: {
+          action_available: true,
+          bonus_action_available: true,
+          reaction_available: true,
+          movement_remaining: 30,
+          remarkable_athlete_movement_remaining: 15,
+          used: [],
+        },
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      identity: { name: 'Ari', class: 'fighter', level: 3, subclass: 'champion' },
+    },
+    rollDie: () => 20,
+  });
+
+  assert.equal(result.worldState.player_stats.hp, 12);
+  assert.equal(result.worldState.combat_state.turn_resources.remarkable_athlete_movement_remaining, 0);
+  assert.equal(result.worldState.combat_state.turn_resources.movement_remaining, 30);
+  assert.match(result.reply, /prevents Opportunity Attacks/);
+  assert.doesNotMatch(result.reply, /Cultist uses/);
+});
+
 function sequenceRolls(values) {
   let index = 0;
   return () => values[index++] ?? values[values.length - 1] ?? 1;

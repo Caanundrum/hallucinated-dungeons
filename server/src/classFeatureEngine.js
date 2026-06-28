@@ -45,6 +45,7 @@ function resolveFeatureAction({ message = '', worldState = {}, characterSheet = 
   if (intent.id === 'patient_defense') return resolvePatientDefense({ worldState, characterSheet });
   if (intent.id === 'step_of_the_wind') return resolveStepOfTheWind({ worldState, characterSheet });
   if (intent.id === 'uncanny_metabolism') return resolveUncannyMetabolism({ worldState, characterSheet, rollDie });
+  if (intent.id === 'steady_aim') return resolveSteadyAim({ worldState, characterSheet });
   if (intent.id === 'arcane_recovery') {
     return {
       handled: true,
@@ -78,8 +79,57 @@ function getFeatureIntent(message = '') {
   if (/\bpatient\s+defense\b|\bfocus(?:ed)?\s+dodge\b/.test(text)) return { id: 'patient_defense' };
   if (/\bstep\s+of\s+the\s+wind\b|\bfocus(?:ed)?\s+(?:dash|disengage)\b/.test(text)) return { id: 'step_of_the_wind' };
   if (/\buncanny\s+metabolism\b/.test(text)) return { id: 'uncanny_metabolism' };
+  if (/\bsteady\s+aim\b|\b(?:take|use)\s+(?:my\s+)?(?:bonus action\s+to\s+)?aim\s+(?:carefully|steadily)\b|\b(?:carefully|steadily)\s+aim\b|\bline\s+up\s+(?:my|the)\s+(?:shot|attack)\b/.test(text)) return { id: 'steady_aim' };
   if (/\barcane\s+recovery\b/.test(text)) return { id: 'arcane_recovery' };
   return null;
+}
+
+function resolveSteadyAim({ worldState = {}, characterSheet = {} } = {}) {
+  if (!isClass(characterSheet, 'rogue')) return wrongClass('Steady Aim', 'Rogue', worldState);
+  if (getCharacterLevel(characterSheet) < 3) return levelRequired('Steady Aim', 'Rogue', 3, worldState);
+  if (!worldState.combat_state?.active) {
+    return {
+      handled: true,
+      logType: 'feature_steady_aim_combat_required',
+      worldState,
+      reply: 'Steady Aim is a Bonus Action used on your turn in combat. Outside initiative, you can simply describe how you line up the shot.',
+    };
+  }
+
+  const resources = worldState.combat_state.turn_resources || {};
+  const speed = Number(worldState.player_stats?.speed ?? characterSheet.derived_stats?.speed ?? 30);
+  const moved = Number(resources.movement_remaining ?? speed) < speed
+    || (resources.used || []).some((entry) => entry.resource === 'movement' && Number(entry.feet || 0) > 0);
+  if (moved) {
+    return {
+      handled: true,
+      logType: 'feature_steady_aim_movement_blocked',
+      worldState,
+      reply: 'Steady Aim requires that you have not moved during this turn. Hold position next turn, then spend your Bonus Action to line up the attack.',
+    };
+  }
+
+  const spent = spendTurnResource(worldState, 'bonus_action', 'Steady Aim', characterSheet);
+  if (!spent.ok) {
+    return { handled: true, logType: 'feature_steady_aim_unavailable', worldState: spent.worldState, reply: spent.reply };
+  }
+  const nextResources = spent.worldState.combat_state.turn_resources || {};
+  return {
+    handled: true,
+    logType: 'feature_steady_aim',
+    worldState: {
+      ...spent.worldState,
+      combat_state: {
+        ...spent.worldState.combat_state,
+        turn_resources: {
+          ...nextResources,
+          movement_remaining: 0,
+          steady_aim: true,
+        },
+      },
+    },
+    reply: 'You use **Steady Aim** as a Bonus Action. Your Speed becomes 0 for the rest of this turn, and your next attack roll this turn has Advantage.',
+  };
 }
 
 function resolveActionSurge({ worldState = {}, characterSheet = {} } = {}) {

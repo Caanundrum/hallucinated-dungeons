@@ -2740,6 +2740,211 @@ test('rogue Sneak Attack adds damage when a finesse attack has advantage', () =>
   assert.match(result.reply, /Sneak Attack 1d6=3/);
 });
 
+test('Champion rolls Initiative and Strength Athletics with Remarkable Athlete Advantage', () => {
+  const champion = {
+    ...characterSheet,
+    identity: { name: 'Ari', class: 'fighter', class_name: 'Fighter', level: 3, subclass: 'champion' },
+    derived_stats: {
+      ...characterSheet.derived_stats,
+      skill_modifiers: {
+        ...characterSheet.derived_stats.skill_modifiers,
+        athletics: { total: 5, ability: 'str', proficient: true },
+      },
+    },
+  };
+  const initiative = adjudicate({
+    message: 'I attack the guard.',
+    worldState: worldState({ scene_presence: { present_npcs: ['guard'], present_objects: [], available_exits: [] } }),
+    characterSheet: champion,
+  });
+  const athletics = adjudicate({
+    message: 'I climb the slick wall beside the gate.',
+    worldState: worldState({ scene_presence: { exact_location: 'slick gate wall', present_npcs: [], present_objects: ['wall'], available_exits: [] } }),
+    characterSheet: champion,
+  });
+
+  assert.equal(initiative.worldState.pending_roll.advantage_mode, 'advantage');
+  assert(initiative.worldState.pending_roll.advantage_sources.includes('Remarkable Athlete'));
+  assert.equal(athletics.worldState.pending_roll.advantage_mode, 'advantage');
+  assert(athletics.worldState.pending_roll.advantage_sources.includes('Remarkable Athlete'));
+});
+
+test('Champion weapon attack scores a Critical Hit on natural 19 and grants protected movement', () => {
+  const result = adjudicate({
+    message: 'I attack the goblin with my longsword.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', hp: 20, max_hp: 20, ac: 18, is_player: true },
+          { name: 'Goblin', hp: 30, max_hp: 30, ac: 30, is_player: false },
+        ],
+      },
+    }),
+    characterSheet: {
+      ...characterSheet,
+      identity: { name: 'Ari', class: 'fighter', class_name: 'Fighter', level: 3, subclass: 'champion' },
+      derived_stats: {
+        ...characterSheet.derived_stats,
+        speed: 30,
+        attack_breakdowns: [{ weapon_id: 'longsword', name: 'Longsword', attack_total: 5, damage_formula: '1d8+3' }],
+      },
+    },
+    rollDie: sequenceRolls([19, 4, 4]),
+  });
+
+  assert.match(result.reply, /Critical hit/);
+  assert.match(result.reply, /Remarkable Athlete/);
+  assert.equal(result.worldState.combat_state.turn_resources.remarkable_athlete_movement_remaining, 15);
+});
+
+test('level 3 Rogue Steady Aim grants one advantaged attack with 2d6 Sneak Attack', () => {
+  const rogue = {
+    ...characterSheet,
+    identity: { name: 'Ari', class: 'rogue', class_name: 'Rogue', level: 3, subclass: 'thief' },
+    derived_stats: {
+      ...characterSheet.derived_stats,
+      speed: 30,
+      attack_breakdowns: [{ weapon_id: 'shortsword', name: 'Shortsword', attack_total: 5, damage_formula: '1d6+3' }],
+    },
+  };
+  const aimed = adjudicate({
+    message: 'I use Steady Aim.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', hp: 17, max_hp: 17, ac: 14, is_player: true },
+          { name: 'Goblin', hp: 30, max_hp: 30, ac: 12, is_player: false },
+        ],
+      },
+    }),
+    characterSheet: rogue,
+  });
+  const attacked = adjudicate({
+    message: 'I attack the goblin with my shortsword.',
+    worldState: aimed.worldState,
+    characterSheet: rogue,
+    rollDie: sequenceRolls([5, 15, 4, 2, 3]),
+  });
+
+  assert.match(attacked.reply, /advantage from Steady Aim/i);
+  assert.match(attacked.reply, /Sneak Attack 2d6=5/);
+  assert.equal(attacked.worldState.combat_state.turn_resources.steady_aim, false);
+  assert.equal(attacked.worldState.combat_state.turn_resources.sneak_attack_used, true);
+});
+
+test('Thief Fast Hands uses the Bonus Action for a combat lock check', () => {
+  const thief = {
+    ...characterSheet,
+    identity: { name: 'Ari', class: 'rogue', class_name: 'Rogue', level: 3, subclass: 'thief' },
+    abilities: { modifiers: { ...characterSheet.abilities.modifiers, dex: 3 } },
+    proficiencies: { tools: ['thieves_tools'] },
+    derived_stats: { ...characterSheet.derived_stats, proficiency_bonus: 2 },
+  };
+  const result = adjudicate({
+    message: 'I pick the lock on the iron chest.',
+    worldState: worldState({
+      scene_presence: { exact_location: 'gate', present_npcs: ['Goblin'], present_objects: ['iron chest'], available_exits: [] },
+      object_states: { iron_chest: { name: 'iron chest', present: true, locked: true, lock_dc: 15 } },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', hp: 17, max_hp: 17, ac: 14, is_player: true },
+          { name: 'Goblin', hp: 8, max_hp: 8, ac: 12, is_player: false },
+        ],
+      },
+    }),
+    characterSheet: thief,
+  });
+
+  assert.equal(result.worldState.pending_roll.consumes, 'bonus_action');
+  assert.equal(result.worldState.combat_state.turn_resources.bonus_action_available, false);
+  assert.equal(result.worldState.combat_state.turn_resources.action_available, true);
+  assert.match(result.reply, /Fast Hands/);
+});
+
+test("Thief Fast Hands recognizes natural possessive pickpocket wording", () => {
+  const thief = {
+    ...characterSheet,
+    identity: { name: 'Ari', class: 'rogue', class_name: 'Rogue', level: 3, subclass: 'thief' },
+    abilities: { modifiers: { ...characterSheet.abilities.modifiers, dex: 3 } },
+    proficiencies: { skills: ['sleight_of_hand'] },
+    derived_stats: { ...characterSheet.derived_stats, proficiency_bonus: 2 },
+  };
+  const result = adjudicate({
+    message: "I pick the guard's pocket.",
+    worldState: worldState({
+      scene_presence: { exact_location: 'gate', present_npcs: ['Guard'], present_objects: [], available_exits: [] },
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Ari', hp: 17, max_hp: 17, ac: 14, is_player: true },
+          { name: 'Guard', hp: 11, max_hp: 11, ac: 16, is_player: false },
+        ],
+      },
+    }),
+    characterSheet: thief,
+  });
+
+  assert.equal(result.worldState.pending_roll.skill, 'sleight_of_hand');
+  assert.equal(result.worldState.pending_roll.consumes, 'bonus_action');
+  assert.equal(result.worldState.combat_state.turn_resources.bonus_action_available, false);
+  assert.equal(result.worldState.combat_state.turn_resources.action_available, true);
+  assert.match(result.reply, /Fast Hands/);
+});
+
+test('Thief Second-Story Work handles ordinary climbing but keeps hazardous climbs gated', () => {
+  const thief = {
+    ...characterSheet,
+    identity: { name: 'Ari', class: 'rogue', class_name: 'Rogue', level: 3, subclass: 'thief' },
+    derived_stats: { ...characterSheet.derived_stats, speed: 30, climb_speed: 30, jump_ability: 'dex' },
+  };
+  const ordinary = adjudicate({
+    message: 'I climb the stone wall.',
+    worldState: worldState({ current_location: 'courtyard', scene_presence: { exact_location: 'courtyard', present_objects: ['stone wall'] } }),
+    characterSheet: thief,
+  });
+  const hazardous = adjudicate({
+    message: 'I climb the slick stone wall in heavy rain.',
+    worldState: worldState({ current_location: 'courtyard', scene_presence: { exact_location: 'courtyard', present_objects: ['slick stone wall'] } }),
+    characterSheet: thief,
+  });
+
+  assert.equal(ordinary.worldState.pending_roll, null);
+  assert.match(ordinary.reply, /Second-Story Work/);
+  assert.match(ordinary.reply, /without an Athletics check/);
+  assert.equal(hazardous.worldState.pending_roll.skill, 'athletics');
+});
+
+test('Thief Second-Story Work uses Dexterity for a hazardous jump check', () => {
+  const thief = {
+    ...characterSheet,
+    identity: { name: 'Ari', class: 'rogue', class_name: 'Rogue', level: 3, subclass: 'thief' },
+    abilities: { modifiers: { ...characterSheet.abilities.modifiers, str: 0, dex: 3 } },
+    proficiencies: { skills: ['athletics'] },
+    derived_stats: { ...characterSheet.derived_stats, proficiency_bonus: 2, jump_ability: 'dex' },
+  };
+  const result = adjudicate({
+    message: 'I jump over the rope on the slick floor.',
+    worldState: worldState({ current_location: 'ruined hall' }),
+    characterSheet: thief,
+  });
+
+  assert.equal(result.worldState.pending_roll.ability, 'dex');
+  assert.equal(result.worldState.pending_roll.skill, 'athletics');
+  assert.equal(result.worldState.pending_roll.modifier, 3);
+  assert.match(result.reply, /Dexterity \(Athletics\)/);
+});
+
 test('Tavern Brawler unarmed strike rerolls damage die results of 1 and records a requested push', () => {
   const result = adjudicate({
     message: 'Punch the Cultist and push him back.',

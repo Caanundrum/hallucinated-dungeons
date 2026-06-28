@@ -68,7 +68,8 @@
         { "id": "remarkable_athlete", "name": "Remarkable Athlete", "description": "Gain Advantage on Initiative and Strength (Athletics) checks." }
       ]
     },
-    "runtime_mechanics": ["fighter_level_3"]
+    "runtime_mechanics": ["fighter_level_3"],
+    "mechanics_status": "implemented"
   },
   {
     "id": "warrior_of_the_open_hand",
@@ -123,7 +124,8 @@
         { "id": "second_story_work", "name": "Second-Story Work", "description": "Gain a Climb Speed and use Dexterity for longer jumps." }
       ]
     },
-    "runtime_mechanics": ["rogue_level_3"]
+    "runtime_mechanics": ["rogue_level_3"],
+    "mechanics_status": "implemented"
   },
   {
     "id": "draconic_sorcery",

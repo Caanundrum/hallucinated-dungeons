@@ -75,6 +75,26 @@ test('DM2 sheet summary exposes the selected Pact of the Blade weapon', () => {
   assert.match(summary, /uses Charisma for attack and damage/);
 });
 
+test('DM2 sheet summary exposes Champion and Thief level 3 derived rules', () => {
+  const champion = summarizeCharacterSheetForRules({
+    identity: { name: 'Bran', class: 'fighter', class_name: 'Fighter', subclass_name: 'Champion', level: 3 },
+    derived_stats: {
+      speed: 30,
+      weapon_critical_threshold: 19,
+      initiative_advantage_sources: ['Remarkable Athlete'],
+    },
+  });
+  const thief = summarizeCharacterSheetForRules({
+    identity: { name: 'Ari', class: 'rogue', class_name: 'Rogue', subclass_name: 'Thief', level: 3 },
+    derived_stats: { speed: 30, climb_speed: 30, jump_ability: 'dex' },
+  });
+
+  assert.match(champion, /Initiative Advantage: Remarkable Athlete/);
+  assert.match(champion, /Critical Hit threshold: natural 19-20/);
+  assert.match(thief, /Climb Speed 30 ft/);
+  assert.match(thief, /jump distance uses DEX/);
+});
+
 test('DM2 sheet summary distinguishes a Wizard spellbook from prepared spells', () => {
   const summary = summarizeCharacterSheetForRules({
     identity: { name: 'Mira', class: 'wizard', class_name: 'Wizard', level: 2 },

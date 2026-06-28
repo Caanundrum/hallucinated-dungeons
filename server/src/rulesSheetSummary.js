@@ -23,6 +23,9 @@ function summarizeCharacterSheetForRules(characterSheet) {
   lines.push(`Build: ${identity.species_name || identity.species || 'Unknown species'} ${identity.class_name || identity.class || 'Unknown class'}${identity.subclass_name ? ` (${identity.subclass_name})` : ''} level ${identity.level || derived.level || 1}`);
   lines.push(`Progression: XP ${experiencePoints}${nextLevelXp ? `/${nextLevelXp}` : ''}${levelUpReady ? '; level up available' : ''}`);
   lines.push(`Core stats: HP ${derived.hp ?? '--'}/${derived.max_hp ?? '--'}, AC ${derived.armor_class ?? '--'}, Speed ${derived.speed ?? '--'} ft, Initiative ${fmtSigned(derived.initiative)}, Proficiency ${fmtSigned(derived.proficiency_bonus)}`);
+  if (derived.climb_speed) lines.push(`Movement: Speed ${derived.speed ?? '--'} ft, Climb Speed ${derived.climb_speed} ft${derived.jump_ability ? `, jump distance uses ${String(derived.jump_ability).toUpperCase()}` : ''}`);
+  if ((derived.initiative_advantage_sources || []).length) lines.push(`Initiative Advantage: ${derived.initiative_advantage_sources.join(', ')}`);
+  if (derived.weapon_critical_threshold) lines.push(`Weapon and Unarmed Strike Critical Hit threshold: natural ${derived.weapon_critical_threshold}-20`);
   const acSources = formatArmorClassSources(derived.armor_class_breakdown, derived.armor_class);
   if (acSources) lines.push(`AC sources: ${acSources}`);
   if (abilities.final_scores) {

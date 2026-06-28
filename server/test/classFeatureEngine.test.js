@@ -670,3 +670,45 @@ test('Uncanny Metabolism refills Monk Focus and heals once per long rest', () =>
   assert.equal(result.worldState.player_stats.hp, 11);
   assert.match(result.reply, /Focus Points refill/);
 });
+
+test('Steady Aim spends the Rogue Bonus Action, grants Advantage, and sets Speed to zero', () => {
+  const result = resolveFeatureAction({
+    message: 'I use Steady Aim.',
+    worldState: combatWorld(),
+    characterSheet: sheet('rogue', {
+      identity: { name: 'Ari', class: 'rogue', level: 3, subclass: 'thief' },
+      derived_stats: { hp: 12, max_hp: 12, armor_class: 16, proficiency_bonus: 2, speed: 30 },
+    }),
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.worldState.combat_state.turn_resources.bonus_action_available, false);
+  assert.equal(result.worldState.combat_state.turn_resources.movement_remaining, 0);
+  assert.equal(result.worldState.combat_state.turn_resources.steady_aim, true);
+  assert.match(result.reply, /next attack roll.*Advantage/);
+});
+
+test('Steady Aim refuses after movement without spending the Bonus Action', () => {
+  const result = resolveFeatureAction({
+    message: 'I use Steady Aim.',
+    worldState: combatWorld({
+      combat_state: {
+        ...combatWorld().combat_state,
+        turn_resources: {
+          action_available: true,
+          bonus_action_available: true,
+          reaction_available: true,
+          movement_remaining: 20,
+          used: [{ resource: 'movement', feet: 10 }],
+        },
+      },
+    }),
+    characterSheet: sheet('rogue', {
+      identity: { name: 'Ari', class: 'rogue', level: 3, subclass: 'thief' },
+      derived_stats: { hp: 12, max_hp: 12, armor_class: 16, proficiency_bonus: 2, speed: 30 },
+    }),
+  });
+
+  assert.match(result.reply, /have not moved/);
+  assert.equal(result.worldState.combat_state.turn_resources.bonus_action_available, true);
+});

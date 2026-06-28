@@ -35,7 +35,7 @@ const CHECK_RULES = [
     skill: 'sleight_of_hand',
     ability: 'dex',
     label: 'Dexterity (Sleight of Hand)',
-    pattern: /\b(?:pick pocket|pickpocket|palm|lift (?:his|her|their|the)|steal quietly|slip .* pocket)\b/i,
+    pattern: /\b(?:pick\s+(?:(?:a|the)\s+)?(?:[a-z][a-z' -]{0,30}'s\s+)?pocket|pickpocket|palm|lift (?:his|her|their|the)|steal quietly|slip .* pocket)\b/i,
   },
   {
     id: 'survival',

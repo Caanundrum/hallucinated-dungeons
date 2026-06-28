@@ -56,6 +56,14 @@ const {
 } = require('./conditionEngine');
 const { resolveFeatureAction } = require('./classFeatureEngine');
 const {
+  canUseFastHands,
+  getSneakAttackDice,
+  getSubclassD20AdvantageSources,
+  getWeaponCriticalThreshold,
+  grantRemarkableAthleteMovement,
+  isThief,
+} = require('./subclassFeatureEngine');
+const {
   getSpeciesD20AdvantageSources,
   resolveSpeciesFeatureAction,
 } = require('./speciesFeatureEngine');
@@ -290,7 +298,9 @@ function parseRollRequest(message) {
 }
 
 function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCombat }) {
-  const check = intent.check;
+  const check = applySecondStoryWorkJump(intent.check, intent.raw, characterSheet);
+  const secondStoryClimb = resolveSecondStoryClimb({ intent, worldState, characterSheet, inCombat });
+  if (secondStoryClimb) return secondStoryClimb;
   const hideAction = isHideActionCheck({ rule_action: intent.ruleAction, skill: check.skill, intent: intent.raw });
   const speciesHideSource = hideAction
     ? getSpeciesHidePermissionSource({ message: intent.raw, worldState, characterSheet })
@@ -327,7 +337,9 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
     nextWorldState = spent.worldState;
     combatConsumeText = spent.cunningAction
       ? ' This uses your Bonus Action through Cunning Action.'
-      : ' This uses your Action.';
+      : spent.fastHands
+        ? ' This uses your Bonus Action through Fast Hands.'
+        : ' This uses your Action.';
     combatConsumeKey = spent.consumes;
   }
 
@@ -354,8 +366,17 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
     ability: check.ability,
     skill: check.skill,
   });
-  const advantageMode = combineAdvantageModes(conditionMode, activeAdvantageSources.length ? 'advantage' : null);
-  const advantageSources = [...conditionSources, ...activeAdvantageSources];
+  const subclassAdvantageSources = getSubclassD20AdvantageSources({
+    characterSheet,
+    testType: check.skill ? 'skill_check' : 'ability_check',
+    ability: check.ability,
+    skill: check.skill,
+  });
+  const advantageMode = combineAdvantageModes(
+    conditionMode,
+    [...activeAdvantageSources, ...subclassAdvantageSources].length ? 'advantage' : null,
+  );
+  const advantageSources = [...conditionSources, ...activeAdvantageSources, ...subclassAdvantageSources];
   let pendingRoll = {
     id: `roll_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     kind: check.skill ? 'skill_check' : 'ability_check',
@@ -399,6 +420,29 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
   };
 }
 
+function applySecondStoryWorkJump(check = {}, message = '', characterSheet = {}) {
+  if (!isThief(characterSheet) || Number(characterSheet.identity?.level || characterSheet.derived_stats?.level || 1) < 3) return check;
+  if (check.skill !== 'athletics' || !/\b(?:jump|leap)\b/i.test(message)) return check;
+  return {
+    ...check,
+    ability: 'dex',
+    label: 'Dexterity (Athletics)',
+  };
+}
+
+function resolveSecondStoryClimb({ intent = {}, worldState = {}, characterSheet = {}, inCombat = false } = {}) {
+  if (!isThief(characterSheet) || Number(characterSheet.identity?.level || characterSheet.derived_stats?.level || 1) < 3) return null;
+  if (intent.check?.skill !== 'athletics' || !/\b(?:climb|scramble up|scale)\b/i.test(intent.raw || '')) return null;
+  const context = `${intent.raw || ''} ${worldState.current_location || ''} ${JSON.stringify(worldState.scene_presence || {})}`.toLowerCase();
+  if (/\b(?:slick|greased|crumbling|collapsing|storm|heavy rain|ice|moving|falling|under attack|hazard|trap)\b/.test(context)) return null;
+  return {
+    handled: true,
+    logType: 'subclass_second_story_work_climb',
+    worldState,
+    reply: `**Second-Story Work:** your ${Number(characterSheet.derived_stats?.climb_speed || characterSheet.derived_stats?.speed || 30)}-foot Climb Speed handles this ordinary ascent without an Athletics check.${inCombat ? ' Resolve the distance through normal combat movement.' : ''}`,
+  };
+}
+
 function getSpeciesHidePermissionSource({ message = '', worldState = {}, characterSheet = {} } = {}) {
   if (normalizeId(characterSheet.identity?.species) !== 'halfling') return '';
   if (!/\b(?:behind|obscured by|use .* as cover)\b/i.test(String(message || ''))) return '';
@@ -426,6 +470,18 @@ function spendCombatCheckResource({ worldState = {}, characterSheet = {}, check 
         ...bonus,
         consumes: 'bonus_action',
         cunningAction: true,
+      };
+    }
+  }
+
+  if (check.skill === 'sleight_of_hand' && canUseFastHands(characterSheet) && /\b(?:pick\s+(?:(?:a|the)\s+)?(?:[a-z][a-z' -]{0,30}'s\s+)?pocket|pickpocket|lift\s+(?:a\s+|the\s+)?(?:purse|coin|key|item))\b/i.test(message)) {
+    const bonus = spendTurnResource(worldState, 'bonus_action', 'Fast Hands: Sleight of Hand', characterSheet);
+    if (bonus.ok) {
+      return {
+        ...bonus,
+        consumes: 'bonus_action',
+        cunningAction: false,
+        fastHands: true,
       };
     }
   }
@@ -1539,6 +1595,7 @@ function promptInitiative({ message, worldState, characterSheet, currentTurn = 0
   const conditionModifier = getConditionD20Modifier(getPlayerConditionSubject(characterSheet, worldState));
   const initiative = baseInitiative + conditionModifier;
   const enemyName = inferEnemyName(worldState, message);
+  const advantageSources = getSubclassD20AdvantageSources({ characterSheet, testType: 'initiative' });
   const pendingRoll = {
     id: `roll_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     kind: 'initiative',
@@ -1548,6 +1605,8 @@ function promptInitiative({ message, worldState, characterSheet, currentTurn = 0
       ? `Initiative ${formatSigned(baseInitiative)} + ${formatConditionD20Sources(getPlayerConditionSubject(characterSheet, worldState)).join(' + ')} = ${formatSigned(initiative)}`
       : null,
     reroll_rules: getAutoD20RerollRules(characterSheet),
+    advantage_mode: advantageSources.length ? 'advantage' : null,
+    advantage_sources: advantageSources,
     intent: message,
     created_turn: currentTurn,
     enemy: buildDefaultEnemy(enemyName),
@@ -1560,7 +1619,7 @@ function promptInitiative({ message, worldState, characterSheet, currentTurn = 0
       ...worldState,
       pending_roll: pendingRoll,
     },
-    reply: `Combat begins. Roll initiative. ${rollTagForPending(pendingRoll)}`,
+    reply: `Combat begins. Roll initiative.${formatAdvantageModeText(pendingRoll.advantage_mode, advantageSources)} ${rollTagForPending(pendingRoll)}`,
   };
 }
 
@@ -1665,14 +1724,16 @@ function resolveCombatAction({ message, intent, worldState, characterSheet, curr
       };
     }
     if (objectInteraction) {
-      const spent = spendTurnResource(worldState, 'action', 'Utilize', characterSheet);
+      const spent = spendUtilizeResource(worldState, characterSheet, message);
       if (!spent.ok) {
         return { handled: true, logType: 'referee_action_unavailable', worldState: spent.worldState, reply: spent.reply };
       }
       const applied = resolveObjectInteraction({ message, worldState: spent.worldState });
       const continued = continuePlayerTurn(
         applied.worldState,
-        `You take the **Utilize** action to ${applied.intent.action} ${applied.target.name}. Object state is updated for narration.`,
+        spent.fastHands
+          ? `You use **Fast Hands** to ${applied.intent.action} ${applied.target.name} as a Bonus Action. Object state is updated for narration.`
+          : `You take the **Utilize** action to ${applied.intent.action} ${applied.target.name}. Object state is updated for narration.`,
         characterSheet,
       );
       return { handled: true, logType: 'referee_combat_object_interaction', ...continued };
@@ -1760,11 +1821,13 @@ function resolveObjectChallengeAction({ message, worldState, characterSheet, cur
   }
 
   let nextWorldState = worldState;
+  let utilizeSpend = { fastHands: false };
   if (inCombat) {
-    const spent = spendTurnResource(worldState, 'action', 'Utilize', characterSheet);
+    const spent = spendUtilizeResource(worldState, characterSheet, message);
     if (!spent.ok) {
       return { handled: true, logType: 'referee_action_unavailable', worldState: spent.worldState, reply: spent.reply };
     }
+    utilizeSpend = spent;
     nextWorldState = spent.worldState;
   }
 
@@ -1800,7 +1863,7 @@ function resolveObjectChallengeAction({ message, worldState, characterSheet, cur
     dc: challenge.dc,
     dc_source: `${challenge.type === 'trap' ? 'trap disarm' : 'lock'} DC from object state; default 15`,
     intent: message,
-    consumes: inCombat ? 'action' : 'exploration',
+    consumes: inCombat ? (utilizeSpend.fastHands ? 'bonus_action' : 'action') : 'exploration',
     combat: Boolean(inCombat),
     created_turn: currentTurn,
     success_result: challenge.successResult,
@@ -1819,8 +1882,17 @@ function resolveObjectChallengeAction({ message, worldState, characterSheet, cur
       ...nextWorldState,
       pending_roll: pendingRoll,
     },
-    reply: `Make a DC ${challenge.dc} ${challenge.label} to ${challenge.action} ${challenge.target.name}.${formatAdvantageModeText(advantageMode, advantageSources)}${inCombat ? ' This uses your Action as the **Utilize** action.' : ''} [CHECK: id=${pendingRoll.id} ability=dex modifier=${modifier.total} breakdown="${sanitizeTagValue(modifier.breakdown)}"]`,
+    reply: `Make a DC ${challenge.dc} ${challenge.label} to ${challenge.action} ${challenge.target.name}.${formatAdvantageModeText(advantageMode, advantageSources)}${inCombat ? utilizeSpend.fastHands ? ' This uses your Bonus Action through **Fast Hands**.' : ' This uses your Action as the **Utilize** action.' : ''} [CHECK: id=${pendingRoll.id} ability=dex modifier=${modifier.total} breakdown="${sanitizeTagValue(modifier.breakdown)}"]`,
   };
+}
+
+function spendUtilizeResource(worldState = {}, characterSheet = {}, message = '') {
+  if (canUseFastHands(characterSheet)) {
+    const bonus = spendTurnResource(worldState, 'bonus_action', 'Fast Hands: Utilize', characterSheet);
+    if (bonus.ok) return { ...bonus, fastHands: true };
+    if (/\b(?:fast hands|bonus action)\b/i.test(message)) return { ...bonus, fastHands: true };
+  }
+  return { ...spendTurnResource(worldState, 'action', 'Utilize', characterSheet), fastHands: false };
 }
 
 function getObjectChallengeModifier(characterSheet = {}, challenge = {}, worldState = {}) {
@@ -2121,7 +2193,7 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
   });
   const attackModeBeforeHelp = combineAdvantageModes(
     combineAdvantageModes(getAttackAdvantageMode(player, target, visionOptions), propertyMode),
-    reckless.advantageMode,
+    combineAdvantageModes(reckless.advantageMode, combat.turn_resources?.steady_aim ? 'advantage' : null),
   );
   const helped = applyHelpToAttack({
     worldState: thrownWeaponSpent.worldState,
@@ -2129,7 +2201,12 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
     attacker: player,
     target,
     advantageMode: attackModeBeforeHelp,
-    sources: [...getAttackAdvantageSources(player, target, visionOptions), ...propertySources, ...reckless.sources],
+    sources: [
+      ...getAttackAdvantageSources(player, target, visionOptions),
+      ...propertySources,
+      ...reckless.sources,
+      ...(combat.turn_resources?.steady_aim ? ['Steady Aim'] : []),
+    ],
   });
   combat = helped.combat;
   player = helped.attacker;
@@ -2164,7 +2241,7 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
   const natural = attackRoll.natural;
   const attackBonusDice = attackRoll.bonusDice;
   const attackTotal = attackRoll.total;
-  const isCrit = natural === 20;
+  const isCrit = natural >= getWeaponCriticalThreshold(characterSheet);
   const criticalMiss = natural === 1;
   const hit = !criticalMiss && (isCrit || attackTotal >= Number(target.ac || 10));
   const lines = [
@@ -2172,6 +2249,10 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
     ...ammunitionSpent.lines,
     ...thrownWeaponSpent.lines,
   ];
+  if (combat.turn_resources?.steady_aim) {
+    combat.turn_resources.steady_aim = false;
+    attackState = { ...attackState, combat_state: combat };
+  }
   if (attack.drawnByThrownWeaponFighting) lines.push(`**Thrown Weapon Fighting:** you draw ${attack.name} as part of the thrown attack.`);
   if (visionOptions.note) lines.push(visionOptions.note);
   if (advantageMode) lines.push(`Attack roll has ${advantageMode} from ${formatList(lucky.sources)}.`);
@@ -2189,9 +2270,10 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
   }
 
   const consumeEffectIds = [];
-  let sneakAttackUsed = false;
+  let sneakAttackUsed = Boolean(combat.turn_resources?.sneak_attack_used);
   let savageAttackerUsed = false;
   let cleaveExtra = null;
+  let remarkableAthleteCritical = isCrit;
   Object.assign(target, consumeVexAdvantage(target));
   if (hit) {
     const damage = rollWeaponDamage({ formula: getWeaponDamageFormula({ attack, message, characterSheet }), characterSheet, rollDie, crit: isCrit, attack });
@@ -2200,8 +2282,11 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
     const flatBonuses = getActiveDamageBonuses(attackState, { attack, characterSheet });
     const fightingStyleBonus = getFightingStyleDamageBonus({ characterSheet, attack, message });
     const flatBonusTotal = flatBonuses.reduce((sum, bonus) => sum + Number(bonus.value || 0), 0) + fightingStyleBonus.total;
-    const sneakAttack = getSneakAttackDamage({ characterSheet, attack, advantageMode, rollDie, crit: isCrit });
-    sneakAttackUsed = sneakAttack.total > 0;
+    const sneakAttack = sneakAttackUsed
+      ? { total: 0, die: `${getSneakAttackDice(characterSheet)}d6` }
+      : getSneakAttackDamage({ characterSheet, attack, advantageMode, rollDie, crit: isCrit });
+    sneakAttackUsed ||= sneakAttack.total > 0;
+    if (sneakAttack.total > 0 && combat.turn_resources) combat.turn_resources.sneak_attack_used = true;
     const totalDamage = damage.total + bonusDamage.total + flatBonusTotal + sneakAttack.total;
     const before = Number(target.hp || 0);
     target.hp = Math.max(0, before - totalDamage);
@@ -2290,6 +2375,7 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
     });
     combat = cleaveResult.combat;
     attackState = cleaveResult.worldState;
+    remarkableAthleteCritical ||= Boolean(cleaveResult.criticalHit);
     lines.push(...cleaveResult.lines);
     consumeEffectIds.push(...cleaveResult.consumeEffectIds);
   } else if (cleaveExtra) {
@@ -2348,6 +2434,7 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
         });
         combat = extraResult.combat;
         attackState = extraResult.worldState;
+        remarkableAthleteCritical ||= Boolean(extraResult.criticalHit);
         lines.push(...extraResult.lines);
         consumeEffectIds.push(...extraResult.consumeEffectIds);
       }
@@ -2375,6 +2462,12 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
     ...attackState,
     combat_state: combat,
   };
+  if (remarkableAthleteCritical) {
+    nextState = grantRemarkableAthleteMovement(nextState, characterSheet);
+    if (getWeaponCriticalThreshold(characterSheet) === 19) {
+      lines.push('**Remarkable Athlete:** you can immediately move up to half your Speed without provoking Opportunity Attacks.');
+    }
+  }
   if (consumeEffectIds.length) {
     nextState = consumeActiveEffects(nextState, consumeEffectIds, characterSheet);
   }
@@ -2492,7 +2585,7 @@ function resolveExtraWeaponAttackRoll({
     rollDie,
   });
   const natural = attackRoll.natural;
-  const isCrit = natural === 20;
+  const isCrit = natural >= getWeaponCriticalThreshold(characterSheet);
   const criticalMiss = natural === 1;
   const hit = !criticalMiss && (isCrit || attackRoll.total >= Number(target.ac || 10));
   const lines = [
@@ -2578,7 +2671,7 @@ function resolveExtraWeaponAttackRoll({
   }
   if (Number(target.hp) <= 0) lines.push(`${target.name} falls.`);
 
-  return { lines, consumeEffectIds, combat, worldState };
+  return { lines, consumeEffectIds, combat, worldState, criticalHit: isCrit };
 }
 
 function getLivingEnemy(combat = {}) {
@@ -3502,10 +3595,12 @@ function getSneakAttackDamage({ characterSheet = {}, attack = {}, advantageMode 
   if (advantageMode !== 'advantage') return { total: 0, die: '1d6' };
   if (!isSneakAttackWeapon(attack)) return { total: 0, die: '1d6' };
 
-  const damage = rollDamageFormula('1d6', rollDie, { crit });
+  const dice = getSneakAttackDice(characterSheet);
+  const formula = `${dice}d6`;
+  const damage = rollDamageFormula(formula, rollDie, { crit });
   return {
     total: damage.total,
-    die: crit ? '2d6' : '1d6',
+    die: `${crit ? dice * 2 : dice}d6`,
   };
 }
 

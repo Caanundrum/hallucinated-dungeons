@@ -31,6 +31,8 @@ const SUPPORTED_LEVEL_UP_MECHANICS = new Set([
   'wild_companion',
   'wild_shape',
   'eldritch_invocations_level_2',
+  'fighter_level_3',
+  'rogue_level_3',
 ]);
 
 const METAMAGIC_OPTIONS = [
@@ -245,6 +247,7 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
     fightingStyle: selectedFightingStyle,
     hasJackOfAllTrades: Boolean(currentDerived.jack_of_all_trades || (advancement.runtime_mechanics || []).includes('jack_of_all_trades')),
   });
+  applyLevelThreeDerivedStats(nextDerivedStats, preview.classId, nextLevel);
   const pactWeaponAttack = buildPactWeaponAttack({
     weaponId: invocationState.pactWeaponId,
     characterSheet,
@@ -622,6 +625,20 @@ function buildLeveledDerivedStats({
   }
 
   return applyFightingStyleToDerivedStats(nextDerived, characterSheet, fightingStyle);
+}
+
+function applyLevelThreeDerivedStats(derived = {}, classId = '', level = 1) {
+  if (Number(level) < 3) return derived;
+  if (classId === 'fighter') {
+    derived.weapon_critical_threshold = 19;
+    derived.initiative_advantage_sources = [...new Set([...(derived.initiative_advantage_sources || []), 'Remarkable Athlete'])];
+  }
+  if (classId === 'rogue') {
+    derived.sneak_attack_dice = '2d6';
+    derived.climb_speed = Number(derived.speed || 30);
+    derived.jump_ability = 'dex';
+  }
+  return derived;
 }
 
 function buildSkillModifiersForLevelUp({

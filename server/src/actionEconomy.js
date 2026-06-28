@@ -276,6 +276,9 @@ function describeAvailableResources(resources = {}) {
   if (Number(resources.movement_remaining || 0) > 0) {
     available.push(`${Number(resources.movement_remaining)} ft movement`);
   }
+  if (Number(resources.remarkable_athlete_movement_remaining || 0) > 0) {
+    available.push(`${Number(resources.remarkable_athlete_movement_remaining)} ft Remarkable Athlete movement`);
+  }
   return available.length ? available.join(', ') : 'no major combat resources';
 }
 

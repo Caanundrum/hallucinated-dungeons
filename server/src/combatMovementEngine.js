@@ -1,4 +1,5 @@
 const {
+  ensureTurnResources,
   grantMovement,
   spendMovement,
   spendTurnResource,
@@ -18,6 +19,10 @@ const {
   resolveCreatureAttackHit,
 } = require('./creatureTurnEngine');
 const { formatPendingReactionPrompt } = require('./reactionEngine');
+const {
+  getRemarkableAthleteMovement,
+  spendRemarkableAthleteMovement,
+} = require('./subclassFeatureEngine');
 const {
   REACTION_RESUME_STAGES,
   REACTION_RESUME_TYPES,
@@ -129,25 +134,32 @@ function resolveCombatMovement({
 } = {}) {
   if (!worldState.combat_state?.active) return null;
 
-  const combat = clone(worldState.combat_state);
+  const readyState = ensureTurnResources(worldState, characterSheet);
+  const combat = clone(readyState.combat_state);
   const playerIndex = combat.combatants.findIndex((combatant) => combatant.is_player);
   const player = combat.combatants[playerIndex];
   if (!player) return blocked(worldState, 'Combat movement needs an active character in the initiative tracker.');
 
   const movement = getMovementRecord({ message, combat, player, destination, characterSheet });
   if (!movement.ok) return blocked(worldState, movement.reply);
+  movement.hadTurnResources = Boolean(worldState.combat_state?.turn_resources);
 
-  const available = spendMovement(worldState, movement.feet, 'combat movement', characterSheet);
-  if (!available.ok) return blocked(available.worldState, available.reply);
+  if (movement.feet > getRemainingMovement(readyState)) {
+    return blocked(readyState, `You only have ${getRemainingMovement(readyState)} ft of movement available, including any Remarkable Athlete movement.`);
+  }
 
-  const opportunity = resolveOpportunityAttacks({
-    message,
-    worldState: { ...worldState, combat_state: combat },
-    characterSheet,
-    rollDie,
-    destination: movement.to,
-    allowReactionWindow: true,
-  });
+  const protectedByRemarkableAthlete = movement.feet <= getRemarkableAthleteMovement(readyState);
+  const opportunity = protectedByRemarkableAthlete
+    ? noOpportunityAttackResult({ worldState: { ...readyState, combat_state: combat } })
+    : resolveOpportunityAttacks({
+        message,
+        worldState: { ...readyState, combat_state: combat },
+        characterSheet,
+        rollDie,
+        destination: movement.to,
+        allowReactionWindow: true,
+      });
+  movement.remarkableAthleteProtected = protectedByRemarkableAthlete;
   if (opportunity.paused) {
     return pauseCombatMovement({ opportunity, movement });
   }
@@ -183,13 +195,23 @@ function resumeCombatMovement({
 
 function finishCombatMovement({ opportunity, movement, characterSheet }) {
   if (Number(opportunity.player?.hp || 0) <= 0) {
-    return resolved('referee_combat_movement_stopped', opportunity.worldState, [
+    const stoppedState = movement.hadTurnResources
+      ? opportunity.worldState
+      : {
+          ...opportunity.worldState,
+          combat_state: {
+            ...opportunity.worldState.combat_state,
+            turn_resources: undefined,
+          },
+        };
+    return resolved('referee_combat_movement_stopped', stoppedState, [
       ...opportunity.lines,
       'The Opportunity Attack stops your movement before you leave reach.',
     ], opportunity.damageEvents);
   }
 
-  const spent = spendMovement(opportunity.worldState, movement.feet, 'combat movement', characterSheet);
+  const special = spendRemarkableAthleteMovement(opportunity.worldState, movement.feet);
+  const spent = spendMovement(special.worldState, movement.feet - special.spent, 'combat movement', characterSheet);
   if (!spent.ok) return blocked(spent.worldState, spent.reply);
   const nextState = recordMovement(spent.worldState, movement);
   const assumption = opportunity.assumedSceneZone
@@ -198,7 +220,7 @@ function finishCombatMovement({ opportunity, movement, characterSheet }) {
   return resolved('referee_combat_movement', nextState, [
     ...opportunity.lines,
     movement.speciesNote,
-    `You move ${movement.feet} feet${movement.destinationText}. ${getRemainingMovement(nextState)} feet of movement remain.${assumption}`,
+    `You move ${movement.feet} feet${movement.destinationText}.${movement.remarkableAthleteProtected ? ' Remarkable Athlete movement prevents Opportunity Attacks.' : ''} ${getRemainingMovement(nextState)} feet of movement remain.${assumption}`,
     'You can use another available combat resource or end your turn.',
   ], opportunity.damageEvents);
 }
@@ -370,6 +392,18 @@ function resolveOpportunityAttacks({
   }
 
   return { worldState: nextWorldState, combat, player, lines, damageEvents, assumedSceneZone };
+}
+
+function noOpportunityAttackResult({ worldState = {} } = {}) {
+  const combat = clone(worldState.combat_state);
+  return {
+    worldState: { ...worldState, combat_state: combat },
+    combat,
+    player: (combat.combatants || []).find((combatant) => combatant.is_player),
+    lines: [],
+    damageEvents: [],
+    assumedSceneZone: false,
+  };
 }
 
 function syncOpportunityAttackState({ worldState = {}, combat = {}, player = {}, playerIndex = -1 }) {
@@ -576,7 +610,8 @@ function getPlayerConditionSubject(characterSheet = {}, worldState = {}) {
 }
 
 function getRemainingMovement(worldState = {}) {
-  return Number(worldState.combat_state?.turn_resources?.movement_remaining || 0);
+  return Number(worldState.combat_state?.turn_resources?.movement_remaining || 0)
+    + getRemarkableAthleteMovement(worldState);
 }
 
 function getDeclaredMovementFeet(message = '') {
