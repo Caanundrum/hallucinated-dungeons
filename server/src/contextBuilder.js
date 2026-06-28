@@ -202,7 +202,8 @@ function buildPartyPresenceText(rows) {
       const combatNote = row.in_combat
         ? ' In combat: character remains present and vulnerable until combat ends.'
         : '';
-      return `- ${name}: ${row.presence}; ${className} level ${level}.${combatNote}`;
+      const subclassName = identity.subclass_name ? ` (${identity.subclass_name})` : '';
+      return `- ${name}: ${row.presence}; ${className}${subclassName} level ${level}.${combatNote}`;
     })
     .join('\n');
 }
@@ -221,7 +222,7 @@ function buildActiveCharacterText(characterSheet) {
   const lines = [];
 
   lines.push(`Name: ${identity.name || 'Unnamed'}`);
-  lines.push(`Build: ${identity.species_name || identity.species || 'Unknown species'} ${identity.class_name || identity.class || 'Unknown class'} level ${identity.level || derived.level || 1}`);
+  lines.push(`Build: ${identity.species_name || identity.species || 'Unknown species'} ${identity.class_name || identity.class || 'Unknown class'}${identity.subclass_name ? ` (${identity.subclass_name})` : ''} level ${identity.level || derived.level || 1}`);
   lines.push(`Core stats: HP ${derived.hp ?? '--'}/${derived.max_hp ?? '--'}, AC ${derived.armor_class ?? '--'}, Speed ${derived.speed ?? '--'} ft, Initiative ${fmtSigned(derived.initiative)}, Proficiency ${fmtSigned(derived.proficiency_bonus)}`);
   if (abilities.final_scores) {
     lines.push(`Ability modifiers: ${Object.entries(abilities.modifiers || {}).map(([key, value]) => `${key.toUpperCase()} ${fmtSigned(value)}`).join(', ')}`);

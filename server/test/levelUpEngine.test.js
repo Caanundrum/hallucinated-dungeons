@@ -892,3 +892,93 @@ test('proficiency bonus follows the SRD advancement table cadence', () => {
   assert.equal(proficiencyBonus(5), 3);
   assert.equal(proficiencyBonus(17), 6);
 });
+
+test('level 3 subclass foundation covers every class with one legal SRD option', () => {
+  const content = getContentBundle();
+  const classIds = content.classes.map((entry) => entry.id).sort();
+  const subclassClassIds = [...new Set(content.subclasses.map((entry) => entry.class_id))].sort();
+
+  assert.deepEqual(subclassClassIds, classIds);
+  for (const classId of classIds) {
+    assert(content.classAdvancement.levels[classId]?.['3'], `${classId} needs level 3 advancement data`);
+    assert.equal(content.subclasses.filter((entry) => entry.class_id === classId).length, 1);
+  }
+});
+
+test('fighter level 3 preview validates subclass ownership and remains mechanics-gated', () => {
+  const sheet = baseSheet({
+    identity: { level: 2, experience_points: 900, level_up_available: true },
+    progression: { experience_points: 900 },
+    derived_stats: { level: 2 },
+  });
+  const content = getContentBundle();
+  const initial = getLevelUpPreview(sheet, content);
+  const subclassChoice = initial.requiredChoices.find((choice) => choice.id === 'subclass');
+
+  assert.equal(initial.canLevelUp, true);
+  assert.equal(initial.canApply, false);
+  assert.deepEqual(subclassChoice.options.map((option) => option.id), ['champion']);
+  assert(initial.blockers.some((entry) => entry.type === 'required_choice'));
+
+  const forged = getLevelUpPreview(sheet, content, {
+    choices: { subclass: ['thief'] },
+  });
+  assert.equal(forged.selectedSubclass, null);
+  assert(forged.blockers.some((entry) => entry.type === 'invalid_choice'));
+
+  const selected = getLevelUpPreview(sheet, content, {
+    choices: { subclass: ['champion'] },
+  });
+  assert.equal(selected.selectedSubclass.name, 'Champion');
+  assert.deepEqual(selected.features.map((feature) => feature.name), ['Improved Critical', 'Remarkable Athlete']);
+  assert(selected.blockers.some((entry) => entry.type === 'unsupported_mechanic' && entry.mechanic === 'fighter_level_3'));
+});
+
+test('shared level 3 apply path persists subclass identity, features, and history when mechanics are ready', () => {
+  const content = getContentBundle();
+  const sheet = baseSheet({
+    identity: { level: 2, experience_points: 900, level_up_available: true },
+    progression: { experience_points: 900 },
+    derived_stats: { level: 2 },
+  });
+  const result = applyLevelUp({
+    characterSheet: sheet,
+    content,
+    payload: { choices: { subclass: ['champion'] } },
+    options: { supportedMechanics: new Set(['fighter_level_3']) },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.characterSheet.identity.level, 3);
+  assert.equal(result.characterSheet.identity.subclass, 'champion');
+  assert.equal(result.characterSheet.identity.subclass_name, 'Champion');
+  assert.equal(result.characterSheet.class_choices.subclass, 'champion');
+  assert(result.characterSheet.features.some((feature) => feature.name === 'Improved Critical' && feature.source === 'subclass'));
+  assert.equal(result.characterSheet.progression.level_history.at(-1).subclass, 'champion');
+});
+
+test('barbarian level 3 skill choice becomes an authoritative proficiency', () => {
+  const content = getContentBundle();
+  const sheet = baseSheet({
+    identity: { class: 'barbarian', class_name: 'Barbarian', level: 2, experience_points: 900, level_up_available: true },
+    progression: { experience_points: 900 },
+    derived_stats: {
+      level: 2,
+      skill_modifiers: {
+        athletics: { ability: 'str', proficient: true, expertise: false, total: 5 },
+        survival: { ability: 'wis', proficient: false, expertise: false, total: 1 },
+      },
+    },
+  });
+  const result = applyLevelUp({
+    characterSheet: sheet,
+    content,
+    payload: { choices: { subclass: ['path_of_the_berserker'], primal_knowledge_skill: ['survival'] } },
+    options: { supportedMechanics: new Set(['barbarian_level_3']) },
+  });
+
+  assert.equal(result.ok, true);
+  assert(result.characterSheet.proficiencies.skills.includes('survival'));
+  assert.equal(result.characterSheet.derived_stats.skill_modifiers.survival.proficient, true);
+  assert.equal(result.characterSheet.derived_stats.skill_modifiers.survival.total, 3);
+});

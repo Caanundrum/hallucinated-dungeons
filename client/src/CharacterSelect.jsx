@@ -42,6 +42,7 @@ function CharacterSelect({
               </span>
               <span>
                 Level {character.summary?.level || 1} {character.summary?.species || ''} {character.summary?.className || ''}
+                {character.summary?.subclassName ? ` (${character.summary.subclassName})` : ''}
               </span>
               <small>
                 HP {character.summary?.hp ?? '--'}/{character.summary?.maxHp ?? '--'} / AC {character.summary?.armorClass ?? '--'}

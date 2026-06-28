@@ -20,7 +20,7 @@ function summarizeCharacterSheetForRules(characterSheet) {
   const levelUpReady = Boolean(identity.level_up_available || progression.level_up_available?.ready);
 
   lines.push(`Name: ${identity.name || 'Unnamed'}`);
-  lines.push(`Build: ${identity.species_name || identity.species || 'Unknown species'} ${identity.class_name || identity.class || 'Unknown class'} level ${identity.level || derived.level || 1}`);
+  lines.push(`Build: ${identity.species_name || identity.species || 'Unknown species'} ${identity.class_name || identity.class || 'Unknown class'}${identity.subclass_name ? ` (${identity.subclass_name})` : ''} level ${identity.level || derived.level || 1}`);
   lines.push(`Progression: XP ${experiencePoints}${nextLevelXp ? `/${nextLevelXp}` : ''}${levelUpReady ? '; level up available' : ''}`);
   lines.push(`Core stats: HP ${derived.hp ?? '--'}/${derived.max_hp ?? '--'}, AC ${derived.armor_class ?? '--'}, Speed ${derived.speed ?? '--'} ft, Initiative ${fmtSigned(derived.initiative)}, Proficiency ${fmtSigned(derived.proficiency_bonus)}`);
   const acSources = formatArmorClassSources(derived.armor_class_breakdown, derived.armor_class);

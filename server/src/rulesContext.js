@@ -179,6 +179,8 @@ function buildActor(characterSheet, worldState, sessionId) {
     name: name || 'Active character',
     class_id: identity.class || null,
     class_name: identity.class_name || identity.class || null,
+    subclass_id: identity.subclass || null,
+    subclass_name: identity.subclass_name || null,
     level: Number(identity.level || derived.level || 1),
   };
 }
@@ -399,7 +401,7 @@ function summarizeRulesContextForPrompt(rulesContext = {}) {
     .map((entity) => `${entity.id}=${entity.name}`)
     .join('; ') || 'none';
   const actor = rulesContext.actor
-    ? `${rulesContext.actor.entity_id} (${rulesContext.actor.name}, ${rulesContext.actor.class_name || 'unknown class'} level ${rulesContext.actor.level})`
+    ? `${rulesContext.actor.entity_id} (${rulesContext.actor.name}, ${rulesContext.actor.class_name || 'unknown class'}${rulesContext.actor.subclass_name ? ` (${rulesContext.actor.subclass_name})` : ''} level ${rulesContext.actor.level})`
     : 'none';
   return [
     `Rules context version: ${rulesContext.version || RULES_CONTEXT_VERSION}.`,

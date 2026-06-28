@@ -145,6 +145,7 @@ function summarizeCharacterOption(characterId, character) {
     summary: {
       species: identity.species_name || identity.species || '',
       className: identity.class_name || identity.class || '',
+      subclassName: identity.subclass_name || '',
       level: identity.level || derived.level || 1,
       hp: derived.hp ?? null,
       maxHp: derived.max_hp ?? null,
@@ -925,7 +926,10 @@ function CharacterSheetModal({ character, content, levelUpBusy, onClose, onLevel
           <div>
             <p className="eyebrow">Character Sheet</p>
             <h2>{identity.name}</h2>
-            <p>{identity.species_name} {identity.class_name} - Level {identity.level || derived.level || 1}</p>
+            <p>
+              {identity.species_name} {identity.class_name}
+              {identity.subclass_name ? ` (${identity.subclass_name})` : ''} - Level {identity.level || derived.level || 1}
+            </p>
             {levelUpReady && <span className="level-up-badge">Level Up Available</span>}
           </div>
           <div className="sheet-header-actions">
@@ -1281,6 +1285,16 @@ function LevelUpModal({ preview, error, busy, onClose, onConfirm }) {
                 </div>
               )) : <p className="muted-text">No new feature data for this level.</p>}
             </section>
+
+            {preview.selectedSubclass && (
+              <section className="sheet-section">
+                <h3>Subclass</h3>
+                <div className="sheet-line">
+                  <strong>{preview.selectedSubclass.name}</strong>
+                  <span>{preview.selectedSubclass.description}</span>
+                </div>
+              </section>
+            )}
 
             {activeRequiredChoices.length > 0 && (
               <section className="sheet-section">

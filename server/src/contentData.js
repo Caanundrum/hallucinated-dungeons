@@ -8,6 +8,16 @@ function readJson(name) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
 }
 
+function mergeAdvancementCatalogs(...catalogs) {
+  const merged = { version: catalogs.map((catalog) => catalog.version).filter(Boolean).join('+'), levels: {} };
+  for (const catalog of catalogs) {
+    for (const [classId, levels] of Object.entries(catalog.levels || {})) {
+      merged.levels[classId] = { ...(merged.levels[classId] || {}), ...levels };
+    }
+  }
+  return merged;
+}
+
 const content = {
   species: readJson('species.json'),
   classes: readJson('classes.json'),
@@ -18,8 +28,12 @@ const content = {
   equipment: readJson('equipment.json'),
   spells: readJson('spells.json'),
   feats: readJson('feats.json'),
+  subclasses: readJson('subclasses.json'),
   xpThresholds: readJson('xp_thresholds.json'),
-  classAdvancement: readJson('class_level_advancement.json'),
+  classAdvancement: mergeAdvancementCatalogs(
+    readJson('class_level_advancement.json'),
+    readJson('level_3_advancement.json'),
+  ),
   itemEffects: readJson('item_effects.json'),
   abilityScoreMethods: [
     {

@@ -1,0 +1,170 @@
+[
+  {
+    "id": "path_of_the_berserker",
+    "class_id": "barbarian",
+    "name": "Path of the Berserker",
+    "unlock_level": 3,
+    "description": "Turn battle fury into relentless offense while refusing effects that would bend your courage or will.",
+    "level_features": {
+      "3": [
+        { "id": "frenzy", "name": "Frenzy", "description": "Reckless Attack can add extra damage to the first Strength-based hit on your turn while Rage is active." },
+        { "id": "mindless_rage", "name": "Mindless Rage", "description": "Rage protects you from being Charmed or Frightened and suppresses those conditions while it lasts." }
+      ]
+    },
+    "runtime_mechanics": ["barbarian_level_3"]
+  },
+  {
+    "id": "college_of_lore",
+    "class_id": "bard",
+    "name": "College of Lore",
+    "unlock_level": 3,
+    "description": "Collect broad expertise and turn sharp observation into a defense for your allies.",
+    "level_features": {
+      "3": [
+        { "id": "bonus_proficiencies", "name": "Bonus Proficiencies", "description": "Gain proficiency in three additional skills." },
+        { "id": "cutting_words", "name": "Cutting Words", "description": "Use Bardic Inspiration and a Reaction to reduce a nearby creature's successful attack roll, ability check, or damage roll." }
+      ]
+    },
+    "runtime_mechanics": ["bard_level_3"]
+  },
+  {
+    "id": "life_domain",
+    "class_id": "cleric",
+    "name": "Life Domain",
+    "unlock_level": 3,
+    "description": "Channel divine power toward restoration, endurance, and keeping wounded companions in the fight.",
+    "level_features": {
+      "3": [
+        { "id": "disciple_of_life", "name": "Disciple of Life", "description": "Healing spells cast with a spell slot restore additional Hit Points." },
+        { "id": "life_domain_spells", "name": "Life Domain Spells", "description": "Gain the level-appropriate Life Domain spells as always-prepared spells." },
+        { "id": "preserve_life", "name": "Preserve Life", "description": "Spend Channel Divinity to divide a pool of healing among Bloodied creatures nearby." }
+      ]
+    },
+    "runtime_mechanics": ["cleric_level_3"]
+  },
+  {
+    "id": "circle_of_the_land",
+    "class_id": "druid",
+    "name": "Circle of the Land",
+    "unlock_level": 3,
+    "description": "Draw adaptable magic and restorative power from the environment around you.",
+    "level_features": {
+      "3": [
+        { "id": "circle_of_the_land_spells", "name": "Circle of the Land Spells", "description": "Choose a land connection after a Long Rest to gain its always-prepared spells." },
+        { "id": "lands_aid", "name": "Land's Aid", "description": "Spend Wild Shape to harm nearby foes while restoring an ally's Hit Points." }
+      ]
+    },
+    "runtime_mechanics": ["druid_level_3"]
+  },
+  {
+    "id": "champion",
+    "class_id": "fighter",
+    "name": "Champion",
+    "unlock_level": 3,
+    "description": "Refine physical training into broader critical hits and stronger athletic performance.",
+    "level_features": {
+      "3": [
+        { "id": "improved_critical", "name": "Improved Critical", "description": "Weapon and Unarmed Strike attacks score a Critical Hit on a roll of 19 or 20." },
+        { "id": "remarkable_athlete", "name": "Remarkable Athlete", "description": "Gain Advantage on Initiative and Strength (Athletics) checks." }
+      ]
+    },
+    "runtime_mechanics": ["fighter_level_3"]
+  },
+  {
+    "id": "warrior_of_the_open_hand",
+    "class_id": "monk",
+    "name": "Warrior of the Open Hand",
+    "unlock_level": 3,
+    "description": "Control enemies with precise techniques delivered through Flurry of Blows.",
+    "level_features": {
+      "3": [
+        { "id": "open_hand_technique", "name": "Open Hand Technique", "description": "Flurry of Blows hits can prevent reactions, push a target, or knock it Prone." }
+      ]
+    },
+    "runtime_mechanics": ["monk_level_3"]
+  },
+  {
+    "id": "oath_of_devotion",
+    "class_id": "paladin",
+    "name": "Oath of Devotion",
+    "unlock_level": 3,
+    "description": "Swear a formal oath centered on justice, duty, compassion, and honorable conduct.",
+    "level_features": {
+      "3": [
+        { "id": "oath_of_devotion_spells", "name": "Oath of Devotion Spells", "description": "Gain the level-appropriate oath spells as always-prepared spells." },
+        { "id": "sacred_weapon", "name": "Sacred Weapon", "description": "Spend Channel Divinity to empower a held weapon with divine accuracy and light." }
+      ]
+    },
+    "runtime_mechanics": ["paladin_level_3"]
+  },
+  {
+    "id": "hunter",
+    "class_id": "ranger",
+    "name": "Hunter",
+    "unlock_level": 3,
+    "description": "Study dangerous prey and adapt your attacks to exploit the opening it gives you.",
+    "level_features": {
+      "3": [
+        { "id": "hunters_lore", "name": "Hunter's Lore", "description": "Hunter's Mark reveals useful weaknesses, resistances, and immunities of the marked creature." },
+        { "id": "hunters_prey", "name": "Hunter's Prey", "description": "Choose a specialized offensive technique and change that choice after a rest." }
+      ]
+    },
+    "runtime_mechanics": ["ranger_level_3"]
+  },
+  {
+    "id": "thief",
+    "class_id": "rogue",
+    "name": "Thief",
+    "unlock_level": 3,
+    "description": "Turn speed, dexterity, and practical tricks into control over objects, locks, traps, and terrain.",
+    "level_features": {
+      "3": [
+        { "id": "fast_hands", "name": "Fast Hands", "description": "Use a Bonus Action for certain Sleight of Hand checks, Utilize actions, and eligible magic items." },
+        { "id": "second_story_work", "name": "Second-Story Work", "description": "Gain a Climb Speed and use Dexterity for longer jumps." }
+      ]
+    },
+    "runtime_mechanics": ["rogue_level_3"]
+  },
+  {
+    "id": "draconic_sorcery",
+    "class_id": "sorcerer",
+    "name": "Draconic Sorcery",
+    "unlock_level": 3,
+    "description": "Manifest durable draconic magic through protective scales, vitality, and inherited spells.",
+    "level_features": {
+      "3": [
+        { "id": "draconic_resilience", "name": "Draconic Resilience", "description": "Increase maximum Hit Points and gain a natural Armor Class formula while unarmored." },
+        { "id": "draconic_spells", "name": "Draconic Spells", "description": "Gain the level-appropriate draconic spells as always-prepared spells." }
+      ]
+    },
+    "runtime_mechanics": ["sorcerer_level_3"]
+  },
+  {
+    "id": "fiend_patron",
+    "class_id": "warlock",
+    "name": "Fiend Patron",
+    "unlock_level": 3,
+    "description": "Draw dangerous resilience and destructive magic from a bargain tied to the Lower Planes.",
+    "level_features": {
+      "3": [
+        { "id": "dark_ones_blessing", "name": "Dark One's Blessing", "description": "Gain Temporary Hit Points when an enemy falls nearby or by your hand." },
+        { "id": "fiend_spells", "name": "Fiend Spells", "description": "Gain the level-appropriate Fiend Patron spells as always-prepared spells." }
+      ]
+    },
+    "runtime_mechanics": ["warlock_level_3"]
+  },
+  {
+    "id": "evoker",
+    "class_id": "wizard",
+    "name": "Evoker",
+    "unlock_level": 3,
+    "description": "Specialize in shaping raw magical energy with efficient study and reliable damaging cantrips.",
+    "level_features": {
+      "3": [
+        { "id": "evocation_savant", "name": "Evocation Savant", "description": "Add two eligible Evocation spells to your spellbook without paying their normal transcription cost." },
+        { "id": "potent_cantrip", "name": "Potent Cantrip", "description": "Damaging cantrips still deal partial damage when an attack misses or a target succeeds on its save." }
+      ]
+    },
+    "runtime_mechanics": ["wizard_level_3"]
+  }
+]

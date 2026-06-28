@@ -1,0 +1,17 @@
+{
+  "version": "srd-5.2.1-level-3-subclass-foundation",
+  "levels": {
+    "barbarian": { "3": { "features": [{ "id": "primal_knowledge", "name": "Primal Knowledge", "description": "Gain another Barbarian skill proficiency and use Strength for certain primal skill checks while raging." }], "runtime_mechanics": ["barbarian_level_3"], "required_choices": [{ "id": "subclass", "label": "Barbarian Subclass", "type": "subclass", "count": 1 }, { "id": "primal_knowledge_skill", "label": "Primal Knowledge Skill", "type": "skill_proficiency", "count": 1 }] } },
+    "bard": { "3": { "features": [], "runtime_mechanics": ["bard_level_3"], "required_choices": [{ "id": "subclass", "label": "Bard Subclass", "type": "subclass", "count": 1 }] } },
+    "cleric": { "3": { "features": [{ "id": "channel_divinity_level_3", "name": "Channel Divinity", "description": "Channel Divinity increases to two uses between rests." }], "runtime_mechanics": ["cleric_level_3"], "required_choices": [{ "id": "subclass", "label": "Cleric Subclass", "type": "subclass", "count": 1 }] } },
+    "druid": { "3": { "features": [], "runtime_mechanics": ["druid_level_3"], "required_choices": [{ "id": "subclass", "label": "Druid Subclass", "type": "subclass", "count": 1 }] } },
+    "fighter": { "3": { "features": [], "runtime_mechanics": ["fighter_level_3"], "required_choices": [{ "id": "subclass", "label": "Fighter Subclass", "type": "subclass", "count": 1 }] } },
+    "monk": { "3": { "features": [{ "id": "deflect_attacks", "name": "Deflect Attacks", "description": "Use a Reaction to reduce incoming physical attack damage and possibly redirect the attack." }], "runtime_mechanics": ["monk_level_3"], "required_choices": [{ "id": "subclass", "label": "Monk Subclass", "type": "subclass", "count": 1 }] } },
+    "paladin": { "3": { "features": [{ "id": "channel_divinity_level_3", "name": "Channel Divinity", "description": "Gain two Channel Divinity uses and the Divine Sense option." }], "runtime_mechanics": ["paladin_level_3"], "required_choices": [{ "id": "subclass", "label": "Paladin Subclass", "type": "subclass", "count": 1 }] } },
+    "ranger": { "3": { "features": [], "runtime_mechanics": ["ranger_level_3"], "required_choices": [{ "id": "subclass", "label": "Ranger Subclass", "type": "subclass", "count": 1 }] } },
+    "rogue": { "3": { "features": [{ "id": "steady_aim", "name": "Steady Aim", "description": "Trade movement and a Bonus Action for Advantage on your next attack this turn." }, { "id": "sneak_attack_level_3", "name": "Sneak Attack (2d6)", "description": "Sneak Attack damage increases to 2d6." }], "runtime_mechanics": ["rogue_level_3"], "required_choices": [{ "id": "subclass", "label": "Rogue Subclass", "type": "subclass", "count": 1 }] } },
+    "sorcerer": { "3": { "features": [], "runtime_mechanics": ["sorcerer_level_3"], "required_choices": [{ "id": "subclass", "label": "Sorcerer Subclass", "type": "subclass", "count": 1 }] } },
+    "warlock": { "3": { "features": [], "runtime_mechanics": ["warlock_level_3"], "required_choices": [{ "id": "subclass", "label": "Warlock Subclass", "type": "subclass", "count": 1 }] } },
+    "wizard": { "3": { "features": [], "runtime_mechanics": ["wizard_level_3"], "required_choices": [{ "id": "subclass", "label": "Wizard Subclass", "type": "subclass", "count": 1 }] } }
+  }
+}

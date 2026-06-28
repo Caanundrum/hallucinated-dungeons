@@ -355,6 +355,7 @@ function characterSheetToWorldStats(characterSheet, characterId = null) {
     character_id: characterId || stats.character_id || null,
     name: identity.name || '',
     class: identity.class_name || '',
+    subclass: identity.subclass_name || '',
     level: stats.level || identity.level || 1,
     hp: stats.hp ?? null,
     max_hp: stats.max_hp ?? null,
@@ -408,6 +409,7 @@ function summarizeCharacterForClient(row) {
     summary: {
       species: identity.species_name || identity.species || '',
       className: identity.class_name || identity.class || '',
+      subclassName: identity.subclass_name || '',
       level: identity.level || derived.level || 1,
       hp: derived.hp ?? null,
       maxHp: derived.max_hp ?? null,
@@ -438,7 +440,7 @@ function describePartyChange(type, characterSheet, worldState, presenceRows = []
   return [
     '[PARTY CHANGE]',
     `Event: ${type}`,
-    `Character: ${characterName}; ${speciesName} ${className} level ${identity.level || derived.level || 1}`,
+    `Character: ${characterName}; ${speciesName} ${className}${identity.subclass_name ? ` (${identity.subclass_name})` : ''} level ${identity.level || derived.level || 1}`,
     `Character flavor: ${buildCharacterFlavorCue(className, details)}`,
     `Current location: ${scene.exact_location || worldState.current_location || 'not yet established'}`,
     `Scene NPCs present: ${formatList(scene.present_npcs)}`,

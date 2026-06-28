@@ -97,6 +97,7 @@ function buildRulesCoverageMatrix({ content = getContentBundle(), catalog = DEFA
       conditions: buildSection('conditions', CORE_CONDITIONS.map((id) => simpleEntry('condition', id, titleCase(id), statusFrom(catalog.conditions?.[id])))),
       resources: buildSection('resources', Object.entries(catalog.resources || {}).map(([id, status]) => simpleEntry('resource', id, titleCase(id), statusFrom(status)))),
       classes: buildSection('classes', (content.classes || []).map((item) => classEntry(item, catalog))),
+      subclasses: buildSection('subclasses', (content.subclasses || []).map(subclassEntry)),
       species: buildSection('species', (content.species || []).map((item) => speciesEntry(item, catalog))),
       origin_feats: buildSection('origin_feats', (content.feats || []).map((item) => featEntry(item, catalog))),
       spells: buildSection('spells', (content.spells || []).map((item) => spellEntry(item, catalog))),
@@ -157,6 +158,25 @@ function classEntry(item, catalog) {
       spellbook_spells: item.spellcasting.spellbook_spells || 0,
       slots: item.spellcasting.slots || {},
     } : null,
+  });
+}
+
+function subclassEntry(item) {
+  const featureEntries = Object.entries(item.level_features || {}).flatMap(([level, features]) => (
+    (features || []).map((feature) => simpleEntry('subclass_feature', feature.id, feature.name, STATUS.DEFERRED, {
+      description: feature.description || '',
+      parent_id: item.id,
+      parent_name: item.name,
+      level: Number(level),
+      implementation: 'Cataloged and mechanically gated until this class level package is implemented.',
+    }))
+  ));
+  return simpleEntry('subclass', item.id, item.name, STATUS.DEFERRED, {
+    description: item.description || '',
+    class_id: item.class_id,
+    unlock_level: Number(item.unlock_level || 3),
+    implementation: 'Legal selection, ownership validation, persistence, and display are implemented; runtime features remain gated.',
+    children: featureEntries,
   });
 }
 

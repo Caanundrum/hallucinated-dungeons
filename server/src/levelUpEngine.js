@@ -83,8 +83,24 @@ function getLevelUpPreview(characterSheet = {}, content = getContentBundle(), op
   });
   blockers.push(...validateRequiredChoices(requiredChoices, choiceSelections));
 
+  const selectedSubclass = getSelectedSubclass({
+    characterSheet,
+    content,
+    classId,
+    nextLevel,
+    selections: choiceSelections,
+  });
+  const levelFeatures = [
+    ...(advancement?.features || []),
+    ...getSubclassFeatures(selectedSubclass, nextLevel),
+  ];
+  const runtimeMechanics = [...new Set([
+    ...(advancement?.runtime_mechanics || []),
+    ...(selectedSubclass?.runtime_mechanics || []),
+  ])];
+
   const supportedMechanics = options.supportedMechanics || SUPPORTED_LEVEL_UP_MECHANICS;
-  for (const mechanic of advancement?.runtime_mechanics || []) {
+  for (const mechanic of runtimeMechanics) {
     if (supportedMechanics.has(mechanic)) continue;
     blockers.push(blocker(
       'unsupported_mechanic',
@@ -109,14 +125,15 @@ function getLevelUpPreview(characterSheet = {}, content = getContentBundle(), op
       current: proficiencyBonus(currentLevel),
       next: proficiencyBonus(nextLevel),
     },
-    features: (advancement?.features || []).map((feature) => ({
+    features: levelFeatures.map((feature) => ({
       id: feature.id,
       name: feature.name,
       description: feature.description || '',
     })),
     requiredChoices,
+    selectedSubclass: selectedSubclass ? summarizeSubclass(selectedSubclass) : null,
     choices: choiceSelections,
-    runtimeMechanics: advancement?.runtime_mechanics || [],
+    runtimeMechanics,
     spellcasting: advancement?.spellcasting || null,
     resources: advancement?.resources || {},
     derived: advancement?.derived || {},
@@ -169,11 +186,22 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
   const currentSpellcasting = characterSheet.spellcasting || null;
   const currentProgression = characterSheet.progression || {};
   const levelUpChoices = normalizeChoiceSelections(payload.choices || {});
+  const selectedSubclass = getSelectedSubclass({
+    characterSheet,
+    content,
+    classId: preview.classId,
+    nextLevel,
+    selections: levelUpChoices,
+  });
   const selectedFightingStyle = levelUpChoices.fighting_style?.[0]
     || normalizeId(characterSheet.class_choices?.fighting_style);
   const nextExpertiseSkills = mergeExpertiseSkills(
     characterSheet.expertise_skills || [],
     getExpertiseChoiceIds(advancement.required_choices || [], levelUpChoices),
+  );
+  const nextProficientSkills = mergeSkillProficiencies(
+    characterSheet.proficiencies?.skills || [],
+    getSkillProficiencyChoiceIds(advancement.required_choices || [], levelUpChoices),
   );
   const nextMaxHp = Number(currentDerived.max_hp || 0) + preview.hp.increase;
   const nextHp = Number(currentDerived.hp ?? currentDerived.max_hp ?? nextMaxHp) + preview.hp.increase;
@@ -196,8 +224,8 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
   );
   const nextFeatures = [
     ...(characterSheet.features || []),
-    ...(advancement.features || []).map((feature) => ({
-      source: 'class',
+    ...preview.features.map((feature) => ({
+      source: getSubclassFeatures(selectedSubclass, nextLevel).some((entry) => entry.id === feature.id) ? 'subclass' : 'class',
       level: nextLevel,
       name: feature.name,
       description: feature.description || '',
@@ -213,6 +241,7 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
     nextHp,
     nextSpeed,
     nextExpertiseSkills,
+    proficientSkills: nextProficientSkills,
     fightingStyle: selectedFightingStyle,
     hasJackOfAllTrades: Boolean(currentDerived.jack_of_all_trades || (advancement.runtime_mechanics || []).includes('jack_of_all_trades')),
   });
@@ -234,6 +263,7 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
     identity: {
       ...(characterSheet.identity || {}),
       level: nextLevel,
+      ...(selectedSubclass ? { subclass: selectedSubclass.id, subclass_name: selectedSubclass.name } : {}),
       next_level_xp: nextThreshold,
       level_up_available: false,
     },
@@ -246,6 +276,7 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
       ...(selectedFightingStyle ? { fighting_style: selectedFightingStyle } : {}),
       ...(levelUpChoices.metamagic?.length ? { metamagic: levelUpChoices.metamagic } : {}),
       ...(invocationState.invocations.length ? { eldritch_invocations: invocationState.invocations } : {}),
+      ...(selectedSubclass ? { subclass: selectedSubclass.id } : {}),
     },
     class_choice_details: {
       ...(characterSheet.class_choice_details || {}),
@@ -255,6 +286,7 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
     languages: nextLanguages,
     proficiencies: {
       ...(characterSheet.proficiencies || {}),
+      skills: nextProficientSkills,
       languages: nextLanguages,
     },
     ...(nextSpellcasting ? {
@@ -290,6 +322,7 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
           hp_increase: preview.hp.increase,
           features: preview.features.map((feature) => feature.name),
           choices: levelUpChoices,
+          ...(selectedSubclass ? { subclass: selectedSubclass.id } : {}),
         },
       ],
     },
@@ -322,6 +355,36 @@ function buildRequiredChoicePreviews({
 }
 
 function getChoiceOptions({ choice = {}, characterSheet = {}, content = {}, classId = '', selections = {} } = {}) {
+  if (choice.type === 'subclass') {
+    const currentLevel = getCharacterLevel(characterSheet);
+    return (content.subclasses || [])
+      .filter((subclass) => normalizeId(subclass.class_id) === normalizeId(classId))
+      .filter((subclass) => Number(subclass.unlock_level || 3) <= currentLevel + 1)
+      .map((subclass) => ({
+        id: subclass.id,
+        name: subclass.name,
+        description: subclass.description || '',
+        meta: [
+          `${titleCase(classId)} subclass`,
+          ...getSubclassFeatures(subclass, currentLevel + 1).map((feature) => feature.name),
+        ].join(' - '),
+      }));
+  }
+
+  if (choice.type === 'skill_proficiency') {
+    const known = new Set((characterSheet.proficiencies?.skills || []).map(normalizeId));
+    const classData = byId(content.classes || [], classId);
+    return (content.skills || [])
+      .filter((skill) => (classData?.skill_options || []).map(normalizeId).includes(normalizeId(skill.id)))
+      .filter((skill) => !known.has(normalizeId(skill.id)))
+      .map((skill) => ({
+        id: skill.id,
+        name: skill.name || titleCase(skill.id),
+        description: skill.description || '',
+        meta: `${String(skill.ability || '').toUpperCase()} skill proficiency`,
+      }));
+  }
+
   if (choice.type === 'skill') {
     const existingExpertise = new Set((characterSheet.expertise_skills || []).map(normalizeId));
     const skillData = characterSheet.derived_stats?.skill_modifiers || {};
@@ -529,6 +592,7 @@ function buildLeveledDerivedStats({
   nextHp,
   nextSpeed,
   nextExpertiseSkills = [],
+  proficientSkills = characterSheet.proficiencies?.skills || [],
   hasJackOfAllTrades = false,
   fightingStyle = '',
 } = {}) {
@@ -546,10 +610,10 @@ function buildLeveledDerivedStats({
     nextDerived.jack_of_all_trades_bonus = Math.floor(nextPb / 2);
   }
 
-  if ((content.skills || []).length > 0 && characterSheet.proficiencies?.skills) {
+  if ((content.skills || []).length > 0 && proficientSkills) {
     nextDerived.skill_modifiers = buildSkillModifiersForLevelUp({
       skills: content.skills,
-      proficientSkills: characterSheet.proficiencies.skills,
+      proficientSkills,
       abilityModifiers: characterSheet.abilities?.modifiers || {},
       pb: nextPb,
       expertiseSkills: nextExpertiseSkills,
@@ -594,6 +658,16 @@ function getExpertiseChoiceIds(requiredChoices = [], selections = {}) {
   return requiredChoices
     .filter(isExpertiseChoice)
     .flatMap((choice) => selections[choice.id] || []);
+}
+
+function getSkillProficiencyChoiceIds(requiredChoices = [], selections = {}) {
+  return requiredChoices
+    .filter((choice) => choice.type === 'skill_proficiency' && isRequiredChoiceActive(choice, selections))
+    .flatMap((choice) => selections[choice.id] || []);
+}
+
+function mergeSkillProficiencies(current = [], additions = []) {
+  return [...new Set([...current, ...additions].map(normalizeId).filter(Boolean))];
 }
 
 function isExpertiseChoice(choice = {}) {
@@ -670,6 +744,35 @@ function getFixedHpIncrease(characterSheet = {}, classData = {}) {
 
 function getClassAdvancement(content = {}, classId, level) {
   return content.classAdvancement?.levels?.[normalizeId(classId)]?.[String(level)] || null;
+}
+
+function getSelectedSubclass({ characterSheet = {}, content = {}, classId = '', nextLevel = 1, selections = {} } = {}) {
+  const selectedId = selections.subclass?.[0]
+    || normalizeId(characterSheet.identity?.subclass)
+    || normalizeId(characterSheet.class_choices?.subclass);
+  if (!selectedId) return null;
+  const subclass = byId(content.subclasses || [], selectedId);
+  if (!subclass) return null;
+  if (normalizeId(subclass.class_id) !== normalizeId(classId)) return null;
+  if (Number(subclass.unlock_level || 3) > Number(nextLevel)) return null;
+  return subclass;
+}
+
+function getSubclassFeatures(subclass, level) {
+  if (!subclass) return [];
+  return Object.entries(subclass.level_features || {})
+    .filter(([featureLevel]) => Number(featureLevel) === Number(level))
+    .flatMap(([, features]) => features || []);
+}
+
+function summarizeSubclass(subclass) {
+  return {
+    id: subclass.id,
+    classId: subclass.class_id,
+    name: subclass.name,
+    description: subclass.description || '',
+    unlockLevel: Number(subclass.unlock_level || 3),
+  };
 }
 
 function getCharacterXp(characterSheet = {}) {

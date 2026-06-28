@@ -14,6 +14,7 @@ test('builds a machine-readable coverage matrix for all exposed content catalogs
 
   assert.equal(matrix.version, '4C.6-H35');
   assert.equal(matrix.sections.classes.entries.length, content.classes.length);
+  assert.equal(matrix.sections.subclasses.entries.length, content.subclasses.length);
   assert.equal(matrix.sections.species.entries.length, content.species.length);
   assert.equal(matrix.sections.origin_feats.entries.length, content.feats.length);
   assert.equal(matrix.sections.spells.entries.length, content.spells.length);
@@ -48,6 +49,7 @@ test('matrix flags the foundation gaps that block leveling work', () => {
   const resources = new Map(matrix.sections.resources.entries.map((entry) => [entry.id, entry]));
   const feats = new Map(matrix.sections.origin_feats.entries.map((entry) => [entry.id, entry]));
   const classes = new Map(matrix.sections.classes.entries.map((entry) => [entry.id, entry]));
+  const subclasses = new Map(matrix.sections.subclasses.entries.map((entry) => [entry.id, entry]));
   const fightingStyles = new Map(matrix.sections.fighting_styles.entries.map((entry) => [entry.id, entry]));
   const spells = new Map(matrix.sections.spells.entries.map((entry) => [entry.id, entry]));
   const human = matrix.sections.species.entries.find((entry) => entry.id === 'human');
@@ -67,4 +69,6 @@ test('matrix flags the foundation gaps that block leveling work', () => {
   assert.equal(spells.get('divine_smite').status, STATUS.IMPLEMENTED);
   assert.equal(classes.get('paladin').status, STATUS.PARTIAL);
   assert.equal(classes.get('wizard').status, STATUS.PARTIAL);
+  assert.equal(subclasses.get('champion').status, STATUS.DEFERRED);
+  assert(subclasses.get('champion').children.every((feature) => feature.status === STATUS.DEFERRED));
 });
