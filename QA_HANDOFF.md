@@ -1,5 +1,44 @@
 # Hallucinated Dungeons QA Handoff
 
+## Latest QA Pass - 2026-06-28 Level 3 Subclass Foundation `c7be597`
+
+Scope:
+
+- Tested the first level-3 foundation package after `c7be597 Build level 3 subclass foundation`.
+- Railway `/health` confirmed release `e91899ba6811be7bc9cd5f9d97b67aef5964ddf6`.
+- Used the production QA helper to make existing level-2 Human Fighter `QA Smoke` level-up eligible at `900/900` XP, then exercised the visible level-3 preview and Champion selection.
+- Reviewed the subclass catalog and server coverage for all twelve classes. QA changed no app code.
+
+Automated checks:
+
+- Server `npm.cmd test`: PASS, `577/577`.
+- Client `npm.cmd run lint`: PASS.
+- `git diff --check c7be597^ c7be597`: PASS.
+- Browser console warnings/errors: none.
+
+Verified / passed:
+
+- Production character sheet correctly showed `Level Up Available`, `900/900` XP, and opened `Fighter Level 3` with fixed HP gain `+8` and PB `+2 -> +2`.
+- Champion was the only Fighter subclass option and exposed `Improved Critical` and `Remarkable Athlete` in its option metadata.
+- The level-up action remained disabled as `Rules Work Needed` because `fighter_level_3` mechanics are intentionally deferred. No level or subclass state was applied prematurely.
+- Automated coverage confirms every exposed class has level-3 advancement data and exactly one legal SRD subclass; forged cross-class subclass selection is rejected; the shared apply path persists subclass identity/features/history only when mechanics support is explicitly enabled; Barbarian Primal Knowledge skill selection updates authoritative proficiency math.
+- Rules coverage correctly marks subclasses and their runtime features as deferred rather than claiming implementation.
+
+Finding for DEV:
+
+- **P2 - Selecting a subclass does not recalculate the visible level-up preview.** After clicking Champion, its card becomes selected, but the modal still says `No new feature data for this level`, does not render the new `Subclass` section, and continues showing `Fighter Subclass must have exactly 1 selection before this level can be applied.` The unsupported-mechanic blocker is correct; the required-choice blocker and missing selected-subclass/features display are stale and contradictory.
+- The server already supports `getLevelUpPreview(..., choices)` and returns `selectedSubclass` plus subclass features. The production UI currently keeps selections only in local modal state and never requests or derives an updated preview, making the newly added `preview.selectedSubclass` section unreachable in this foundation flow.
+
+Expected behavior:
+
+- Selecting Champion should immediately show Champion as the selected subclass, display Improved Critical and Remarkable Athlete in the preview, and remove only the required-choice blocker.
+- `Fighter Level 3 needs rules support before this level can be applied` must remain, and the apply button must stay disabled until the mechanics package exists.
+- Deselecting or changing a choice should restore/recalculate the corresponding preview and blockers consistently.
+
+Current recommendation:
+
+- Keep the level-3 mechanics gate in place and fix preview recalculation before building the first subclass runtime package. The foundation is structurally sound, but its front door currently says both `Champion selected` and `please select a Champion`, which is ambitious even for fantasy architecture.
+
 ## Latest QA Pass - 2026-06-27 Focused Utility Prompt Retest `01a112b`
 
 Scope:
