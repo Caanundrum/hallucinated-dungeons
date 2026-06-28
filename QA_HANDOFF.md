@@ -1,5 +1,38 @@
 # Hallucinated Dungeons QA Handoff
 
+## Latest QA Pass - 2026-06-28 Level 3 Preview Refresh Retest `e107397`
+
+Scope:
+
+- Retested the stale level-3 subclass preview after `e107397 Refresh level up preview after choices`.
+- Railway `/health` confirmed release `80903857bbcc1bb0ee4b1fefe05bdae15b1aeba4`.
+- Reused production level-2 Fighter `QA Smoke` at `900/900` XP and exercised selection, deselection, and rapid repeated choice changes.
+- QA changed no app code.
+
+Automated checks:
+
+- Server `npm.cmd test`: PASS, `577/577`.
+- Client `npm.cmd run lint`: PASS.
+- `git diff --check e107397^ e107397`: PASS.
+- Browser console warnings/errors: none.
+
+Verified fixed / passed:
+
+- Selecting Champion immediately refreshed `New Features` to show Improved Critical and Remarkable Athlete with their descriptions.
+- The preview rendered the `Subclass` section with Champion and its description.
+- The stale `Fighter Subclass must have exactly 1 selection` blocker disappeared after selection.
+- The legitimate `Fighter Level 3 needs rules support before this level can be applied` blocker remained, and `Rules Work Needed` stayed disabled.
+- Deselecting Champion removed the subclass/features and restored the required-choice blocker while preserving the mechanics blocker.
+- Three rapid toggles settled on the final intended selected state; an older preview response did not overwrite the latest choice.
+
+Findings for DEV:
+
+- No remaining issue found in this focused retest.
+
+Current recommendation:
+
+- Close the level-3 preview refresh defect. The shared subclass foundation is production-passed within its intentionally mechanics-gated scope and is ready for the first class runtime package. The front door now agrees with itself, a surprisingly premium feature in both software and dungeons.
+
 ## Latest QA Pass - 2026-06-28 Level 3 Subclass Foundation `c7be597`
 
 Scope:
