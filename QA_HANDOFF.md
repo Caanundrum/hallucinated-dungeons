@@ -1,5 +1,34 @@
 # Hallucinated Dungeons QA Handoff
 
+## Latest QA Pass - 2026-06-27 Focused Utility Prompt Retest `01a112b`
+
+Scope:
+
+- Retested the remaining Thaumaturgy prompt distinction after `01a112b Enforce focused utility narration prompts`.
+- Railway `/health` confirmed release `c3790876ce314f8c0ef7468aa76fb9118d8d1f06` with narration pipeline `resolved-event-v2`.
+- Reused production character `QA Tiefling`; QA changed no app code.
+
+Automated checks:
+
+- Server `npm.cmd test`: PASS, `573/573`.
+- Client `npm.cmd run lint`: PASS.
+- `git diff --check 01a112b^ 01a112b`: PASS.
+- Browser console warnings/errors: none.
+
+Production results:
+
+- **PASS:** `I cast Thaumaturgy to make my voice boom.` produced sensory booming-voice narration and ended with the focused question `What do you call out?`
+- **PASS:** `I cast Thaumaturgy and shout, "Open the gate!"` preserved and narrated the supplied words without asking `What do you call out?` again.
+- The standard application composer still displays `What do you do?` after the GM response, but the GM narration itself now carries the correct focused follow-up and does not replace or duplicate supplied dialogue.
+
+Findings for DEV:
+
+- No remaining issue found in this focused retest.
+
+Current recommendation:
+
+- Close the utility-magic narration finding. The resolved-event delivery, sensory narration, focused missing-intent prompt, supplied-dialogue preservation, and authoritative effect tracking have now all passed production QA. The microphone has officially been returned to the player.
+
 ## Latest QA Pass - 2026-06-27 Resolved-Event Delivery Retest `2bc55d4`
 
 Scope:
