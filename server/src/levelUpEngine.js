@@ -1083,6 +1083,34 @@ function repairPactWeaponAttack(characterSheet = {}, content = getContentBundle(
   };
 }
 
+function repairRogueSneakAttack(characterSheet = {}) {
+  const classId = normalizeId(characterSheet.identity?.class || characterSheet.identity?.class_name);
+  const level = Number(characterSheet.identity?.level || characterSheet.derived_stats?.level || 1);
+  if (classId !== 'rogue' || level < 3) return characterSheet;
+
+  const diceCount = Math.ceil(level / 2);
+  const dice = `${diceCount}d6`;
+  const features = (characterSheet.features || [])
+    .filter((feature) => !normalizeId(feature.name).startsWith('sneak_attack'));
+
+  return {
+    ...characterSheet,
+    features: [
+      ...features,
+      {
+        source: 'class',
+        level: Math.max(1, level),
+        name: `Sneak Attack (${dice})`,
+        description: `Once per turn, deal an extra ${dice} damage when Sneak Attack's requirements are met.`,
+      },
+    ],
+    derived_stats: {
+      ...(characterSheet.derived_stats || {}),
+      sneak_attack_dice: dice,
+    },
+  };
+}
+
 function formatDamageFormula(dice = '1d4', modifier = 0) {
   const value = Number(modifier || 0);
   if (value < 0) return `${dice} - ${Math.abs(value)}`;
@@ -1185,4 +1213,5 @@ module.exports = {
   getXpThreshold,
   proficiencyBonus,
   repairPactWeaponAttack,
+  repairRogueSneakAttack,
 };

@@ -9,6 +9,7 @@ const { getContentBundle } = require('../src/contentData');
 const {
   applyLevelUp,
   getFixedHpIncrease,
+  repairRogueSneakAttack,
   getLevelUpPreview,
   proficiencyBonus,
   repairPactWeaponAttack,
@@ -1087,6 +1088,35 @@ test('Rogue level 3 supersedes the old 1d6 Sneak Attack display entry', () => {
 
   assert.equal(result.ok, true);
   assert.deepEqual(result.characterSheet.features.filter((feature) => /Sneak Attack/.test(feature.name)).map((feature) => feature.name), ['Sneak Attack (2d6)']);
+});
+
+test('runtime repair migrates an already-leveled Rogue from stale 1d6 Sneak Attack display data', () => {
+  const legacy = baseSheet({
+    identity: { class: 'rogue', class_name: 'Rogue', level: 3, subclass: 'thief' },
+    derived_stats: { level: 3, sneak_attack_dice: '2d6' },
+    features: [
+      { source: 'class', level: 1, name: 'Sneak Attack', description: 'Deal an extra 1d6 damage.' },
+      { source: 'class', level: 3, name: 'Sneak Attack (2d6)', description: 'Sneak Attack damage increases to 2d6.' },
+      { source: 'subclass', level: 3, name: 'Fast Hands', description: 'Use certain actions quickly.' },
+    ],
+  });
+  const repaired = repairRogueSneakAttack(legacy);
+
+  assert.equal(repaired.derived_stats.sneak_attack_dice, '2d6');
+  assert.deepEqual(repaired.features.filter((feature) => /Sneak Attack/.test(feature.name)).map((feature) => feature.name), ['Sneak Attack (2d6)']);
+  assert(repaired.features.some((feature) => feature.name === 'Fast Hands'));
+  assert.match(repaired.features.find((feature) => feature.name === 'Sneak Attack (2d6)').description, /extra 2d6/);
+});
+
+test('runtime Rogue Sneak Attack repair derives later scaling instead of freezing level 3 data', () => {
+  const repaired = repairRogueSneakAttack(baseSheet({
+    identity: { class: 'rogue', level: 5 },
+    derived_stats: { level: 5 },
+    features: [{ name: 'Sneak Attack (2d6)', description: 'Old scaling.' }],
+  }));
+
+  assert.equal(repaired.derived_stats.sneak_attack_dice, '3d6');
+  assert.equal(repaired.features.find((feature) => /Sneak Attack/.test(feature.name)).name, 'Sneak Attack (3d6)');
 });
 
 test('Draconic Sorcery continues adding one HP on later level increases', () => {

@@ -63,6 +63,7 @@ const {
   applyLevelUp,
   getLevelUpPreview,
   repairPactWeaponAttack,
+  repairRogueSneakAttack,
 } = require('./levelUpEngine');
 const {
   buildLevelUpReadySheet,
@@ -314,7 +315,7 @@ function repairCharacterSheetForRuntime(characterSheet) {
     },
     [...activeSpellEffects, ...equipmentEffects],
   );
-  return repairPactWeaponAttack(effectRepairedSheet, getContentBundle());
+  return repairRogueSneakAttack(repairPactWeaponAttack(effectRepairedSheet, getContentBundle()));
 }
 
 async function repairCharacterRowForRuntime(character) {
@@ -340,6 +341,8 @@ function getRuntimeRepairSnapshot(characterSheet = {}) {
     armor_class_breakdown: derived.armor_class_breakdown || [],
     active_spell_effects: derived.active_spell_effects || [],
     attack_breakdowns: derived.attack_breakdowns || [],
+    sneak_attack_dice: derived.sneak_attack_dice || null,
+    features: characterSheet.features || [],
     active_effects: characterSheet.active_effects || [],
   };
 }
