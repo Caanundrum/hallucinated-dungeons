@@ -33,6 +33,16 @@ const SUPPORTED_LEVEL_UP_MECHANICS = new Set([
   'eldritch_invocations_level_2',
   'fighter_level_3',
   'rogue_level_3',
+  'barbarian_level_3',
+  'bard_level_3',
+  'cleric_level_3',
+  'druid_level_3',
+  'monk_level_3',
+  'paladin_level_3',
+  'ranger_level_3',
+  'sorcerer_level_3',
+  'warlock_level_3',
+  'wizard_level_3',
 ]);
 
 const METAMAGIC_OPTIONS = [
@@ -205,8 +215,9 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
     characterSheet.proficiencies?.skills || [],
     getSkillProficiencyChoiceIds(advancement.required_choices || [], levelUpChoices),
   );
-  const nextMaxHp = Number(currentDerived.max_hp || 0) + preview.hp.increase;
-  const nextHp = Number(currentDerived.hp ?? currentDerived.max_hp ?? nextMaxHp) + preview.hp.increase;
+  const subclassHpBonus = selectedSubclass?.id === 'draconic_sorcery' && nextLevel === 3 ? 3 : 0;
+  const nextMaxHp = Number(currentDerived.max_hp || 0) + preview.hp.increase + subclassHpBonus;
+  const nextHp = Number(currentDerived.hp ?? currentDerived.max_hp ?? nextMaxHp) + preview.hp.increase + subclassHpBonus;
   const nextThreshold = getXpThreshold(content, nextLevel + 1);
   const nextPb = proficiencyBonus(nextLevel);
   const nextSpeed = Number(currentDerived.speed || 0) + getDerivedSpeedBonus(advancement, characterSheet);
@@ -218,14 +229,21 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
     },
   });
   const nextCantrips = getCantripChoiceIds(advancement.required_choices || [], levelUpChoices);
-  const nextSpellcasting = mergeSpellcasting(currentSpellcasting, advancement.spellcasting, levelUpChoices, nextCantrips);
+  const nextSpellcasting = applySubclassSpellcasting(
+    mergeSpellcasting(currentSpellcasting, advancement.spellcasting, levelUpChoices, nextCantrips),
+    selectedSubclass,
+    levelUpChoices,
+  );
   const invocationState = buildInvocationLevelUpState({ characterSheet, levelUpChoices, content });
   const nextLanguages = mergeLanguages(
     characterSheet.languages || characterSheet.proficiencies?.languages || [],
     getLanguageChoiceIds(advancement.required_choices || [], levelUpChoices),
   );
+  const currentFeatures = preview.classId === 'rogue' && nextLevel === 3
+    ? (characterSheet.features || []).filter((feature) => !normalizeId(feature.name).startsWith('sneak_attack'))
+    : (characterSheet.features || []);
   const nextFeatures = [
-    ...(characterSheet.features || []),
+    ...currentFeatures,
     ...preview.features.map((feature) => ({
       source: getSubclassFeatures(selectedSubclass, nextLevel).some((entry) => entry.id === feature.id) ? 'subclass' : 'class',
       level: nextLevel,
@@ -247,7 +265,7 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
     fightingStyle: selectedFightingStyle,
     hasJackOfAllTrades: Boolean(currentDerived.jack_of_all_trades || (advancement.runtime_mechanics || []).includes('jack_of_all_trades')),
   });
-  applyLevelThreeDerivedStats(nextDerivedStats, preview.classId, nextLevel);
+  applyLevelThreeDerivedStats(nextDerivedStats, preview.classId, nextLevel, characterSheet, selectedSubclass);
   const pactWeaponAttack = buildPactWeaponAttack({
     weaponId: invocationState.pactWeaponId,
     characterSheet,
@@ -279,6 +297,8 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
       ...(selectedFightingStyle ? { fighting_style: selectedFightingStyle } : {}),
       ...(levelUpChoices.metamagic?.length ? { metamagic: levelUpChoices.metamagic } : {}),
       ...(invocationState.invocations.length ? { eldritch_invocations: invocationState.invocations } : {}),
+      ...(levelUpChoices.land_type?.length ? { land_type: levelUpChoices.land_type[0] } : {}),
+      ...(levelUpChoices.hunters_prey?.length ? { hunters_prey: levelUpChoices.hunters_prey[0] } : {}),
       ...(selectedSubclass ? { subclass: selectedSubclass.id } : {}),
     },
     class_choice_details: {
@@ -388,6 +408,18 @@ function getChoiceOptions({ choice = {}, characterSheet = {}, content = {}, clas
       }));
   }
 
+  if (choice.type === 'skill_proficiency_any') {
+    const known = new Set((characterSheet.proficiencies?.skills || []).map(normalizeId));
+    return (content.skills || [])
+      .filter((skill) => !known.has(normalizeId(skill.id)))
+      .map((skill) => ({
+        id: skill.id,
+        name: skill.name || titleCase(skill.id),
+        description: skill.description || '',
+        meta: `${String(skill.ability || '').toUpperCase()} skill proficiency`,
+      }));
+  }
+
   if (choice.type === 'skill') {
     const existingExpertise = new Set((characterSheet.expertise_skills || []).map(normalizeId));
     const skillData = characterSheet.derived_stats?.skill_modifiers || {};
@@ -434,23 +466,32 @@ function getChoiceOptions({ choice = {}, characterSheet = {}, content = {}, clas
 
   if (choice.type === 'wizard_spell') {
     const spellbook = new Set((characterSheet.spellcasting?.spellbook_spells || []).map(normalizeId));
+    const selectedElsewhere = new Set(Object.entries(selections)
+      .filter(([choiceId]) => choiceId !== choice.id && ['spellbook_spells', 'evocation_savant_spells'].includes(choiceId))
+      .flatMap(([, ids]) => ids || [])
+      .map(normalizeId));
+    const maxLevel = Number(choice.max_level ?? 1);
+    const requiredSchool = normalizeId(choice.school);
     return (content.spells || [])
-      .filter((spell) => Number(spell.level || 0) === 1)
+      .filter((spell) => Number(spell.level || 0) >= 1 && Number(spell.level || 0) <= maxLevel)
       .filter((spell) => (spell.classes || []).map(normalizeId).includes('wizard'))
+      .filter((spell) => !requiredSchool || inferSpellSchool(spell) === requiredSchool)
       .filter((spell) => !spellbook.has(normalizeId(spell.id)))
+      .filter((spell) => !selectedElsewhere.has(normalizeId(spell.id)))
       .map((spell) => ({
         id: spell.id,
         name: spell.name || titleCase(spell.id),
         description: spell.description || '',
-        meta: `Level 1 spellbook addition - ${spell.casting_time || 'Action'} - ${spell.duration || 'Instant'}`,
+        meta: `Level ${spell.level} ${titleCase(inferSpellSchool(spell) || 'spell')} spellbook addition - ${spell.casting_time || 'Action'} - ${spell.duration || 'Instant'}`,
       }));
   }
 
   if (choice.type === 'wizard_prepared_spell') {
     const spellbook = new Set((characterSheet.spellcasting?.spellbook_spells || []).map(normalizeId));
     const prepared = new Set((characterSheet.spellcasting?.spells_prepared || []).map(normalizeId));
+    const maxLevel = Number(choice.max_level ?? 1);
     return (content.spells || [])
-      .filter((spell) => Number(spell.level || 0) === 1)
+      .filter((spell) => Number(spell.level || 0) >= 1 && Number(spell.level || 0) <= maxLevel)
       .filter((spell) => (spell.classes || []).map(normalizeId).includes('wizard'))
       .filter((spell) => !prepared.has(normalizeId(spell.id)))
       .map((spell) => ({
@@ -458,7 +499,10 @@ function getChoiceOptions({ choice = {}, characterSheet = {}, content = {}, clas
         name: spell.name || titleCase(spell.id),
         description: spell.description || '',
         meta: spellbook.has(normalizeId(spell.id)) ? 'Already in spellbook' : 'Selected spellbook addition',
-        ...(!spellbook.has(normalizeId(spell.id)) ? {
+        ...(!spellbook.has(normalizeId(spell.id)) && ![
+          ...(selections.spellbook_spells || []),
+          ...(selections.evocation_savant_spells || []),
+        ].includes(normalizeId(spell.id)) ? {
           requires_choice: { choice_id: 'spellbook_spells', option_id: spell.id },
         } : {}),
       }));
@@ -627,7 +671,7 @@ function buildLeveledDerivedStats({
   return applyFightingStyleToDerivedStats(nextDerived, characterSheet, fightingStyle);
 }
 
-function applyLevelThreeDerivedStats(derived = {}, classId = '', level = 1) {
+function applyLevelThreeDerivedStats(derived = {}, classId = '', level = 1, characterSheet = {}, selectedSubclass = null) {
   if (Number(level) < 3) return derived;
   if (classId === 'fighter') {
     derived.weapon_critical_threshold = 19;
@@ -637,6 +681,20 @@ function applyLevelThreeDerivedStats(derived = {}, classId = '', level = 1) {
     derived.sneak_attack_dice = '2d6';
     derived.climb_speed = Number(derived.speed || 30);
     derived.jump_ability = 'dex';
+  }
+  if (classId === 'monk') derived.martial_arts_die = '1d6';
+  if (selectedSubclass?.id === 'draconic_sorcery') {
+    derived.draconic_resilience_hp_bonus = 3;
+    if (!hasArmorOrShieldEquipped(characterSheet)) {
+      const dex = Number(characterSheet.abilities?.modifiers?.dex || 0);
+      const cha = Number(characterSheet.abilities?.modifiers?.cha || 0);
+      derived.armor_class = 10 + dex + cha;
+      derived.armor_class_breakdown = [
+        { label: 'Draconic Resilience', value: 10 },
+        { label: 'DEX modifier', value: dex },
+        { label: 'CHA modifier', value: cha },
+      ];
+    }
   }
   return derived;
 }
@@ -679,7 +737,7 @@ function getExpertiseChoiceIds(requiredChoices = [], selections = {}) {
 
 function getSkillProficiencyChoiceIds(requiredChoices = [], selections = {}) {
   return requiredChoices
-    .filter((choice) => choice.type === 'skill_proficiency' && isRequiredChoiceActive(choice, selections))
+    .filter((choice) => ['skill_proficiency', 'skill_proficiency_any'].includes(choice.type) && isRequiredChoiceActive(choice, selections))
     .flatMap((choice) => selections[choice.id] || []);
 }
 
@@ -745,9 +803,14 @@ function getFixedHpIncrease(characterSheet = {}, classData = {}) {
     characterSheet.abilities?.modifiers?.con
       ?? abilityMod(conScore)
   );
-  const perLevelBonus = (characterSheet.active_effects || [])
+  const storedPerLevelBonus = (characterSheet.active_effects || [])
     .filter((effect) => effect.target === 'max_hp_per_level_bonus')
     .reduce((sum, effect) => sum + Number(effect.value || 0), 0);
+  const draconicPerLevelBonus = normalizeId(characterSheet.identity?.subclass) === 'draconic_sorcery'
+    && Number(characterSheet.identity?.level || 1) >= 3
+    ? 1
+    : 0;
+  const perLevelBonus = Math.max(storedPerLevelBonus, draconicPerLevelBonus);
   const increase = Math.max(1, fixedBase + conModifier + perLevelBonus);
   return {
     method: 'fixed',
@@ -839,7 +902,10 @@ function mergeSpellcasting(current, advancementSpellcasting, levelUpChoices = {}
     ...(levelUpChoices.prepared_spells || []),
     ...(levelUpChoices.prepared_spell || []),
   ];
-  const spellbookAdditions = levelUpChoices.spellbook_spells || [];
+  const spellbookAdditions = [
+    ...(levelUpChoices.spellbook_spells || []),
+    ...(levelUpChoices.evocation_savant_spells || []),
+  ];
   return {
     ...(current || {}),
     ...(advancementSpellcasting.cantrips !== undefined ? { cantrips_count: advancementSpellcasting.cantrips } : {}),
@@ -884,7 +950,33 @@ function mergeSpellcasting(current, advancementSpellcasting, levelUpChoices = {}
       ...((current || {}).slots_max || (current || {}).slots || {}),
       ...(advancementSpellcasting.slots || {}),
     },
+    ...(advancementSpellcasting.pact_slot_level ? { pact_slot_level: advancementSpellcasting.pact_slot_level } : {}),
   };
+}
+
+function applySubclassSpellcasting(spellcasting, selectedSubclass = null, choices = {}) {
+  if (!spellcasting || selectedSubclass?.id !== 'circle_of_the_land') return spellcasting;
+  const land = normalizeId(choices.land_type?.[0] || '');
+  const circleSpells = {
+    arid: ['blur', 'burning_hands', 'fire_bolt'],
+    polar: ['fog_cloud', 'hold_person', 'ray_of_frost'],
+    temperate: ['misty_step', 'shocking_grasp', 'sleep'],
+    tropical: ['acid_splash', 'ray_of_sickness', 'web'],
+  }[land] || [];
+  return {
+    ...spellcasting,
+    always_prepared_spells: [...new Set([...(spellcasting.always_prepared_spells || []), ...circleSpells])],
+  };
+}
+
+function inferSpellSchool(spell = {}) {
+  if (spell.school) return normalizeId(spell.school);
+  const evocation = new Set([
+    'burning_hands', 'chromatic_orb', 'continual_flame', 'fire_bolt', 'flame_blade',
+    'flaming_sphere', 'gust_of_wind', 'magic_missile', 'moonbeam', 'ray_of_frost',
+    'scorching_ray', 'shatter', 'shocking_grasp', 'spiritual_weapon', 'thunderwave',
+  ]);
+  return evocation.has(normalizeId(spell.id)) ? 'evocation' : normalizeId(spell.school);
 }
 
 function buildInvocationLevelUpState({ characterSheet = {}, levelUpChoices = {}, content = {} } = {}) {

@@ -10,6 +10,7 @@ const {
   advanceEnemyTurns,
 } = require('../src/refereeCore');
 const { resolveCombatMovement } = require('../src/combatMovementEngine');
+const { getReactionOptions, resolvePendingReactionChoice } = require('../src/reactionEngine');
 
 const wizardSheet = {
   identity: { name: 'Mira', level: 1, class: 'wizard', class_name: 'Wizard' },
@@ -937,4 +938,107 @@ test('a melee creature outside reach moves toward the player before attacking', 
   assert.equal(result.worldState.player_stats.hp, 9);
   assert.match(result.reply, /Skeleton moves 10 feet to hex \(1, 0\)/);
   assert.match(result.reply, /Skeleton uses claw/);
+});
+
+test('College of Lore Cutting Words spends its Reaction and Bardic Inspiration to reduce a hit', () => {
+  const bard = {
+    identity: { name: 'Lyra', class: 'bard', level: 3, subclass: 'college_of_lore' },
+    abilities: { modifiers: { cha: 3 } },
+    derived_stats: { armor_class: 12 },
+    resources: { bardic_inspiration: { name: 'Bardic Inspiration', remaining: 2, max: 3, reset: 'long_rest', die: '1d6' } },
+  };
+  const world = combatWorld();
+  const options = getReactionOptions({ trigger: 'attack_hit', worldState: world, characterSheet: bard, context: { actor: combatant('Goblin', 8), attack: { name: 'blade' } } });
+  const pending = {
+    id: 'reaction_cutting', kind: 'player_reaction', trigger: 'attack_hit', trigger_label: 'Goblin blade', trigger_prompt: 'Goblin would hit.', resume_stage: 'before_attack',
+    options, attack_frame: { attack_total: 14, roll_text: '11+3', critical_hit: false },
+  };
+  const result = resolvePendingReactionChoice({ message: 'I use Cutting Words.', worldState: { ...world, pending_reaction: pending }, characterSheet: bard, rollDie: sequenceRolls([4]) });
+
+  assert.equal(result.resolved, true);
+  assert.equal(result.pendingReaction.attack_frame.attack_total, 10);
+  assert.equal(result.worldState.player_stats.resources.bardic_inspiration.remaining, 1);
+  assert.equal(result.worldState.combat_state.turn_resources.reaction_available, false);
+});
+
+test('College of Lore Cutting Words can reduce a creature damage roll', () => {
+  const bard = {
+    identity: { name: 'Lyra', class: 'bard', level: 3, subclass: 'college_of_lore' },
+    abilities: { modifiers: { cha: 3 } },
+    derived_stats: { armor_class: 12, max_hp: 12 },
+    resources: { bardic_inspiration: { name: 'Bardic Inspiration', remaining: 2, max: 3, reset: 'long_rest', die: '1d6' } },
+  };
+  const world = combatWorld();
+  world.player_stats.hp = 5;
+  world.player_stats.max_hp = 12;
+  world.combat_state.combatants[0].hp = 5;
+  world.combat_state.combatants[0].max_hp = 12;
+  const options = getReactionOptions({ trigger: 'damage_taken', worldState: world, characterSheet: bard, context: { actor: combatant('Goblin', 8), attack: { name: 'blade' }, damageTaken: 6 } });
+  const pending = {
+    id: 'reaction_cutting_damage', kind: 'player_reaction', trigger: 'damage_taken', trigger_label: 'Goblin blade', trigger_prompt: 'Goblin dealt 6 damage.', resume_stage: 'after_attack',
+    options, damage_frame: { damage_taken: 6, attack: { name: 'blade' } },
+  };
+  const result = resolvePendingReactionChoice({ message: 'I use Cutting Words on the damage.', worldState: { ...world, pending_reaction: pending }, characterSheet: bard, rollDie: sequenceRolls([4]) });
+
+  assert.equal(result.resolved, true);
+  assert.equal(result.worldState.player_stats.hp, 9);
+  assert.equal(result.worldState.combat_state.combatants[0].hp, 9);
+  assert.equal(result.worldState.player_stats.resources.bardic_inspiration.remaining, 1);
+  assert.match(result.reply, /reducing the damage by 4/);
+});
+
+test('Monk Deflect Attacks restores prevented damage and spends the Reaction', () => {
+  const monk = {
+    identity: { name: 'Kai', class: 'monk', level: 3, subclass: 'warrior_of_the_open_hand' },
+    abilities: { modifiers: { dex: 3, wis: 3 } },
+    derived_stats: { armor_class: 16 },
+    resources: { focus_points: { name: 'Focus Points', remaining: 3, max: 3, reset: 'short_rest' } },
+  };
+  const world = combatWorld();
+  world.player_stats.hp = 3;
+  world.combat_state.combatants[0].hp = 3;
+  const options = getReactionOptions({ trigger: 'damage_taken', worldState: world, characterSheet: monk, context: { actor: combatant('Goblin', 8), attack: { name: 'blade', damage_type: 'slashing' }, damageTaken: 5 } });
+  const pending = {
+    id: 'reaction_deflect', kind: 'player_reaction', trigger: 'damage_taken', trigger_label: 'Goblin blade', trigger_prompt: 'Goblin dealt 5 damage.', resume_stage: 'after_attack',
+    options, damage_frame: { damage_taken: 5, attack: { name: 'blade', damage_type: 'slashing' } },
+  };
+  const result = resolvePendingReactionChoice({ message: 'I use Deflect Attacks.', worldState: { ...world, pending_reaction: pending }, characterSheet: monk, rollDie: sequenceRolls([2]) });
+
+  assert.equal(result.resolved, true);
+  assert.equal(result.worldState.player_stats.hp, 8);
+  assert.equal(result.worldState.combat_state.turn_resources.reaction_available, false);
+});
+
+test('Monk Deflect Attacks can spend Focus to damage the original attacker after reducing damage to zero', () => {
+  const monk = {
+    identity: { name: 'Kai', class: 'monk', level: 3, subclass: 'warrior_of_the_open_hand' },
+    abilities: { modifiers: { dex: 3, wis: 3 } },
+    derived_stats: { armor_class: 16, proficiency_bonus: 2, martial_arts_die: '1d6' },
+    resources: { focus_points: { name: 'Focus Points', remaining: 3, max: 3, reset: 'short_rest' } },
+  };
+  const world = combatWorld();
+  world.player_stats.hp = 3;
+  world.combat_state.combatants[0].hp = 3;
+  const goblin = world.combat_state.combatants.find((entry) => !entry.is_player);
+  goblin.id = 'goblin-1';
+  goblin.hp = 8;
+  goblin.max_hp = 8;
+  goblin.saves = { dex: 0 };
+  const options = getReactionOptions({ trigger: 'damage_taken', worldState: world, characterSheet: monk, context: { actor: goblin, attack: { name: 'blade', damage_type: 'slashing' }, damageTaken: 5 } });
+  const pending = {
+    id: 'reaction_deflect_redirect', kind: 'player_reaction', trigger: 'damage_taken', trigger_label: 'Goblin blade', trigger_prompt: 'Goblin dealt 5 damage.', resume_stage: 'after_attack',
+    source_actor: { id: 'goblin-1', name: 'Goblin' }, options,
+    damage_frame: { damage_taken: 5, attack: { name: 'blade', damage_type: 'slashing' } },
+  };
+  const result = resolvePendingReactionChoice({
+    message: 'I use Deflect Attacks and redirect it at the Goblin.',
+    worldState: { ...world, pending_reaction: pending },
+    characterSheet: monk,
+    rollDie: sequenceRolls([2, 1, 4, 5]),
+  });
+
+  assert.equal(result.resolved, true);
+  assert.equal(result.worldState.player_stats.resources.focus_points.remaining, 2);
+  assert.equal(result.worldState.combat_state.combatants.find((entry) => entry.id === 'goblin-1').hp, 0);
+  assert.match(result.reply, /fails its DEX save.*takes 12 damage/);
 });

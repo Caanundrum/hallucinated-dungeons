@@ -284,6 +284,51 @@ test('Magical Cunning restores one Pact slot after its one-minute rite', () => {
   assert.match(result.reply, /recover 1 Pact Magic slot/);
 });
 
+test('level 3 Magical Cunning restores a level 2 Pact Magic slot', () => {
+  const result = resolveFeatureAction({
+    message: 'I use Magical Cunning.',
+    worldState: {
+      player_stats: {
+        spell_slots: { 1: 0, 2: 0 },
+        resources: { magical_cunning: { name: 'Magical Cunning', remaining: 1, max: 1, reset: 'long_rest' } },
+      },
+    },
+    characterSheet: sheet('warlock', {
+      identity: { name: 'Ari', class: 'warlock', level: 3, subclass: 'fiend_patron' },
+      spellcasting: { ability: 'cha', pact_slot_level: 2, slots: { 1: 0, 2: 0 }, slots_max: { 1: 0, 2: 2 } },
+    }),
+  });
+
+  assert.equal(result.worldState.player_stats.spell_slots[1], 0);
+  assert.equal(result.worldState.player_stats.spell_slots[2], 1);
+  assert.match(result.reply, /Level 2 Pact slots: 1\/2/);
+});
+
+test('Land Druid and Hunter choices can change after a rest and return a persistable sheet', () => {
+  const restState = { time_state: { scene_time: 'after a Long Rest' }, player_stats: {} };
+  const druid = resolveFeatureAction({
+    message: 'I change my land attunement to Polar after the rest.',
+    worldState: restState,
+    characterSheet: sheet('druid', {
+      identity: { name: 'Ari', class: 'druid', level: 3, subclass: 'circle_of_the_land' },
+      class_choices: { land_type: 'arid' },
+      spellcasting: { ability: 'wis', always_prepared_spells: ['blur', 'burning_hands', 'fire_bolt'] },
+    }),
+  });
+  const ranger = resolveFeatureAction({
+    message: "I switch Hunter's Prey to Horde Breaker after the rest.",
+    worldState: restState,
+    characterSheet: sheet('ranger', {
+      identity: { name: 'Ari', class: 'ranger', level: 3, subclass: 'hunter' },
+      class_choices: { hunters_prey: 'colossus_slayer' },
+    }),
+  });
+
+  assert.equal(druid.characterSheet.class_choices.land_type, 'polar');
+  assert.deepEqual(druid.characterSheet.spellcasting.always_prepared_spells, ['fog_cloud', 'hold_person', 'ray_of_frost']);
+  assert.equal(ranger.characterSheet.class_choices.hunters_prey, 'horde_breaker');
+});
+
 test('natural Pact of the Blade wording conjures the selected weapon without using the narrator', () => {
   const result = resolveFeatureAction({
     message: 'I conjure my Pact of the Blade weapon as the longsword I chose.',
@@ -711,4 +756,41 @@ test('Steady Aim refuses after movement without spending the Bonus Action', () =
 
   assert.match(result.reply, /have not moved/);
   assert.equal(result.worldState.combat_state.turn_resources.bonus_action_available, true);
+});
+
+test('Life Cleric Preserve Life heals a Bloodied target to no more than half HP', () => {
+  const result = resolveFeatureAction({
+    message: 'I use Preserve Life on myself.',
+    worldState: combatWorld({ player_stats: { hp: 2, max_hp: 12, resources: { channel_divinity: { name: 'Channel Divinity', remaining: 2, max: 2, reset: 'short_rest' } } } }),
+    characterSheet: sheet('cleric', { identity: { name: 'Ari', class: 'cleric', level: 3, subclass: 'life_domain' } }),
+  });
+
+  assert.equal(result.worldState.player_stats.hp, 6);
+  assert.equal(result.worldState.player_stats.resources.channel_divinity.remaining, 1);
+  assert.match(result.reply, /Preserve Life/);
+});
+
+test("Land Druid Land's Aid spends Wild Shape, damages a foe, and heals the Druid", () => {
+  const result = resolveFeatureAction({
+    message: "I use Land's Aid on the Goblin.",
+    worldState: combatWorld({ player_stats: { hp: 5, max_hp: 12, resources: { wild_shape: { name: 'Wild Shape', remaining: 2, max: 2, reset: 'short_rest' } } } }),
+    characterSheet: sheet('druid', { identity: { name: 'Ari', class: 'druid', level: 3, subclass: 'circle_of_the_land' } }),
+    rollDie: sequenceRolls([1, 4, 3, 5, 2]),
+  });
+
+  assert.equal(result.worldState.player_stats.resources.wild_shape.remaining, 1);
+  assert(result.worldState.combat_state.combatants[1].hp < 8);
+  assert(result.worldState.player_stats.hp > 5);
+  assert.match(result.reply, /Land's Aid/);
+});
+
+test('Devotion Paladin Divine Sense spends Channel Divinity and tracks ten minutes', () => {
+  const result = resolveFeatureAction({
+    message: 'I use Divine Sense.',
+    worldState: combatWorld({ player_stats: { hp: 12, max_hp: 12, resources: { channel_divinity: { name: 'Channel Divinity', remaining: 2, max: 2, reset: 'short_rest' } } } }),
+    characterSheet: sheet('paladin', { identity: { name: 'Ari', class: 'paladin', level: 3, subclass: 'oath_of_devotion' } }),
+  });
+
+  assert.equal(result.worldState.player_stats.resources.channel_divinity.remaining, 1);
+  assert.equal(result.worldState.active_effects.find((effect) => effect.id === 'divine_sense').remaining_minutes, 10);
 });

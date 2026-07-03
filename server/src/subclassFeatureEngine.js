@@ -22,6 +22,29 @@ function isThief(characterSheet = {}) {
     || hasSubclassFeature(characterSheet, 'fast_hands');
 }
 
+function isBerserker(characterSheet = {}) { return hasSubclass(characterSheet, 'path_of_the_berserker'); }
+function isLoreBard(characterSheet = {}) { return hasSubclass(characterSheet, 'college_of_lore'); }
+function isLifeCleric(characterSheet = {}) { return hasSubclass(characterSheet, 'life_domain'); }
+function isLandDruid(characterSheet = {}) { return hasSubclass(characterSheet, 'circle_of_the_land'); }
+function isOpenHandMonk(characterSheet = {}) { return hasSubclass(characterSheet, 'warrior_of_the_open_hand'); }
+function isDevotionPaladin(characterSheet = {}) { return hasSubclass(characterSheet, 'oath_of_devotion'); }
+function isHunter(characterSheet = {}) { return hasSubclass(characterSheet, 'hunter'); }
+function isDraconicSorcerer(characterSheet = {}) { return hasSubclass(characterSheet, 'draconic_sorcery'); }
+function isFiendWarlock(characterSheet = {}) { return hasSubclass(characterSheet, 'fiend_patron'); }
+function isEvoker(characterSheet = {}) { return hasSubclass(characterSheet, 'evoker'); }
+
+function getHunterPrey(characterSheet = {}) {
+  return normalizeId(characterSheet.class_choices?.hunters_prey);
+}
+
+function getLandType(characterSheet = {}) {
+  return normalizeId(characterSheet.class_choices?.land_type);
+}
+
+function getFrenzyDice(characterSheet = {}) {
+  return isBerserker(characterSheet) && getCharacterLevel(characterSheet) >= 3 ? 2 : 0;
+}
+
 function getWeaponCriticalThreshold(characterSheet = {}) {
   return isChampion(characterSheet) && getCharacterLevel(characterSheet) >= 3 ? 19 : 20;
 }
@@ -105,7 +128,20 @@ module.exports = {
   getWeaponCriticalThreshold,
   grantRemarkableAthleteMovement,
   hasSubclass,
+  getFrenzyDice,
+  getHunterPrey,
+  getLandType,
+  isBerserker,
   isChampion,
+  isDevotionPaladin,
+  isDraconicSorcerer,
+  isEvoker,
+  isFiendWarlock,
+  isHunter,
+  isLandDruid,
+  isLifeCleric,
+  isLoreBard,
+  isOpenHandMonk,
   isThief,
   spendRemarkableAthleteMovement,
 };

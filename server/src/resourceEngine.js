@@ -366,7 +366,12 @@ function applyClassResourceDefaults(resources, characterSheet = {}, worldResourc
   const abilityMods = characterSheet.abilities?.modifiers || {};
   const defaults = {};
 
-  if (classId === 'barbarian') defaults.rage = RESOURCE_DEFINITIONS.rage;
+  if (classId === 'barbarian') defaults.rage = {
+    ...RESOURCE_DEFINITIONS.rage,
+    remaining: level >= 3 ? 3 : 2,
+    max: level >= 3 ? 3 : 2,
+    recover_on_short_rest: 1,
+  };
   if (classId === 'fighter') {
     defaults.second_wind = RESOURCE_DEFINITIONS.second_wind;
     if (level >= 2) defaults.action_surge = RESOURCE_DEFINITIONS.action_surge;

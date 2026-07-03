@@ -282,6 +282,20 @@ test('active flat item bonuses are filtered by skill, save, weapon, and class co
   assert.equal(getActiveSpellAttackBonus(state, casterSheet({ identity: { class: 'cleric', class_name: 'Cleric' } })), 0);
 });
 
+test('weapon-bound attack bonuses apply only to the weapon that owns the effect', () => {
+  const state = worldState({
+    active_effects: [{
+      id: 'sacred_weapon',
+      name: 'Sacred Weapon',
+      weapon_name: 'Longsword',
+      rules_effects: [{ target: 'weapon_attack_bonus', weapon_name: 'Longsword', value: 3, label: 'Sacred Weapon' }],
+    }],
+  });
+
+  assert.deepEqual(getActiveAttackRollBonuses(state, { attack: { name: 'Longsword' } }).map((bonus) => bonus.value), [3]);
+  assert.deepEqual(getActiveAttackRollBonuses(state, { attack: { name: 'Javelin' } }), []);
+});
+
 test('Armor of Agathys uses the 2024 Bonus Action casting time', () => {
   const spell = content.spells.find((item) => item.id === 'armor_of_agathys');
   const cast = resolveSpellCast({
@@ -1258,4 +1272,41 @@ test('Tiefling saving-throw cantrips use the selected legacy ability for DC', ()
   assert.match(outcome.reply, /vs DC 13/);
   assert.match(outcome.reply, /Save succeeds/);
   assert.equal(outcome.worldState.combat_state.combatants.find((entry) => entry.name === 'Skeleton').hp, 10);
+});
+
+test('Life Domain Disciple of Life adds 2 plus slot level to healing spells', () => {
+  const cleric = casterSheet({
+    identity: { name: 'Mira', level: 3, class: 'cleric', class_name: 'Cleric', subclass: 'life_domain' },
+    abilities: { modifiers: { wis: 3 } },
+    spellcasting: { ability: 'wis', spells_prepared: ['cure_wounds'], slots: { 1: 1 } },
+  });
+  const cast = resolveSpellCast({ message: 'I cast Cure Wounds.', content, characterSheet: cleric, worldState: worldState({ player_stats: { hp: 2, max_hp: 20, spell_slots: { 1: 1 } } }) });
+  const outcome = resolveSpellOutcome({ spellCast: cast, characterSheet: cast.characterSheet, worldState: cast.worldState, rollDie: sequenceRolls([2, 3]) });
+
+  assert.equal(outcome.worldState.player_stats.hp, 13);
+  assert.match(outcome.reply, /Disciple of Life/);
+});
+
+test('Evoker Potent Cantrip deals half damage when Fire Bolt misses', () => {
+  const evoker = casterSheet({ identity: { name: 'Mira', level: 3, class: 'wizard', class_name: 'Wizard', subclass: 'evoker' } });
+  const cast = resolveSpellCast({ message: 'I cast Fire Bolt at the Skeleton.', content, characterSheet: evoker, worldState: combatWorld() });
+  const outcome = resolveSpellOutcome({ spellCast: cast, characterSheet: cast.characterSheet, worldState: cast.worldState, rollDie: sequenceRolls([2, 6]) });
+  const skeleton = outcome.worldState.combat_state.combatants.find((entry) => entry.name === 'Skeleton');
+
+  assert.equal(skeleton.hp, 7);
+  assert.match(outcome.reply, /Potent Cantrip/);
+});
+
+test('Scorching Ray resolves three independent spell attacks instead of utility narration', () => {
+  const sorcerer = casterSheet({
+    identity: { name: 'Mira', level: 3, class: 'sorcerer', class_name: 'Sorcerer', subclass: 'draconic_sorcery' },
+    abilities: { modifiers: { cha: 3 } },
+    spellcasting: { ability: 'cha', spells_prepared: ['scorching_ray'], always_prepared_spells: ['scorching_ray'], slots: { 2: 1 } },
+  });
+  const cast = resolveSpellCast({ message: 'I cast Scorching Ray at the Skeleton.', content, characterSheet: sorcerer, worldState: combatWorld({ player_stats: { hp: 8, max_hp: 8, spell_slots: { 2: 1 } } }) });
+  const outcome = resolveSpellOutcome({ spellCast: cast, characterSheet: cast.characterSheet, worldState: cast.worldState, rollDie: sequenceRolls([15, 2, 3, 14, 4, 2, 13, 1, 1]) });
+
+  assert.match(outcome.reply, /making 3 spell attacks/);
+  assert.match(outcome.reply, /Ray 3/);
+  assert.doesNotMatch(outcome.reply, /effect is now active in the scene/);
 });

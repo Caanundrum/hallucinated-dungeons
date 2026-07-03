@@ -1904,7 +1904,10 @@ test('locked objects create a Thieves Tools pending check and unlock on success'
     ...characterSheet,
     abilities: { modifiers: { ...characterSheet.abilities.modifiers, dex: 3 } },
     proficiencies: { tools: ['thieves_tools'] },
-    derived_stats: { ...characterSheet.derived_stats, proficiency_bonus: 2 },
+    derived_stats: {
+      ...characterSheet.derived_stats,
+      proficiency_bonus: 2,
+    },
   };
   const prompted = adjudicate({
     message: 'Pick the lock on the iron chest.',
@@ -2769,6 +2772,30 @@ test('Champion rolls Initiative and Strength Athletics with Remarkable Athlete A
   assert(athletics.worldState.pending_roll.advantage_sources.includes('Remarkable Athlete'));
 });
 
+test('Primal Knowledge uses Strength for a listed skill check while Rage is active', () => {
+  const barbarian = {
+    ...characterSheet,
+    identity: { name: 'Ari', class: 'barbarian', level: 3, subclass: 'path_of_the_berserker' },
+    abilities: { modifiers: { ...characterSheet.abilities.modifiers, str: 4, wis: 0 } },
+    proficiencies: { skills: ['perception'] },
+    derived_stats: {
+      ...characterSheet.derived_stats,
+      proficiency_bonus: 2,
+      skill_modifiers: { ...characterSheet.derived_stats.skill_modifiers, perception: { total: 2, ability: 'wis', proficient: true } },
+    },
+  };
+  const result = adjudicate({
+    message: 'I scan the dangerous ledge for movement.',
+    worldState: worldState({ active_effects: [{ id: 'rage', name: 'Rage', remaining_rounds: 10, rules_effects: [] }] }),
+    characterSheet: barbarian,
+  });
+
+  assert.equal(result.worldState.pending_roll.skill, 'perception');
+  assert.equal(result.worldState.pending_roll.ability, 'str');
+  assert.equal(result.worldState.pending_roll.modifier, 6);
+  assert.match(result.reply, /STR via Primal Knowledge/);
+});
+
 test('Champion weapon attack scores a Critical Hit on natural 19 and grants protected movement', () => {
   const result = adjudicate({
     message: 'I attack the goblin with my longsword.',
@@ -2943,6 +2970,147 @@ test('Thief Second-Story Work uses Dexterity for a hazardous jump check', () => 
   assert.equal(result.worldState.pending_roll.skill, 'athletics');
   assert.equal(result.worldState.pending_roll.modifier, 3);
   assert.match(result.reply, /Dexterity \(Athletics\)/);
+});
+
+test('Berserker Frenzy adds 2d6 once to a Reckless Strength hit while raging', () => {
+  const barbarian = {
+    ...characterSheet,
+    identity: { name: 'Ari', class: 'barbarian', level: 3, subclass: 'path_of_the_berserker' },
+    derived_stats: { ...characterSheet.derived_stats, attack_breakdowns: [{ name: 'Greataxe', ability: 'str', attack_total: 5, damage_formula: '1d12+3' }] },
+  };
+  const result = adjudicate({
+    message: 'I recklessly attack the Goblin with my greataxe.',
+    worldState: worldState({
+      active_effects: [{ id: 'rage', name: 'Rage', rules_effects: [] }],
+      combat_state: { active: true, round: 1, turn_index: 0, combatants: [{ name: 'Ari', hp: 30, max_hp: 30, ac: 15, is_player: true }, { name: 'Goblin', hp: 30, max_hp: 30, ac: 12, is_player: false }] },
+    }),
+    characterSheet: barbarian,
+    rollDie: sequenceRolls([18, 12, 5, 4, 3]),
+  });
+
+  assert.match(result.reply, /Frenzy 2d6=7/);
+  assert.equal(result.worldState.combat_state.turn_resources.frenzy_used, true);
+});
+
+test('Devotion Paladin can activate Sacred Weapon as part of the Attack action', () => {
+  const paladin = {
+    ...characterSheet,
+    identity: { name: 'Ari', class: 'paladin', level: 3, subclass: 'oath_of_devotion' },
+    abilities: { modifiers: { ...characterSheet.abilities.modifiers, cha: 3 } },
+    resources: { channel_divinity: { name: 'Channel Divinity', remaining: 2, max: 2, reset: 'short_rest' } },
+  };
+  const result = adjudicate({
+    message: 'I attack the Goblin with my Longsword and use Sacred Weapon.',
+    worldState: worldState({ combat_state: { active: true, round: 1, turn_index: 0, combatants: [{ name: 'Ari', hp: 24, max_hp: 24, ac: 18, is_player: true }, { name: 'Goblin', hp: 20, max_hp: 20, ac: 17, is_player: false }] } }),
+    characterSheet: paladin,
+    rollDie: sequenceRolls([10, 4]),
+  });
+
+  assert.match(result.reply, /Sacred Weapon/);
+  assert.match(result.reply, /Hit for/);
+  assert.equal(result.worldState.player_stats.resources.channel_divinity.remaining, 1);
+  assert(result.worldState.active_effects.some((effect) => effect.id === 'sacred_weapon'));
+});
+
+test('Hunter Colossus Slayer adds 1d8 once against a wounded creature', () => {
+  const ranger = {
+    ...characterSheet,
+    identity: { name: 'Ari', class: 'ranger', level: 3, subclass: 'hunter' },
+    class_choices: { hunters_prey: 'colossus_slayer' },
+  };
+  const result = adjudicate({
+    message: 'I attack the wounded Goblin with my Longsword.',
+    worldState: worldState({ combat_state: { active: true, round: 1, turn_index: 0, combatants: [{ name: 'Ari', hp: 24, max_hp: 24, ac: 16, is_player: true }, { name: 'Goblin', hp: 30, max_hp: 40, ac: 12, is_player: false }] } }),
+    characterSheet: ranger,
+    rollDie: sequenceRolls([15, 4, 5]),
+  });
+
+  assert.match(result.reply, /Colossus Slayer 1d8=5/);
+  assert.equal(result.worldState.combat_state.turn_resources.colossus_slayer_used, true);
+});
+
+test("Fiend Warlock gains Dark One's Blessing when its attack drops an enemy", () => {
+  const warlock = {
+    ...characterSheet,
+    identity: { name: 'Vex', class: 'warlock', level: 3, subclass: 'fiend_patron' },
+    abilities: { modifiers: { ...characterSheet.abilities.modifiers, cha: 3 } },
+  };
+  const result = adjudicate({
+    message: 'I attack the Goblin with my Longsword.',
+    worldState: worldState({ combat_state: { active: true, round: 1, turn_index: 0, combatants: [{ name: 'Vex', hp: 18, max_hp: 18, ac: 14, is_player: true }, { name: 'Goblin', hp: 2, max_hp: 8, ac: 12, is_player: false }] } }),
+    characterSheet: warlock,
+    rollDie: sequenceRolls([15, 4]),
+  });
+
+  assert.match(result.reply, /Dark One's Blessing/);
+  assert.equal(result.worldState.player_stats.temp_hp, 6);
+});
+
+test('Open Hand Technique can Topple on Flurry of Blows hits', () => {
+  const monk = {
+    ...characterSheet,
+    identity: { name: 'Kai', class: 'monk', level: 3, subclass: 'warrior_of_the_open_hand' },
+    abilities: { modifiers: { ...characterSheet.abilities.modifiers, dex: 3, wis: 3 } },
+    resources: { focus_points: { name: 'Focus Points', remaining: 3, max: 3, reset: 'short_rest' } },
+  };
+  const result = adjudicate({
+    message: 'I use Flurry of Blows on the Goblin and Topple it.',
+    worldState: worldState({ combat_state: { active: true, round: 1, turn_index: 0, combatants: [{ name: 'Kai', hp: 20, max_hp: 20, ac: 16, is_player: true }, { name: 'Goblin', hp: 30, max_hp: 30, ac: 10, saves: { dex: 0 }, is_player: false }] } }),
+    characterSheet: monk,
+    rollDie: sequenceRolls([15, 4, 1, 15, 4, 1]),
+  });
+
+  assert.match(result.reply, /Open Hand Technique - Topple/);
+  assert(result.worldState.combat_state.combatants[1].conditions.includes('prone'));
+});
+
+test('Hunter Horde Breaker attacks a second explicitly named living enemy once per turn', () => {
+  const ranger = {
+    ...characterSheet,
+    identity: { name: 'Ari', class: 'ranger', level: 3, subclass: 'hunter' },
+    class_choices: { hunters_prey: 'horde_breaker' },
+    derived_stats: { ...characterSheet.derived_stats, attack_breakdowns: [{ name: 'Longsword', ability: 'str', attack_total: 5, damage_formula: '1d8+3' }] },
+  };
+  const result = adjudicate({
+    message: 'I attack the Goblin with my longsword, then use Horde Breaker on the Kobold.',
+    worldState: worldState({
+      combat_state: { active: true, round: 1, turn_index: 0, combatants: [
+        { name: 'Ari', hp: 24, max_hp: 24, ac: 16, is_player: true },
+        { name: 'Goblin', hp: 20, max_hp: 20, ac: 12, is_player: false },
+        { name: 'Kobold', hp: 20, max_hp: 20, ac: 12, is_player: false },
+      ] },
+    }),
+    characterSheet: ranger,
+    rollDie: sequenceRolls([15, 4, 15, 5]),
+  });
+
+  assert.match(result.reply, /Horde Breaker.*Kobold/);
+  assert.equal(result.worldState.combat_state.combatants.find((entry) => entry.name === 'Kobold').hp, 12);
+  assert.equal(result.worldState.combat_state.turn_resources.horde_breaker_used, true);
+});
+
+test('Hunter Horde Breaker respects map distance between the two targets', () => {
+  const ranger = {
+    ...characterSheet,
+    identity: { name: 'Ari', class: 'ranger', level: 3, subclass: 'hunter' },
+    class_choices: { hunters_prey: 'horde_breaker' },
+    derived_stats: { ...characterSheet.derived_stats, attack_breakdowns: [{ name: 'Longsword', ability: 'str', attack_total: 5, damage_formula: '1d8+3' }] },
+  };
+  const result = adjudicate({
+    message: 'I attack the Goblin with my longsword, then use Horde Breaker on the distant Kobold.',
+    worldState: worldState({
+      combat_state: { active: true, round: 1, turn_index: 0, combatants: [
+        { name: 'Ari', hp: 24, max_hp: 24, ac: 16, is_player: true, position: { map_id: 'bridge', q: 0, r: 0 } },
+        { name: 'Goblin', hp: 20, max_hp: 20, ac: 12, is_player: false, position: { map_id: 'bridge', q: 1, r: 0 } },
+        { name: 'Distant Kobold', hp: 20, max_hp: 20, ac: 12, is_player: false, position: { map_id: 'bridge', q: 3, r: 0 } },
+      ] },
+    }),
+    characterSheet: ranger,
+    rollDie: sequenceRolls([15, 4]),
+  });
+
+  assert.doesNotMatch(result.reply, /Horde Breaker:/);
+  assert.equal(result.worldState.combat_state.combatants.find((entry) => entry.name === 'Distant Kobold').hp, 20);
 });
 
 test('Tavern Brawler unarmed strike rerolls damage die results of 1 and records a requested push', () => {

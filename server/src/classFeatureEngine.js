@@ -23,6 +23,11 @@ const {
   resolveSavingThrow,
 } = require('./conditionEngine');
 const { assertValidRulesEffects } = require('./refereeContracts');
+const {
+  isDevotionPaladin,
+  isLandDruid,
+  isLifeCleric,
+} = require('./subclassFeatureEngine');
 
 function resolveFeatureAction({ message = '', worldState = {}, characterSheet = {}, rollDie = defaultRollDie } = {}) {
   const intent = getFeatureIntent(message);
@@ -46,6 +51,10 @@ function resolveFeatureAction({ message = '', worldState = {}, characterSheet = 
   if (intent.id === 'step_of_the_wind') return resolveStepOfTheWind({ worldState, characterSheet });
   if (intent.id === 'uncanny_metabolism') return resolveUncannyMetabolism({ worldState, characterSheet, rollDie });
   if (intent.id === 'steady_aim') return resolveSteadyAim({ worldState, characterSheet });
+  if (intent.id === 'preserve_life') return resolvePreserveLife({ message, worldState, characterSheet });
+  if (intent.id === 'lands_aid') return resolveLandsAid({ message, worldState, characterSheet, rollDie });
+  if (intent.id === 'divine_sense') return resolveDivineSense({ worldState, characterSheet });
+  if (intent.id === 'rest_subclass_choice') return resolveRestSubclassChoice({ message, worldState, characterSheet });
   if (intent.id === 'arcane_recovery') {
     return {
       handled: true,
@@ -80,8 +89,103 @@ function getFeatureIntent(message = '') {
   if (/\bstep\s+of\s+the\s+wind\b|\bfocus(?:ed)?\s+(?:dash|disengage)\b/.test(text)) return { id: 'step_of_the_wind' };
   if (/\buncanny\s+metabolism\b/.test(text)) return { id: 'uncanny_metabolism' };
   if (/\bsteady\s+aim\b|\b(?:take|use)\s+(?:my\s+)?(?:bonus action\s+to\s+)?aim\s+(?:carefully|steadily)\b|\b(?:carefully|steadily)\s+aim\b|\bline\s+up\s+(?:my|the)\s+(?:shot|attack)\b/.test(text)) return { id: 'steady_aim' };
+  if (/\bpreserve\s+life\b/.test(text)) return { id: 'preserve_life' };
+  if (/\bland['’]?s\s+aid\b|\blands\s+aid\b/.test(text)) return { id: 'lands_aid' };
+  if (/\bdivine\s+sense\b/.test(text)) return { id: 'divine_sense' };
+  if (/\b(?:choose|change|switch|attune)\b.*\b(?:arid|polar|temperate|tropical|colossus slayer|horde breaker)\b/.test(text)) return { id: 'rest_subclass_choice' };
   if (/\barcane\s+recovery\b/.test(text)) return { id: 'arcane_recovery' };
   return null;
+}
+
+function resolveRestSubclassChoice({ message = '', worldState = {}, characterSheet = {} } = {}) {
+  if (worldState.combat_state?.active) return { handled: true, logType: 'feature_rest_choice_combat_blocked', worldState, reply: 'This subclass choice changes after a Short or Long Rest, not during combat.' };
+  const afterRest = /rest/i.test(String(worldState.time_state?.scene_time || ''));
+  if (!afterRest) return { handled: true, logType: 'feature_rest_choice_rest_required', worldState, reply: 'Finish the required rest first, then choose the new subclass option.' };
+  const text = String(message || '').toLowerCase();
+  if (isLandDruid(characterSheet)) {
+    const land = ['arid', 'polar', 'temperate', 'tropical'].find((entry) => new RegExp(`\\b${entry}\\b`).test(text));
+    if (!land) return null;
+    const allLandSpells = new Set(['blur', 'burning_hands', 'fire_bolt', 'fog_cloud', 'hold_person', 'ray_of_frost', 'misty_step', 'shocking_grasp', 'sleep', 'acid_splash', 'ray_of_sickness', 'web']);
+    const selected = {
+      arid: ['blur', 'burning_hands', 'fire_bolt'], polar: ['fog_cloud', 'hold_person', 'ray_of_frost'],
+      temperate: ['misty_step', 'shocking_grasp', 'sleep'], tropical: ['acid_splash', 'ray_of_sickness', 'web'],
+    }[land];
+    const nextSheet = {
+      ...characterSheet,
+      class_choices: { ...(characterSheet.class_choices || {}), land_type: land },
+      spellcasting: {
+        ...(characterSheet.spellcasting || {}),
+        always_prepared_spells: [...new Set([...(characterSheet.spellcasting?.always_prepared_spells || []).filter((id) => !allLandSpells.has(id)), ...selected])],
+      },
+    };
+    return { handled: true, logType: 'feature_land_choice_changed', worldState, characterSheet: nextSheet, reply: `After the rest, you attune the Circle of the Land to **${titleCase(land)}**. Its three Circle Spells replace the previous land list.` };
+  }
+  if (normalizeFeatureId(characterSheet.identity?.subclass) === 'hunter') {
+    const prey = /horde\s+breaker/.test(text) ? 'horde_breaker' : /colossus\s+slayer/.test(text) ? 'colossus_slayer' : '';
+    if (!prey) return null;
+    const nextSheet = { ...characterSheet, class_choices: { ...(characterSheet.class_choices || {}), hunters_prey: prey } };
+    return { handled: true, logType: 'feature_hunters_prey_changed', worldState, characterSheet: nextSheet, reply: `After the rest, **Hunter's Prey** changes to **${titleCase(prey)}**.` };
+  }
+  return null;
+}
+
+function resolvePreserveLife({ message = '', worldState = {}, characterSheet = {} } = {}) {
+  if (!isLifeCleric(characterSheet) || getCharacterLevel(characterSheet) < 3) return levelRequired('Preserve Life', 'Life Cleric', 3, worldState);
+  const context = getFeatureTargetContext({ message, worldState, allowFallback: true });
+  const combat = context?.combat || cloneCombat(worldState.combat_state || {});
+  const target = context?.target || combat.combatants?.find((entry) => entry.is_player) || null;
+  const stats = worldState.player_stats || {};
+  const fallback = { name: actorName(characterSheet, worldState), hp: Number(stats.hp ?? characterSheet.derived_stats?.hp ?? 0), max_hp: Number(stats.max_hp ?? characterSheet.derived_stats?.max_hp ?? 0), is_player: true };
+  const recipient = target || fallback;
+  if (Number(recipient.hp || 0) * 2 > Number(recipient.max_hp || 0)) {
+    return { handled: true, logType: 'feature_preserve_life_not_bloodied', worldState, reply: 'Preserve Life can heal only Bloodied creatures at half their Hit Points or lower. No Channel Divinity is spent.' };
+  }
+  const spent = spendFeatureCost({ worldState, characterSheet, actionResource: 'action', actionLabel: 'Preserve Life', resource: 'channel_divinity' });
+  if (!spent.ok) return spent.result;
+  const pool = getCharacterLevel(characterSheet) * 5;
+  const cap = Math.floor(Number(recipient.max_hp || 0) / 2);
+  const healedFor = Math.min(pool, Math.max(0, cap - Number(recipient.hp || 0)));
+  recipient.hp = Number(recipient.hp || 0) + healedFor;
+  let nextState = spent.worldState;
+  if (recipient.is_player) nextState = { ...nextState, player_stats: { ...(nextState.player_stats || {}), hp: recipient.hp } };
+  if (context?.combat) nextState = syncFeatureTargetCombat(nextState, combat, context.activeCombat);
+  return { handled: true, logType: 'feature_preserve_life', worldState: nextState, reply: `You use **Preserve Life** and restore ${healedFor} HP to ${recipient.name}, up to half maximum HP. Channel Divinity left: ${remainingResourceText(nextState, characterSheet, 'channel_divinity')}.` };
+}
+
+function resolveLandsAid({ message = '', worldState = {}, characterSheet = {}, rollDie = defaultRollDie } = {}) {
+  if (!isLandDruid(characterSheet) || getCharacterLevel(characterSheet) < 3) return levelRequired("Land's Aid", 'Land Druid', 3, worldState);
+  const context = getFeatureTargetContext({ message, worldState, allowFallback: true });
+  if (!context?.target) return { handled: true, logType: 'feature_lands_aid_no_target', worldState, reply: "Land's Aid needs an established creature target for its damaging thorns. Name the foe; the flowers can handle the rest." };
+  const spent = spendFeatureCost({ worldState, characterSheet, actionResource: 'action', actionLabel: "Land's Aid", resource: 'wild_shape' });
+  if (!spent.ok) return spent.result;
+  const live = getFeatureTargetContext({ message, worldState: spent.worldState, allowFallback: true }) || context;
+  const dc = getSpellSaveDc(characterSheet);
+  const save = resolveSavingThrow({ target: live.target, ability: 'con', dc, rollDie, bonus: Number(live.target.saves?.con || 0) });
+  const damageRoll = rollDamageFormula('2d6', rollDie);
+  const damage = save.success ? Math.floor(damageRoll.total / 2) : damageRoll.total;
+  const applied = applyDamage({ target: live.target, amount: damage, damageType: 'necrotic', source: "Land's Aid" });
+  Object.assign(live.target, applied.target);
+  const player = live.combat?.combatants?.find((entry) => entry.is_player);
+  const healingRoll = rollDamageFormula('2d6', rollDie);
+  const healTarget = player || { hp: spent.worldState.player_stats?.hp, max_hp: spent.worldState.player_stats?.max_hp };
+  const healed = applyHealing({ target: healTarget, amount: healingRoll.total, maxHp: healTarget.max_hp });
+  if (player) player.hp = healed.target.hp;
+  let nextState = syncFeatureTargetCombat(spent.worldState, live.combat, live.activeCombat);
+  nextState = { ...nextState, player_stats: { ...(nextState.player_stats || {}), hp: healed.target.hp } };
+  return { handled: true, logType: 'feature_lands_aid', worldState: nextState, reply: `You use **Land's Aid**. ${live.target.name} ${save.success ? 'succeeds' : 'fails'} its CON save and takes ${applied.amount} necrotic damage. You regain ${healed.afterHp - healed.beforeHp} HP. Wild Shape left: ${remainingResourceText(nextState, characterSheet, 'wild_shape')}.` };
+}
+
+function resolveDivineSense({ worldState = {}, characterSheet = {} } = {}) {
+  if (!isDevotionPaladin(characterSheet) || getCharacterLevel(characterSheet) < 3) return levelRequired('Divine Sense', 'Paladin', 3, worldState);
+  const spent = spendFeatureCost({ worldState, characterSheet, actionResource: 'bonus_action', actionLabel: 'Divine Sense', resource: 'channel_divinity' });
+  if (!spent.ok) return spent.result;
+  const effect = {
+    id: 'divine_sense', name: 'Divine Sense', source: actorName(characterSheet, spent.worldState), source_type: 'class_feature', target: actorName(characterSheet, spent.worldState),
+    duration: '10 minutes', concentration: false, remaining_minutes: 10, remaining_rounds: 100,
+    mechanical_effect: 'Detect the location and type of Celestials, Fiends, Undead, and consecrated or desecrated places or objects within 60 feet.', rules_effects: [],
+  };
+  const nextState = addOrReplaceFeatureEffect(spent.worldState, effect, characterSheet);
+  return { handled: true, logType: 'feature_divine_sense', worldState: nextState, reply: `You use **Divine Sense** as a Bonus Action. For 10 minutes, the referee will expose established Celestials, Fiends, Undead, and consecrated or desecrated presences within 60 feet. Channel Divinity left: ${remainingResourceText(nextState, characterSheet, 'channel_divinity')}.` };
 }
 
 function resolveSteadyAim({ worldState = {}, characterSheet = {} } = {}) {
@@ -625,9 +729,10 @@ function resolveMagicalCunning({ worldState = {}, characterSheet = {} } = {}) {
     };
   }
 
-  const maxSlots = Number(characterSheet.spellcasting?.slots_max?.['1'] || getWarlockLevelOneSlotMaximum(characterSheet));
+  const slotLevel = Number(characterSheet.spellcasting?.pact_slot_level || (getCharacterLevel(characterSheet) >= 3 ? 2 : 1));
+  const maxSlots = Number(characterSheet.spellcasting?.slots_max?.[String(slotLevel)] || getWarlockLevelOneSlotMaximum(characterSheet));
   const slots = { ...(worldState.player_stats?.spell_slots || characterSheet.spellcasting?.slots || {}) };
-  const current = Number(slots['1'] || 0);
+  const current = Number(slots[String(slotLevel)] || 0);
   const recoverable = Math.ceil(maxSlots / 2);
   const restored = Math.min(recoverable, Math.max(0, maxSlots - current));
   if (restored <= 0) {
@@ -650,9 +755,9 @@ function resolveMagicalCunning({ worldState = {}, characterSheet = {} } = {}) {
     worldState: mergeWorldResources({
       ...worldState,
       time_state: { ...(worldState.time_state || {}), elapsed_minutes: elapsed, scene_time: 'after a one-minute Magical Cunning rite' },
-      player_stats: { ...(worldState.player_stats || {}), spell_slots: { ...slots, 1: current + restored } },
+      player_stats: { ...(worldState.player_stats || {}), spell_slots: { ...slots, [slotLevel]: current + restored } },
     }, nextResources),
-    reply: `You complete a one-minute **Magical Cunning** rite and recover ${restored} Pact Magic slot. Level 1 Pact slots: ${current + restored}/${maxSlots}. Uses left: ${nextResources.magical_cunning.remaining}/${nextResources.magical_cunning.max}.`,
+    reply: `You complete a one-minute **Magical Cunning** rite and recover ${restored} Pact Magic slot. Level ${slotLevel} Pact slots: ${current + restored}/${maxSlots}. Uses left: ${nextResources.magical_cunning.remaining}/${nextResources.magical_cunning.max}.`,
   };
 }
 

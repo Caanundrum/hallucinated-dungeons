@@ -59,6 +59,8 @@ function summarizeCharacterSheetForRules(characterSheet) {
   if (features.length) {
     lines.push(`Features: ${features.map((feature) => `${feature.name} (${feature.source || 'feature'})`).join('; ')}`);
   }
+  const classChoices = formatClassChoices(characterSheet.class_choices);
+  if (classChoices) lines.push(`Class choices: ${classChoices}`);
   const pactWeapon = getPactWeapon(characterSheet);
   if (pactWeapon) lines.push(`Pact weapon: ${humanizeRuleTarget(pactWeapon)} (chosen through Pact of the Blade; uses Charisma for attack and damage)`);
   if (inventory.length) {
@@ -67,7 +69,7 @@ function summarizeCharacterSheetForRules(characterSheet) {
   if (spellcasting.ability) {
     const cantrips = spellcasting.cantrips_known || [];
     const spells = spellcasting.spells_prepared || [];
-    lines.push(`Spellcasting: ${spellcasting.ability.toUpperCase()}, attack ${fmtSigned(derived.spell_attack_bonus)}, DC ${derived.spell_save_dc ?? '--'}, slots ${formatSpellSlots(spellcasting.slots)}, cantrips ${formatList(cantrips)}, level 1 ${formatList(spells)}`);
+    lines.push(`Spellcasting: ${spellcasting.ability.toUpperCase()}, attack ${fmtSigned(derived.spell_attack_bonus)}, DC ${derived.spell_save_dc ?? '--'}, slots ${formatSpellSlots(spellcasting.slots)}, cantrips ${formatList(cantrips)}, prepared level 1+ spells ${formatList(spells)}`);
     if ((spellcasting.spellbook_spells || []).length) {
       lines.push(`Spellbook: ${formatList(spellcasting.spellbook_spells)}. Prepared from spellbook: ${formatList(spells)}`);
     }
@@ -82,6 +84,13 @@ function summarizeCharacterSheetForRules(characterSheet) {
     lines.push(`Character details: ${[details.alignment, details.personality, details.backstory].filter(Boolean).join(' ')}`);
   }
   return lines.join('\n');
+}
+
+function formatClassChoices(choices = {}) {
+  const visible = Object.entries(choices || {})
+    .filter(([key, value]) => value !== null && value !== undefined && value !== '' && key !== 'subclass')
+    .map(([key, value]) => `${humanizeRuleTarget(key)}: ${Array.isArray(value) ? value.join(', ') : humanizeRuleTarget(value)}`);
+  return visible.join('; ');
 }
 
 function getPactWeapon(characterSheet = {}) {

@@ -1534,6 +1534,11 @@ io.on('connection', (socket) => {
       let refereeSkipSpatialGuard = false;
       let resolvedRefereeAction = null;
       if (referee?.handled) {
+        if (referee.characterSheet && activeCharacter?.id) {
+          activeCharacter = await db.updateCharacterSheet(activeCharacter.id, referee.characterSheet);
+          await syncCharacterToWorldState(sessionId, activeCharacter.character_sheet, activeCharacter.id).catch(console.error);
+          socket.emit('character_ready', { characterId: activeCharacter.id, character: activeCharacter.character_sheet, shouldStartSession: false });
+        }
         const progressed = await applyProgressionAfterReferee({
           socket,
           sessionId,

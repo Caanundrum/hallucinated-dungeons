@@ -22,6 +22,7 @@ const {
   spendTurnResource,
 } = require('./actionEconomy');
 const { resolveCreatureTurns, resumeCreatureTurns } = require('./creatureTurnEngine');
+const { getCombatantDistanceFeet } = require('./combatPositionEngine');
 const {
   formatPendingReactionPrompt,
   resolvePendingReactionChoice,
@@ -57,11 +58,17 @@ const {
 const { resolveFeatureAction } = require('./classFeatureEngine');
 const {
   canUseFastHands,
+  getFrenzyDice,
+  getHunterPrey,
   getSneakAttackDice,
   getSubclassD20AdvantageSources,
   getWeaponCriticalThreshold,
   grantRemarkableAthleteMovement,
   isThief,
+  isDevotionPaladin,
+  isFiendWarlock,
+  isHunter,
+  isOpenHandMonk,
 } = require('./subclassFeatureEngine');
 const {
   getSpeciesD20AdvantageSources,
@@ -344,32 +351,33 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
   }
 
   const modifier = getCheckModifier(characterSheet, check, worldState);
+  const checkAbility = modifier.ability || check.ability;
   const bonus = getActiveBonusDice(worldState, 'check', { skill: check.skill })[0] || null;
   const dcAssessment = assessDc(intent.raw, check, worldState, inCombat, { hideAction, characterSheet });
   const dc = dcAssessment.dc;
   const conditionMode = getD20ConditionMode({
     subject: conditionSubject,
     testType: check.skill ? 'skill_check' : 'ability_check',
-    ability: check.ability,
+    ability: checkAbility,
     skill: check.skill,
     reason: intent.raw,
   });
   const conditionSources = getD20ConditionSources({
     subject: conditionSubject,
     testType: check.skill ? 'skill_check' : 'ability_check',
-    ability: check.ability,
+    ability: checkAbility,
     skill: check.skill,
     reason: intent.raw,
   });
   const activeAdvantageSources = getActiveD20AdvantageSources(worldState, {
     testType: check.skill ? 'skill_check' : 'ability_check',
-    ability: check.ability,
+    ability: checkAbility,
     skill: check.skill,
   });
   const subclassAdvantageSources = getSubclassD20AdvantageSources({
     characterSheet,
     testType: check.skill ? 'skill_check' : 'ability_check',
-    ability: check.ability,
+    ability: checkAbility,
     skill: check.skill,
   });
   const advantageMode = combineAdvantageModes(
@@ -381,7 +389,7 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
     id: `roll_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     kind: check.skill ? 'skill_check' : 'ability_check',
     skill: check.skill,
-    ability: check.ability,
+    ability: checkAbility,
     label: check.label,
     formula: `1d20${formatSigned(modifier.total)}`,
     modifier: modifier.total,
@@ -416,7 +424,7 @@ function promptCheck({ intent, worldState, characterSheet, currentTurn = 0, inCo
       ...nextWorldState,
       pending_roll: pendingRoll,
     },
-    reply: `Make a DC ${dc} ${check.label}.${speciesHideSource ? ` **${speciesHideSource}** permits this Hide attempt behind the larger creature.` : ''}${formatAdvantageModeText(pendingRoll.advantage_mode, pendingRoll.advantage_sources)}${bonus ? ` Add ${bonus.die} from ${bonus.label}.` : ''}${combatConsumeText} [CHECK: id=${pendingRoll.id}${check.skill ? ` skill=${check.skill}` : ''} ability=${check.ability} modifier=${modifier.total} breakdown="${sanitizeTagValue(modifier.breakdown)}"${formatBonusDieTag(bonus)}]`,
+    reply: `Make a DC ${dc} ${check.label}.${speciesHideSource ? ` **${speciesHideSource}** permits this Hide attempt behind the larger creature.` : ''}${formatAdvantageModeText(pendingRoll.advantage_mode, pendingRoll.advantage_sources)}${bonus ? ` Add ${bonus.die} from ${bonus.label}.` : ''}${combatConsumeText} [CHECK: id=${pendingRoll.id}${check.skill ? ` skill=${check.skill}` : ''} ability=${checkAbility} modifier=${modifier.total} breakdown="${sanitizeTagValue(modifier.breakdown)}"${formatBonusDieTag(bonus)}]`,
   };
 }
 
@@ -2053,6 +2061,10 @@ function resolveMonkFlurryOfBlows({ message = '', worldState, characterSheet, ro
     combat = result.combat;
     attackState = result.worldState;
     lines.push(...result.lines);
+    if (result.hit && isOpenHandMonk(characterSheet)) {
+      const openHandTarget = findCombatTarget(combat, result.targetName || target.name);
+      lines.push(...applyOpenHandTechnique({ message, target: openHandTarget, characterSheet, rollDie }));
+    }
     consumeEffectIds.push(...result.consumeEffectIds);
     target = findCombatTarget(combat, target.name) || getLivingEnemy(combat);
   }
@@ -2226,6 +2238,12 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
     player = combat.combatants.find((combatant) => combatant.is_player);
     target = findCombatTarget(combat, target.name) || target;
   }
+  const sacred = activateSacredWeaponForAttack({ message, worldState: attackState, characterSheet, attack });
+  if (sacred.blocked) return { handled: true, logType: 'referee_sacred_weapon_unavailable', worldState, reply: sacred.reply };
+  attackState = sacred.worldState;
+  combat = cloneCombatState(attackState.combat_state);
+  player = combat.combatants.find((combatant) => combatant.is_player);
+  target = findCombatTarget(combat, target.name) || target;
   const activeAttackBonuses = getActiveAttackRollBonuses(attackState, { attack, characterSheet });
   const activeAttackBonusTotal = activeAttackBonuses.reduce((sum, bonus) => sum + Number(bonus.value || 0), 0);
   const conditionAttackModifier = getConditionD20Modifier(player);
@@ -2260,6 +2278,7 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
   if (activeAttackBonuses.length) lines.push(`Active attack bonus: ${activeAttackBonuses.map((bonus) => `${bonus.label} ${formatSigned(bonus.value)}`).join(', ')}.`);
   if (conditionAttackModifier) lines.push(`Condition modifier: ${formatConditionD20Sources(player).join(', ')}.`);
   if (lucky.note) lines.push(lucky.note);
+  if (sacred.activated) lines.push(sacred.reply);
   const reveal = clearPlayerHidden({ worldState: attackState, reason: 'attack' });
   if (reveal.revealed) {
     attackState = reveal.worldState;
@@ -2287,7 +2306,9 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
       : getSneakAttackDamage({ characterSheet, attack, advantageMode, rollDie, crit: isCrit });
     sneakAttackUsed ||= sneakAttack.total > 0;
     if (sneakAttack.total > 0 && combat.turn_resources) combat.turn_resources.sneak_attack_used = true;
-    const totalDamage = damage.total + bonusDamage.total + flatBonusTotal + sneakAttack.total;
+    const frenzy = getFrenzyDamage({ characterSheet, worldState: attackState, combat, reckless, attack, rollDie });
+    const colossus = getColossusSlayerDamage({ characterSheet, combat, target, attack, rollDie });
+    const totalDamage = damage.total + bonusDamage.total + flatBonusTotal + sneakAttack.total + frenzy.total + colossus.total;
     const before = Number(target.hp || 0);
     target.hp = Math.max(0, before - totalDamage);
     const damageParts = [
@@ -2296,9 +2317,13 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
       flatBonuses.length ? flatBonuses.map((bonus) => `${bonus.label} ${formatSigned(bonus.value)}`).join(' + ') : '',
       fightingStyleBonus.total ? `${fightingStyleBonus.label} ${formatSigned(fightingStyleBonus.total)}` : '',
       sneakAttack.total ? `Sneak Attack ${sneakAttack.die}=${sneakAttack.total}` : '',
+      frenzy.total ? `Frenzy ${frenzy.die}=${frenzy.total}` : '',
+      colossus.total ? `Colossus Slayer 1d8=${colossus.total}` : '',
     ].filter(Boolean);
     lines.push(`${isCrit ? '**Critical hit.** ' : ''}Hit for ${totalDamage} damage${damageParts.length > 1 ? ` (${damageParts.join(' + ')})` : ''}. ${target.name}: (${before} -> ${target.hp} HP).`);
     if (damage.note) lines.push(damage.note);
+    if (frenzy.total) combat.turn_resources.frenzy_used = true;
+    if (colossus.total) combat.turn_resources.colossus_slayer_used = true;
     if (attack.tavernBrawlerPush && Number(target.hp) > 0) {
       target.forced_movement = { feet: 5, direction: 'away_from_player', source: 'Tavern Brawler' };
       lines.push(`**Tavern Brawler** pushes ${target.name} 5 feet away, subject to available space in the scene.`);
@@ -2352,7 +2377,13 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
     target.conditions = (target.conditions || []).filter((condition) => condition !== 'guiding_bolt_advantage');
   }
 
-  if (Number(target.hp) <= 0) lines.push(`${target.name} falls.`);
+  if (Number(target.hp) <= 0) {
+    lines.push(`${target.name} falls.`);
+    const blessing = applyDarkOnesBlessing({ worldState: { ...attackState, combat_state: combat }, characterSheet });
+    attackState = blessing.worldState;
+    combat = cloneCombatState(attackState.combat_state);
+    if (blessing.reply) lines.push(blessing.reply);
+  }
 
   if (cleaveExtra?.ok) {
     combat = markCleaveUsed(combat);
@@ -2380,6 +2411,31 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
     consumeEffectIds.push(...cleaveResult.consumeEffectIds);
   } else if (cleaveExtra) {
     lines.push(`**Cleave mastery:** ${cleaveExtra.reply}`);
+  }
+
+  const hordeTarget = getHordeBreakerTarget({ characterSheet, combat, primaryTarget: target, message });
+  if (hordeTarget) {
+    combat.turn_resources.horde_breaker_used = true;
+    const hordeResult = resolveExtraWeaponAttackRoll({
+      attack,
+      target: hordeTarget,
+      combat,
+      worldState: { ...attackState, combat_state: combat },
+      characterSheet,
+      message,
+      rollDie,
+      attackLabel: 'Horde Breaker attack',
+      resultLabel: 'Horde Breaker attack',
+      includeDamageRiders: false,
+      applyMastery: false,
+      sneakAttackAvailable: false,
+      savageAttackerAvailable: false,
+    });
+    combat = hordeResult.combat;
+    attackState = hordeResult.worldState;
+    lines.push(`**Horde Breaker:** you attack ${hordeTarget.name} with the same weapon.`);
+    lines.push(...hordeResult.lines);
+    consumeEffectIds.push(...hordeResult.consumeEffectIds);
   }
 
   if (lightExtra && getLivingEnemy(combat)) {
@@ -2671,7 +2727,30 @@ function resolveExtraWeaponAttackRoll({
   }
   if (Number(target.hp) <= 0) lines.push(`${target.name} falls.`);
 
-  return { lines, consumeEffectIds, combat, worldState, criticalHit: isCrit };
+  return { lines, consumeEffectIds, combat, worldState, criticalHit: isCrit, hit, targetName: target.name };
+}
+
+function applyOpenHandTechnique({ message = '', target = null, characterSheet = {}, rollDie = defaultRollDie } = {}) {
+  if (!target || Number(target.hp || 0) <= 0) return [];
+  const dc = 8 + Number(characterSheet.abilities?.modifiers?.wis || 0) + Number(characterSheet.derived_stats?.proficiency_bonus || 2);
+  if (/\b(?:addle|no reactions?|prevent.*opportunity)\b/i.test(message)) {
+    target.conditions = [...new Set([...(target.conditions || []), 'open_hand_addled'])];
+    target.reaction_available = false;
+    return [`**Open Hand Technique - Addle:** ${target.name} cannot make Opportunity Attacks until the start of its next turn.`];
+  }
+  if (/\b(?:push|shove|knock back)\b/i.test(message)) {
+    const save = resolveSavingThrow({ target, ability: 'str', dc, rollDie, bonus: Number(target.saves?.str || 0) });
+    if (save.success) return [`**Open Hand Technique - Push:** ${target.name} succeeds on its STR save (${save.text} vs DC ${dc}).`];
+    target.forced_movement = { feet: 15, direction: 'away_from_player', source: 'Open Hand Technique' };
+    return [`**Open Hand Technique - Push:** ${target.name} fails its STR save (${save.text} vs DC ${dc}) and is pushed up to 15 feet away.`];
+  }
+  if (/\b(?:topple|trip|prone|knock down)\b/i.test(message)) {
+    const save = resolveSavingThrow({ target, ability: 'dex', dc, rollDie, bonus: Number(target.saves?.dex || 0) });
+    if (save.success) return [`**Open Hand Technique - Topple:** ${target.name} succeeds on its DEX save (${save.text} vs DC ${dc}).`];
+    target.conditions = [...new Set([...(target.conditions || []), 'prone'])];
+    return [`**Open Hand Technique - Topple:** ${target.name} fails its DEX save (${save.text} vs DC ${dc}) and falls Prone.`];
+  }
+  return [];
 }
 
 function getLivingEnemy(combat = {}) {
@@ -3150,7 +3229,8 @@ function getCheckModifier(characterSheet, check, worldState = {}) {
     : '';
   const skillData = check.skill ? characterSheet?.derived_stats?.skill_modifiers?.[check.skill] : null;
   if (skillData) {
-    const baseTotal = Number(skillData.total || 0);
+    const primalKnowledge = getPrimalKnowledgeStrengthAdjustment({ characterSheet, check, skillData, worldState });
+    const baseTotal = Number(skillData.total || 0) + primalKnowledge.adjustment;
     const total = baseTotal + activeTotal + conditionModifier;
     const skillBonusLabel = skillData.expertise
       ? '+ Expertise'
@@ -3159,9 +3239,12 @@ function getCheckModifier(characterSheet, check, worldState = {}) {
         : skillData.jack_of_all_trades
           ? `+ Jack of All Trades ${formatSigned(skillData.jack_bonus)}`
           : 'only';
-    const baseBreakdown = `${String(skillData.ability || check.ability).toUpperCase()} ${skillBonusLabel} = ${formatSigned(baseTotal)}`;
+    const baseBreakdown = primalKnowledge.active
+      ? `STR via Primal Knowledge ${skillBonusLabel} = ${formatSigned(baseTotal)}`
+      : `${String(skillData.ability || check.ability).toUpperCase()} ${skillBonusLabel} = ${formatSigned(baseTotal)}`;
     return {
       total,
+      ability: primalKnowledge.active ? 'str' : (skillData.ability || check.ability),
       breakdown: activeBonuses.length || conditionModifier ? `${baseBreakdown}${activeBreakdown}${conditionBreakdown} = ${formatSigned(total)}` : baseBreakdown,
     };
   }
@@ -3170,8 +3253,20 @@ function getCheckModifier(characterSheet, check, worldState = {}) {
   const abilityBreakdown = `${check.ability.toUpperCase()} modifier ${formatSigned(abilityMod)}`;
   return {
     total: abilityMod + activeTotal + conditionModifier,
+    ability: check.ability,
     breakdown: activeBonuses.length || conditionModifier ? `${abilityBreakdown}${activeBreakdown}${conditionBreakdown} = ${formatSigned(abilityMod + activeTotal + conditionModifier)}` : abilityBreakdown,
   };
+}
+
+function getPrimalKnowledgeStrengthAdjustment({ characterSheet = {}, check = {}, skillData = {}, worldState = {} } = {}) {
+  const eligible = new Set(['acrobatics', 'intimidation', 'perception', 'stealth', 'survival']);
+  const raging = (worldState.active_effects || []).some((effect) => effect.id === 'rage');
+  if (!raging || normalizeId(characterSheet.identity?.class) !== 'barbarian' || getCharacterLevel(characterSheet) < 3 || !eligible.has(normalizeId(check.skill))) {
+    return { active: false, adjustment: 0 };
+  }
+  const original = Number(characterSheet.abilities?.modifiers?.[skillData.ability || check.ability] || 0);
+  const strength = Number(characterSheet.abilities?.modifiers?.str || 0);
+  return { active: true, adjustment: strength - original };
 }
 
 function getSavingThrowModifier(characterSheet, ability, worldState = {}) {
@@ -3741,6 +3836,75 @@ function getRecklessAttackUse({ message = '', characterSheet = {}, attack = {} }
     advantageMode: 'advantage',
     sources: ['Reckless Attack'],
   };
+}
+
+function activateSacredWeaponForAttack({ message = '', worldState = {}, characterSheet = {}, attack = {} } = {}) {
+  if (!/\bsacred\s+weapon\b/i.test(message)) return { worldState, activated: false };
+  if (!isDevotionPaladin(characterSheet) || getCharacterLevel(characterSheet) < 3) {
+    return { worldState, blocked: true, reply: 'Sacred Weapon requires a level 3 Oath of Devotion Paladin.' };
+  }
+  if (normalizeId(attack.attackKind || attack.attack_kind) !== 'melee') {
+    return { worldState, blocked: true, reply: 'Sacred Weapon must empower a held melee weapon. No Channel Divinity is spent.' };
+  }
+  if ((worldState.active_effects || []).some((effect) => effect.id === 'sacred_weapon')) {
+    return { worldState, activated: false };
+  }
+  const spent = spendResource({ worldState, characterSheet, resource: 'channel_divinity' });
+  if (!spent.ok) return { worldState, blocked: true, reply: 'Sacred Weapon needs an available Channel Divinity use. The Attack action is not spent.' };
+  const charisma = Math.max(1, Number(characterSheet.abilities?.modifiers?.cha || 0));
+  const effect = {
+    id: 'sacred_weapon', name: 'Sacred Weapon', source: characterSheet.identity?.name || 'Paladin', source_type: 'class_feature',
+    target: attack.name || 'held melee weapon', duration: '10 minutes', concentration: false, remaining_minutes: 10, remaining_rounds: 100,
+    mechanical_effect: `The empowered weapon gains +${charisma} to attack rolls, can deal Radiant damage, and sheds bright and dim light.`,
+    weapon_name: attack.name || 'held melee weapon',
+    rules_effects: [{ target: 'weapon_attack_bonus', value: charisma, weapon_name: attack.name || 'held melee weapon', label: 'Sacred Weapon' }],
+  };
+  const effects = [...(spent.worldState.active_effects || []).filter((entry) => entry.id !== effect.id), effect];
+  const nextState = applyActiveEffectsToWorldState({ ...spent.worldState, active_effects: effects }, effects, characterSheet);
+  return { worldState: nextState, activated: true, reply: `**Sacred Weapon:** Channel Divinity empowers ${attack.name} for 10 minutes, adding ${formatSigned(charisma)} to its attack rolls and filling the scene with divine light.` };
+}
+
+function getFrenzyDamage({ characterSheet = {}, worldState = {}, combat = {}, reckless = {}, attack = {}, rollDie = defaultRollDie } = {}) {
+  const dice = getFrenzyDice(characterSheet);
+  const raging = (worldState.active_effects || []).some((effect) => effect.id === 'rage');
+  const strengthAttack = normalizeId(attack.ability) === 'str';
+  if (!dice || !raging || !reckless.active || !strengthAttack || combat.turn_resources?.frenzy_used) return { total: 0, die: `${dice || 0}d6` };
+  const result = rollDamageFormula(`${dice}d6`, rollDie);
+  return { total: result.total, die: `${dice}d6` };
+}
+
+function getColossusSlayerDamage({ characterSheet = {}, combat = {}, target = {}, attack = {}, rollDie = defaultRollDie } = {}) {
+  if (!isHunter(characterSheet) || getHunterPrey(characterSheet) !== 'colossus_slayer') return { total: 0 };
+  if (!attack.isWeapon || Number(target.hp || 0) >= Number(target.max_hp || target.hp || 0) || combat.turn_resources?.colossus_slayer_used) return { total: 0 };
+  return { total: rollDamageFormula('1d8', rollDie).total };
+}
+
+function applyDarkOnesBlessing({ worldState = {}, characterSheet = {} } = {}) {
+  if (!isFiendWarlock(characterSheet) || getCharacterLevel(characterSheet) < 3) return { worldState, reply: '' };
+  const amount = Math.max(1, Number(characterSheet.abilities?.modifiers?.cha || 0) + getCharacterLevel(characterSheet));
+  const combat = cloneCombatState(worldState.combat_state);
+  const player = combat.combatants?.find((entry) => entry.is_player);
+  if (player) player.temp_hp = Math.max(Number(player.temp_hp || 0), amount);
+  return {
+    worldState: {
+      ...worldState,
+      combat_state: combat,
+      player_stats: { ...(worldState.player_stats || {}), temp_hp: Math.max(Number(worldState.player_stats?.temp_hp || 0), amount) },
+    },
+    reply: `**Dark One's Blessing:** you gain ${amount} temporary HP.`,
+  };
+}
+
+function getHordeBreakerTarget({ characterSheet = {}, combat = {}, primaryTarget = null, message = '' } = {}) {
+  if (!isHunter(characterSheet) || getHunterPrey(characterSheet) !== 'horde_breaker' || combat.turn_resources?.horde_breaker_used) return null;
+  const text = normalizeTargetPhrase(message);
+  return (combat.combatants || [])
+    .filter((entry) => !entry.is_player && entry !== primaryTarget && Number(entry.hp || 0) > 0)
+    .find((entry) => {
+      if (!text.includes(normalizeTargetPhrase(entry.name))) return false;
+      const distance = getCombatantDistanceFeet(primaryTarget || {}, entry);
+      return distance === null || distance <= 5;
+    }) || null;
 }
 
 function wantsRecklessAttack(message = '') {

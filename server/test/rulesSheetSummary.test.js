@@ -95,6 +95,18 @@ test('DM2 sheet summary exposes Champion and Thief level 3 derived rules', () =>
   assert.match(thief, /jump distance uses DEX/);
 });
 
+test('DM2 sheet summary exposes level 3 class choices and level 2 prepared spells', () => {
+  const summary = summarizeCharacterSheetForRules({
+    identity: { name: 'Rowan', class: 'ranger', class_name: 'Ranger', subclass_name: 'Hunter', level: 3 },
+    derived_stats: { spell_attack_bonus: 5, spell_save_dc: 13 },
+    class_choices: { subclass: 'hunter', hunters_prey: 'horde_breaker' },
+    spellcasting: { ability: 'wis', slots: { 1: 3 }, cantrips_known: [], spells_prepared: ['cure_wounds', 'ensnaring_strike'] },
+  });
+
+  assert.match(summary, /Class choices: hunters prey: horde breaker/);
+  assert.match(summary, /prepared level 1\+ spells cure_wounds, ensnaring_strike/);
+});
+
 test('DM2 sheet summary distinguishes a Wizard spellbook from prepared spells', () => {
   const summary = summarizeCharacterSheetForRules({
     identity: { name: 'Mira', class: 'wizard', class_name: 'Wizard', level: 2 },

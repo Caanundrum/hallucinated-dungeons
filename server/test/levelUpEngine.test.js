@@ -1012,3 +1012,92 @@ test('Rogue level 3 applies Thief movement, Steady Aim, and 2d6 Sneak Attack dat
   assert.equal(result.characterSheet.derived_stats.climb_speed, 30);
   assert.equal(result.characterSheet.derived_stats.jump_ability, 'dex');
 });
+
+test('all remaining level 3 classes expose complete choices and apply one coherent runtime package', () => {
+  const content = getContentBundle();
+  const subclasses = Object.fromEntries(content.subclasses.map((entry) => [entry.class_id, entry.id]));
+  const classes = ['barbarian', 'bard', 'cleric', 'druid', 'monk', 'paladin', 'ranger', 'sorcerer', 'warlock', 'wizard'];
+  const results = new Map();
+
+  for (const classId of classes) {
+    const sheet = baseSheet({
+      identity: { class: classId, class_name: classId, level: 2, experience_points: 900, level_up_available: true },
+      progression: { experience_points: 900 },
+      abilities: { modifiers: { str: 3, dex: 2, con: 2, int: 3, wis: 3, cha: 3 } },
+      derived_stats: { level: 2, hp: 18, max_hp: 18, armor_class: 12, spell_attack_bonus: 5, spell_save_dc: 13 },
+      resources: {
+        rage: { name: 'Rage', remaining: 2, max: 2, reset: 'long_rest' },
+        focus_points: { name: 'Focus Points', remaining: 2, max: 2, reset: 'short_rest' },
+        channel_divinity: { name: 'Channel Divinity', remaining: 2, max: 2, reset: 'short_rest' },
+        sorcery_points: { name: 'Sorcery Points', remaining: 2, max: 2, reset: 'long_rest' },
+      },
+      spellcasting: ['bard', 'cleric', 'druid', 'paladin', 'ranger', 'sorcerer', 'warlock', 'wizard'].includes(classId) ? {
+        ability: classId === 'wizard' ? 'int' : ['cleric', 'druid', 'ranger'].includes(classId) ? 'wis' : 'cha',
+        cantrips_known: ['light'],
+        spells_prepared: ['cure_wounds'],
+        always_prepared_spells: classId === 'ranger' ? ['hunter_mark'] : [],
+        spellbook_spells: classId === 'wizard' ? ['magic_missile', 'shield'] : undefined,
+        slots: { 1: 3 },
+        slots_max: { 1: 3 },
+      } : undefined,
+    });
+    const choices = { subclass: [subclasses[classId]] };
+    let preview = getLevelUpPreview(sheet, content, { choices });
+    for (const required of preview.requiredChoices.filter((choice) => choice.id !== 'subclass')) {
+      preview = getLevelUpPreview(sheet, content, { choices });
+      const liveChoice = preview.requiredChoices.find((choice) => choice.id === required.id);
+      choices[required.id] = liveChoice.options
+        .filter((option) => !option.requires_choice)
+        .slice(0, Number(liveChoice.count || 0))
+        .map((option) => option.id);
+    }
+    preview = getLevelUpPreview(sheet, content, { choices });
+    assert.equal(preview.canApply, true, `${classId}: ${preview.blockers.map((entry) => entry.message).join(' | ')}`);
+    const result = applyLevelUp({ characterSheet: sheet, content, payload: { choices } });
+    assert.equal(result.ok, true, classId);
+    assert.equal(result.characterSheet.identity.level, 3, classId);
+    assert.equal(result.characterSheet.identity.subclass, subclasses[classId], classId);
+    results.set(classId, result.characterSheet);
+  }
+
+  assert.equal(results.get('barbarian').resources.rage.max, 3);
+  assert.equal(results.get('bard').spellcasting.prepared_spells_count, 6);
+  assert.deepEqual(results.get('cleric').spellcasting.slots, { 1: 4, 2: 2 });
+  assert(results.get('cleric').spellcasting.always_prepared_spells.includes('lesser_restoration'));
+  assert(results.get('druid').class_choices.land_type);
+  assert.equal(results.get('monk').resources.focus_points.max, 3);
+  assert.equal(results.get('paladin').resources.channel_divinity.max, 2);
+  assert(results.get('paladin').spellcasting.always_prepared_spells.includes('shield_of_faith'));
+  assert(results.get('ranger').class_choices.hunters_prey);
+  assert.equal(results.get('sorcerer').derived_stats.max_hp, 27);
+  assert.equal(results.get('sorcerer').derived_stats.armor_class, 15);
+  assert.equal(results.get('warlock').spellcasting.pact_slot_level, 2);
+  assert.equal(results.get('warlock').spellcasting.slots[2], 2);
+  assert.equal(results.get('wizard').spellcasting.spellbook_spells.length, 6);
+});
+
+test('Rogue level 3 supersedes the old 1d6 Sneak Attack display entry', () => {
+  const sheet = baseSheet({
+    identity: { class: 'rogue', class_name: 'Rogue', level: 2, experience_points: 900, level_up_available: true },
+    progression: { experience_points: 900 },
+    derived_stats: { level: 2 },
+    features: [{ source: 'class', level: 1, name: 'Sneak Attack', description: 'Deal an extra 1d6 damage.' }],
+  });
+  const result = applyLevelUp({ characterSheet: sheet, content: getContentBundle(), payload: { choices: { subclass: ['thief'] } } });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.characterSheet.features.filter((feature) => /Sneak Attack/.test(feature.name)).map((feature) => feature.name), ['Sneak Attack (2d6)']);
+});
+
+test('Draconic Sorcery continues adding one HP on later level increases', () => {
+  const hp = getFixedHpIncrease(baseSheet({
+    identity: { class: 'sorcerer', subclass: 'draconic_sorcery', level: 3 },
+    abilities: { final_scores: { con: 14 }, modifiers: { con: 2 } },
+    active_effects: [],
+  }), { hit_die: 6 });
+
+  assert.equal(hp.fixedBase, 4);
+  assert.equal(hp.constitutionModifier, 2);
+  assert.equal(hp.perLevelBonus, 1);
+  assert.equal(hp.increase, 7);
+});

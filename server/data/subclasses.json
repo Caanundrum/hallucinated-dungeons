@@ -4,14 +4,14 @@
     "class_id": "barbarian",
     "name": "Path of the Berserker",
     "unlock_level": 3,
-    "description": "Turn battle fury into relentless offense while refusing effects that would bend your courage or will.",
+    "description": "Turn battle fury into relentless offense through reckless, rage-fueled attacks.",
     "level_features": {
       "3": [
-        { "id": "frenzy", "name": "Frenzy", "description": "Reckless Attack can add extra damage to the first Strength-based hit on your turn while Rage is active." },
-        { "id": "mindless_rage", "name": "Mindless Rage", "description": "Rage protects you from being Charmed or Frightened and suppresses those conditions while it lasts." }
+        { "id": "frenzy", "name": "Frenzy", "description": "Reckless Attack can add extra damage to the first Strength-based hit on your turn while Rage is active." }
       ]
     },
-    "runtime_mechanics": ["barbarian_level_3"]
+    "runtime_mechanics": ["barbarian_level_3"],
+    "mechanics_status": "implemented"
   },
   {
     "id": "college_of_lore",
@@ -25,7 +25,8 @@
         { "id": "cutting_words", "name": "Cutting Words", "description": "Use Bardic Inspiration and a Reaction to reduce a nearby creature's successful attack roll, ability check, or damage roll." }
       ]
     },
-    "runtime_mechanics": ["bard_level_3"]
+    "runtime_mechanics": ["bard_level_3"],
+    "mechanics_status": "implemented"
   },
   {
     "id": "life_domain",
@@ -40,7 +41,8 @@
         { "id": "preserve_life", "name": "Preserve Life", "description": "Spend Channel Divinity to divide a pool of healing among Bloodied creatures nearby." }
       ]
     },
-    "runtime_mechanics": ["cleric_level_3"]
+    "runtime_mechanics": ["cleric_level_3"],
+    "mechanics_status": "implemented"
   },
   {
     "id": "circle_of_the_land",
@@ -54,7 +56,8 @@
         { "id": "lands_aid", "name": "Land's Aid", "description": "Spend Wild Shape to harm nearby foes while restoring an ally's Hit Points." }
       ]
     },
-    "runtime_mechanics": ["druid_level_3"]
+    "runtime_mechanics": ["druid_level_3"],
+    "mechanics_status": "implemented"
   },
   {
     "id": "champion",
@@ -82,7 +85,8 @@
         { "id": "open_hand_technique", "name": "Open Hand Technique", "description": "Flurry of Blows hits can prevent reactions, push a target, or knock it Prone." }
       ]
     },
-    "runtime_mechanics": ["monk_level_3"]
+    "runtime_mechanics": ["monk_level_3"],
+    "mechanics_status": "implemented"
   },
   {
     "id": "oath_of_devotion",
@@ -96,7 +100,8 @@
         { "id": "sacred_weapon", "name": "Sacred Weapon", "description": "Spend Channel Divinity to empower a held weapon with divine accuracy and light." }
       ]
     },
-    "runtime_mechanics": ["paladin_level_3"]
+    "runtime_mechanics": ["paladin_level_3"],
+    "mechanics_status": "implemented"
   },
   {
     "id": "hunter",
@@ -110,7 +115,8 @@
         { "id": "hunters_prey", "name": "Hunter's Prey", "description": "Choose a specialized offensive technique and change that choice after a rest." }
       ]
     },
-    "runtime_mechanics": ["ranger_level_3"]
+    "runtime_mechanics": ["ranger_level_3"],
+    "mechanics_status": "implemented"
   },
   {
     "id": "thief",
@@ -139,7 +145,8 @@
         { "id": "draconic_spells", "name": "Draconic Spells", "description": "Gain the level-appropriate draconic spells as always-prepared spells." }
       ]
     },
-    "runtime_mechanics": ["sorcerer_level_3"]
+    "runtime_mechanics": ["sorcerer_level_3"],
+    "mechanics_status": "implemented"
   },
   {
     "id": "fiend_patron",
@@ -153,7 +160,8 @@
         { "id": "fiend_spells", "name": "Fiend Spells", "description": "Gain the level-appropriate Fiend Patron spells as always-prepared spells." }
       ]
     },
-    "runtime_mechanics": ["warlock_level_3"]
+    "runtime_mechanics": ["warlock_level_3"],
+    "mechanics_status": "implemented"
   },
   {
     "id": "evoker",
@@ -167,6 +175,7 @@
         { "id": "potent_cantrip", "name": "Potent Cantrip", "description": "Damaging cantrips still deal partial damage when an attack misses or a target succeeds on its save." }
       ]
     },
-    "runtime_mechanics": ["wizard_level_3"]
+    "runtime_mechanics": ["wizard_level_3"],
+    "mechanics_status": "implemented"
   }
 ]

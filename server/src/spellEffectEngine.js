@@ -27,6 +27,7 @@ const { applyGiantAncestryOnHit } = require('./giantAncestryEngine');
 const { clearPlayerHidden } = require('./hiddenStateEngine');
 const { assertValidRulesEffects } = require('./refereeContracts');
 const { getFightingStyleArmorBonus } = require('./fightingStyleEngine');
+const { isEvoker, isFiendWarlock, isHunter, isLifeCleric } = require('./subclassFeatureEngine');
 
 const CONCENTRATION_DURATIONS = {
   bless: 'Concentration, up to 1 minute',
@@ -52,9 +53,17 @@ const SPELL_OUTCOMES = {
   poison_spray: { type: 'saving_throw', save: 'con', damage: '1d12', damage_type: 'poison', half_on_success: false },
   sacred_flame: { type: 'saving_throw', save: 'dex', damage: '1d8', damage_type: 'radiant', half_on_success: false },
   thunderwave: { type: 'saving_throw', save: 'con', damage: '2d8', damage_type: 'thunder', half_on_success: true },
+  shatter: { type: 'saving_throw', save: 'con', damage: '3d8', damage_type: 'thunder', half_on_success: true },
+  mind_spike: { type: 'saving_throw', save: 'wis', damage: '3d8', damage_type: 'psychic', half_on_success: true },
+  moonbeam: { type: 'saving_throw', save: 'con', damage: '2d10', damage_type: 'radiant', half_on_success: true },
+  scorching_ray: { type: 'multi_spell_attack', attacks: 3, damage: '2d6', damage_type: 'fire' },
   command: { type: 'save_effect', save: 'wis', effect: 'The target obeys a one-word command on its next turn if the command is valid and not directly harmful.' },
   charm_person: { type: 'save_effect', save: 'wis', effect: 'The humanoid is charmed by you if it fails the save.' },
   faerie_fire: { type: 'save_effect', save: 'dex', effect: 'Failed targets are outlined, cannot benefit from invisibility, and attacks against them have advantage.' },
+  hold_person: { type: 'save_effect', save: 'wis', effect: 'The humanoid is Paralyzed while the spell lasts, repeating the save at the end of each turn.' },
+  web: { type: 'save_effect', save: 'dex', effect: 'The target is Restrained by the webs while the spell lasts or until it escapes.' },
+  suggestion: { type: 'save_effect', save: 'wis', effect: 'The target follows the declared reasonable course of action while the spell lasts.' },
+  blindness_deafness: { type: 'save_effect', save: 'con', effect: 'The target suffers the declared Blinded or Deafened condition while the spell lasts.' },
   sleep: { type: 'sleep_pool', dice: '5d8' },
 };
 
@@ -163,11 +172,14 @@ function resolveSpellOutcome({ spellCast, characterSheet, worldState = {}, rollD
   });
 
   if (!rule) {
-    return resolveUtilitySpell({ spell, worldState: stateWithMessage });
+    return resolveUtilitySpell({ spell, worldState: stateWithMessage, characterSheet });
   }
 
   if (rule.type === 'spell_attack') {
     return resolveSpellAttack({ spell, rule, known, characterSheet, worldState: stateWithMessage, rollDie });
+  }
+  if (rule.type === 'multi_spell_attack') {
+    return resolveMultiSpellAttack({ spell, rule, known, characterSheet, worldState: stateWithMessage, rollDie });
   }
   if (rule.type === 'automatic_damage') {
     return resolveAutomaticDamageSpell({ spell, rule, worldState: stateWithMessage, rollDie });
@@ -268,10 +280,57 @@ function resolveSpellAttack({ spell, rule, known = {}, characterSheet, worldStat
   } else if (criticalMiss) {
     lines.push('**Critical miss.** The spell goes wide, and magic pretends it meant to do that.');
   } else {
-    lines.push('Miss.');
+    const potent = getPotentCantripMissDamage({ spell, rule, characterSheet, target, rollDie });
+    if (potent.amount) {
+      target.hp = potent.target.hp;
+      lines.push(`Miss, but **Potent Cantrip** deals ${potent.amount} ${rule.damage_type} damage. ${target.name}: (${potent.beforeHp} -> ${target.hp} HP).`);
+    } else {
+      lines.push('Miss.');
+    }
   }
 
-  return finishSpellAction({ spell, worldState: outcomeWorldState, combat, lines, activeCombat });
+  const blessedState = Number(target.hp || 0) <= 0
+    ? applyFiendSpellKillBlessing({ worldState: outcomeWorldState, combat, characterSheet })
+    : { worldState: outcomeWorldState, combat, line: '' };
+  if (blessedState.line) lines.push(blessedState.line);
+  return finishSpellAction({ spell, worldState: blessedState.worldState, combat: blessedState.combat, lines, activeCombat });
+}
+
+function resolveMultiSpellAttack({ spell, rule, known = {}, characterSheet, worldState, rollDie }) {
+  const context = getSpellTargetContext({ spell, spellCastMessage: worldState.__spell_message, worldState, characterSheet });
+  if (!context?.target) return noSpellTarget(worldState, spell);
+  const { combat, target, activeCombat } = context;
+  const attackBonus = getSpellAttackBonus(characterSheet, known) + getActiveSpellAttackBonus(worldState, characterSheet);
+  const lines = [`You cast **${spell.name}** at ${target.name}, making ${rule.attacks} spell attacks.`];
+  let total = 0;
+  for (let index = 1; index <= Number(rule.attacks || 1); index += 1) {
+    const roll = rollD20WithMode(rollDie, null);
+    const attackTotal = roll.natural + attackBonus;
+    const crit = roll.natural === 20;
+    const hit = roll.natural !== 1 && (crit || attackTotal >= Number(target.ac || 10));
+    if (!hit) {
+      lines.push(`Ray ${index}: ${roll.text}${formatSigned(attackBonus)} = ${attackTotal} vs AC ${target.ac}; miss.`);
+      continue;
+    }
+    const damage = rollFormula(rule.damage, rollDie, { crit });
+    const applied = applyDamage({ target, amount: damage.total, damageType: rule.damage_type, source: spell.name });
+    Object.assign(target, applied.target);
+    total += applied.amount;
+    lines.push(`Ray ${index}: ${roll.text}${formatSigned(attackBonus)} = ${attackTotal}; ${crit ? 'Critical hit, ' : ''}${applied.amount} ${rule.damage_type} damage.`);
+  }
+  lines.push(`${target.name}: ${target.hp} HP remaining. Total damage: ${total}.`);
+  const blessedState = Number(target.hp || 0) <= 0
+    ? applyFiendSpellKillBlessing({ worldState, combat, characterSheet })
+    : { worldState, combat, line: '' };
+  if (blessedState.line) lines.push(blessedState.line);
+  return finishSpellAction({ spell, worldState: blessedState.worldState, combat: blessedState.combat, lines, activeCombat });
+}
+
+function getPotentCantripMissDamage({ spell = {}, rule = {}, characterSheet = {}, target = {}, rollDie = defaultRollDie } = {}) {
+  if (Number(spell.level || 0) !== 0 || !isEvoker(characterSheet) || !rule.damage) return { amount: 0, target };
+  const damage = rollFormula(rule.damage, rollDie);
+  const applied = applyDamage({ target, amount: Math.floor(damage.total / 2), damageType: rule.damage_type, source: 'Potent Cantrip' });
+  return { ...applied, amount: applied.amount };
 }
 
 function resolveAutomaticDamageSpell({ spell, rule, worldState, rollDie }) {
@@ -319,7 +378,8 @@ function resolveSavingThrowSpell({ spell, rule, known = {}, characterSheet, worl
   const save = resolveSavingThrow({ target, ability: rule.save, dc, rollDie, bonus: saveBonus, mode: spell.metamagic?.save_disadvantage ? 'disadvantage' : null });
   const success = save.success;
   const damage = rollFormula(rule.damage, rollDie, { empoweredRerolls: spell.metamagic?.empowered_rerolls });
-  const appliedDamage = success && rule.half_on_success ? Math.floor(damage.total / 2) : success ? 0 : damage.total;
+  const potentCantrip = success && Number(spell.level || 0) === 0 && isEvoker(characterSheet);
+  const appliedDamage = success && (rule.half_on_success || potentCantrip) ? Math.floor(damage.total / 2) : success ? 0 : damage.total;
   const damageType = spell.metamagic?.damage_type || rule.damage_type;
   const applied = applyDamage({ target, amount: appliedDamage, damageType, source: spell.name });
   Object.assign(target, applied.target);
@@ -434,6 +494,7 @@ function resolveHealingSpell({ spell, rule, known = {}, characterSheet, worldSta
     spellMod,
     rerollOnes: hasOriginFeat(characterSheet, 'healer'),
   });
+  const discipleBonus = Number(spell.level || 0) > 0 && isLifeCleric(characterSheet) ? 2 + Number(spell.level) : 0;
   const stats = worldState.player_stats || {};
   const healingTarget = player || {
     hp: stats.hp ?? characterSheet?.derived_stats?.hp ?? 0,
@@ -441,7 +502,7 @@ function resolveHealingSpell({ spell, rule, known = {}, characterSheet, worldSta
   };
   const healed = applyHealing({
     target: healingTarget,
-    amount: healing.total,
+    amount: healing.total + discipleBonus,
     maxHp: player?.max_hp ?? stats.max_hp ?? characterSheet?.derived_stats?.max_hp,
   });
   if (player) player.hp = healed.target.hp;
@@ -456,7 +517,7 @@ function resolveHealingSpell({ spell, rule, known = {}, characterSheet, worldSta
     },
   };
   const lines = [
-    `You cast **${spell.name}** and restore ${healing.total} HP. HP: (${healed.beforeHp} -> ${healed.afterHp}).`,
+    `You cast **${spell.name}** and restore ${healing.total + discipleBonus} HP${discipleBonus ? `, including +${discipleBonus} from **Disciple of Life**` : ''}. HP: (${healed.beforeHp} -> ${healed.afterHp}).`,
   ];
 
   return {
@@ -469,9 +530,10 @@ function resolveHealingSpell({ spell, rule, known = {}, characterSheet, worldSta
   };
 }
 
-function resolveUtilitySpell({ spell, worldState }) {
+function resolveUtilitySpell({ spell, worldState, characterSheet = {} }) {
   const effectSummary = formatUtilitySpellEffectSummary(spell, worldState);
-  const reply = `You cast **${spell.name}**.${effectSummary ? ` ${effectSummary}` : ''} Its effect is now active in the scene: ${spell.description}`;
+  const lore = getHuntersLoreText({ spell, worldState, characterSheet });
+  const reply = `You cast **${spell.name}**.${effectSummary ? ` ${effectSummary}` : ''} Its effect is now active in the scene: ${spell.description}${lore ? ` ${lore}` : ''}`;
   return {
     handled: true,
     logType: 'spell_utility',
@@ -481,6 +543,31 @@ function resolveUtilitySpell({ spell, worldState }) {
     narrationGuidance: buildUtilitySpellNarrationGuidance({ spell, worldState }),
     narrationRequirements: getUtilitySpellNarrationRequirements({ spell, worldState }),
     consumesTurn: consumesCombatTurn(spell),
+  };
+}
+
+function getHuntersLoreText({ spell = {}, worldState = {}, characterSheet = {} } = {}) {
+  if (spell.id !== 'hunter_mark' || !isHunter(characterSheet)) return '';
+  const targetName = normalizeName((worldState.active_effects || []).find((effect) => effect.id === 'hunter_mark')?.target);
+  const target = (worldState.combat_state?.combatants || []).find((entry) => normalizeName(entry.name) === targetName);
+  if (!target) return "**Hunter's Lore:** the marked creature's defenses will be reported when its authoritative creature state is available.";
+  const facts = [
+    (target.immunities || []).length ? `Immunities: ${target.immunities.join(', ')}` : 'Immunities: none known',
+    (target.resistances || []).length ? `Resistances: ${target.resistances.join(', ')}` : 'Resistances: none known',
+    (target.vulnerabilities || []).length ? `Vulnerabilities: ${target.vulnerabilities.join(', ')}` : 'Vulnerabilities: none known',
+  ];
+  return `**Hunter's Lore:** ${facts.join('; ')}.`;
+}
+
+function applyFiendSpellKillBlessing({ worldState = {}, combat = {}, characterSheet = {} } = {}) {
+  if (!isFiendWarlock(characterSheet)) return { worldState, combat, line: '' };
+  const amount = Math.max(1, Number(characterSheet.abilities?.modifiers?.cha || 0) + Number(characterSheet.identity?.level || 1));
+  const player = (combat.combatants || []).find((entry) => entry.is_player);
+  if (player) player.temp_hp = Math.max(Number(player.temp_hp || 0), amount);
+  return {
+    combat,
+    worldState: { ...worldState, player_stats: { ...(worldState.player_stats || {}), temp_hp: Math.max(Number(worldState.player_stats?.temp_hp || 0), amount) } },
+    line: `**Dark One's Blessing:** you gain ${amount} temporary HP.`,
   };
 }
 
@@ -1398,10 +1485,15 @@ function getActiveSavingThrowBonuses(worldState = {}, context = {}) {
 
 function getActiveAttackRollBonuses(worldState = {}, context = {}) {
   const attackAbility = normalizeName(context.attack?.ability);
+  const attackName = normalizeName(context.attack?.name || context.attack?.id);
   return normalizeEffects(worldState.active_effects || [])
     .flatMap((effect) => (effect.rules_effects || []).map((rule) => ({ effect, rule })))
     .filter(({ rule }) => rule.target === 'weapon_attack_bonus')
     .filter(({ rule }) => !rule.ability || (attackAbility && normalizeName(rule.ability) === attackAbility))
+    .filter(({ effect, rule }) => {
+      const boundWeapon = normalizeName(rule.weapon_id || rule.weapon_name || effect.weapon_id || effect.weapon_name);
+      return !boundWeapon || (attackName && attackName === boundWeapon);
+    })
     .filter(({ effect }) => !isWeaponMagicAlreadyInSheet(context.characterSheet, context.attack, effect))
     .map(({ effect, rule }) => ({
       effectId: effect.id,

@@ -350,7 +350,7 @@ function inferTraitStatus(trait = {}) {
 }
 
 function inferSpellStatus(spell = {}) {
-  if (Number(spell.level || 0) === 0 || Number(spell.level || 0) === 1) return STATUS.PARTIAL;
+  if (Number(spell.level || 0) >= 0 && Number(spell.level || 0) <= 2) return STATUS.PARTIAL;
   return STATUS.NOT_EXPOSED;
 }
 

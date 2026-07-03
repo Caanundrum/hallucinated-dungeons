@@ -73,3 +73,14 @@ test('matrix flags the foundation gaps that block leveling work', () => {
   assert(subclasses.get('champion').children.every((feature) => feature.status === STATUS.IMPLEMENTED));
   assert.equal(subclasses.get('thief').status, STATUS.IMPLEMENTED);
 });
+
+test('the complete level 3 subclass catalog is implemented while level 2 spell coverage remains honest', () => {
+  const matrix = buildRulesCoverageMatrix();
+  const subclasses = matrix.sections.subclasses.entries;
+  const spells = new Map(matrix.sections.spells.entries.map((entry) => [entry.id, entry]));
+
+  assert.equal(subclasses.length, 12);
+  assert(subclasses.every((entry) => entry.status === STATUS.IMPLEMENTED));
+  assert.equal(spells.get('scorching_ray').status, STATUS.PARTIAL);
+  assert.equal(spells.get('web').status, STATUS.PARTIAL);
+});
