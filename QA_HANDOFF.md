@@ -1,5 +1,34 @@
 # Hallucinated Dungeons QA Handoff
 
+## Latest QA Pass - 2026-07-03 Legacy Rogue Sneak Attack Repair `97f4652`
+
+Scope:
+
+- Retested the exact production compatibility repair on already-leveled character `QA Rogue`.
+- Cross-checked the visible character sheet, a fresh Rules answer, browser diagnostics, and the full server regression suite.
+- QA changed no app code.
+
+Automated checks:
+
+- Server `npm.cmd test`: PASS, `617/617`.
+- `git diff --check 97f4652^ 97f4652`: PASS.
+- Browser console warnings/errors: none.
+
+Production verified / passed:
+
+- `QA Rogue` loaded as Human Rogue (Thief), level 3.
+- The sheet now exposes one authoritative Sneak Attack value at `2d6`; stale `extra 1d6` text is absent.
+- Steady Aim, Fast Hands, and Second-Story Work remain present after migration.
+- Fresh Rules query, `What is my exact current Sneak Attack damage dice? Use my current sheet.`, answered `2d6` from the active sheet.
+
+Finding disposition:
+
+- **CLOSED - P2 legacy Rogue Sneak Attack migration defect.** The compatibility repair passes production verification.
+
+Current recommendation:
+
+- Proceed to the next level-wide milestone for all classes. The stale `1d6` has been escorted out of the dungeon.
+
 ## Latest QA Pass - 2026-07-03 Complete Level 3 Package `2807747`
 
 Scope:
