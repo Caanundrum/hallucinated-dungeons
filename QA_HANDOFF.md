@@ -1,5 +1,41 @@
 # Hallucinated Dungeons QA Handoff
 
+## Latest QA Pass - 2026-07-03 Complete Level 3 Package `2807747`
+
+Scope:
+
+- Verified the complete level-wide class package rather than returning to two-class batches.
+- Reviewed the all-class advancement and runtime coverage, then ran a production Druid vertical slice through XP eligibility, choices, apply, and persisted sheet state.
+- Prior production Champion and Thief evidence remains applicable to this package's shared level-3 path.
+- QA changed no app code.
+
+Automated checks:
+
+- Server `npm.cmd test`: PASS, `615/615`.
+- Client `npm.cmd run lint`: PASS.
+- Client `npm.cmd run build`: PASS.
+- `git diff --check 2807747^ 2807747`: PASS.
+- The advancement suite applies level 3 for every class in one coherent matrix and asserts subclass choices, resources, spell progression, and class-specific selections.
+- Runtime coverage includes Frenzy, Cutting Words, Preserve Life, Land's Aid, Divine Sense, Sacred Weapon, Hunter choices, Open Hand, Potent Cantrip, Disciple of Life, and Scorching Ray.
+
+Production verified / passed:
+
+- `QA Druid 2` became Orc Druid (Circle of the Land) level 3. HP changed `17/17` to `24/24`; XP became `900/2700`.
+- Circle of the Land, Temperate land type, and Healing Word persisted after apply.
+- Temperate always-prepared spells appeared as Misty Step, Shocking Grasp, and Sleep.
+- Spellcasting preview reported six prepared spells and slots `L1:4, L2:2`; the applied sheet showed the expected six prepared entries plus the land spells.
+- Circle of the Land Spells and Land's Aid appeared on the applied sheet. Existing Wild Shape state was preserved at `1/2` rather than being silently refilled.
+- Champion and Thief production paths were already exercised through level-up, persisted sheets, fresh Rules answers, and representative live actions in the immediately preceding pass.
+
+Finding for DEV:
+
+- **P2 - Existing level-3 Rogue sheets are not migrated away from the stale Sneak Attack 1d6 feature text.** A fresh level-up is covered and passes with 2d6, and Rules/runtime answer 2d6, but already-leveled production character `QA Rogue` still displays both the original `Sneak Attack` description (`extra 1d6`) and the newer `Sneak Attack (2d6)` entry.
+- Repair or supersede the legacy feature entry when loading/migrating existing Rogue level-3 sheets. This is a compatibility cleanup, not a new-character advancement failure.
+
+Current recommendation:
+
+- Treat the complete level-3 package as broadly passed with one P2 legacy-sheet migration defect. Bundle that repair into a single level-3 stabilization patch; do not reopen the two-class conga line.
+
 ## Latest QA Pass - 2026-07-03 Champion / Thief Level 3 `bc90631`
 
 Scope:
