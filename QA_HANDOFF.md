@@ -1,5 +1,45 @@
 # Hallucinated Dungeons QA Handoff
 
+## Latest QA Pass - 2026-07-03 Champion / Thief Level 3 `bc90631`
+
+Scope:
+
+- Tested the already-deployed Champion and Thief level-3 runtime package before switching development to level-wide batching.
+- Railway `/health` confirmed release `60352d0be3bbeedf695d2ab64e4ae60787dc67dd`.
+- Leveled production characters `QA Smoke` to Fighter 3 (Champion) and `QA Rogue` to Rogue 3 (Thief), then checked sheets, Rules answers, and representative live behavior.
+- QA changed no app code.
+
+Automated checks:
+
+- Server `npm.cmd test`: PASS, `589/589`.
+- Client `npm.cmd run lint`: PASS.
+- `git diff --check bc90631^ bc90631`: PASS.
+- Browser console warnings/errors: none.
+
+Verified / passed:
+
+- Champion applied successfully. `QA Smoke` became Human Fighter (Champion) level 3; HP changed from `21/24` to `29/32`, XP became `900/2700`, subclass identity persisted, and Improved Critical plus Remarkable Athlete appeared on the sheet.
+- A live Strength (Athletics) action explicitly requested Advantage from Remarkable Athlete and used the correct `+5` modifier.
+- Thief applied successfully. `QA Rogue` became Human Rogue (Thief) level 3; HP changed from `5/17` to `12/24`, XP became `900/2700`, subclass identity persisted, and Steady Aim, Sneak Attack (2d6), Fast Hands, and Second-Story Work appeared.
+- A fresh Rules question answered authoritative current Sneak Attack damage as `2d6` and named the eligible shortsword/dagger attacks.
+- Automated runtime coverage passes Champion natural-19 criticals, Initiative/Athletics Advantage, protected critical movement, Thief Steady Aim action economy and 2d6 Sneak Attack, Fast Hands lock/pickpocket paths, ordinary versus hazardous climbing, and Dexterity-based hazardous jumps.
+- One GM request transiently failed on the first attempt and succeeded on immediate retry; no browser console error accompanied it. Not treated as a repeatable subclass defect in this pass.
+
+Finding for DEV:
+
+- **P2 - Rogue character sheet displays contradictory Sneak Attack values after level 3.** The Features section retains the original `Sneak Attack` description saying `extra 1d6` and separately adds `Sneak Attack (2d6)`. Runtime and Rules correctly use `2d6`, but the visible sheet presents both values as current features.
+- Replace or supersede the prior scaling feature display so the sheet has one authoritative current Sneak Attack value. Do not merely add a third explanatory line.
+
+Process direction from user:
+
+- Do not hand off additional two-class level-3 slices.
+- DEV should implement all remaining level-3 class and subclass runtime packages together, include this Sneak Attack display fix, run complete automated validation, then push one coherent level-3 package for broad QA across all twelve classes.
+- Subsequent level work should follow the same level-wide cadence unless a genuinely blocking foundation issue requires an earlier gate.
+
+Current recommendation:
+
+- Treat Champion and Thief mechanics as provisionally passed within tested scope, carry the P2 sheet cleanup into the complete level-3 package, and continue directly with the remaining ten classes. We are trading the two-class conga line for one actual milestone.
+
 ## Latest QA Pass - 2026-06-28 Level 3 Preview Refresh Retest `e107397`
 
 Scope:
