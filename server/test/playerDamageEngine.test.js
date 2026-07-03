@@ -54,3 +54,66 @@ test('Relentless Endurance does not stop instant death overflow', () => {
     damageResult: { beforeHp: 4, hpDamage: 16 },
   }), true);
 });
+
+test('Monk Slow Fall reduces falling damage and spends the combat Reaction', () => {
+  const result = applyDamageToPlayer({
+    player: { name: 'Mira', hp: 30, max_hp: 30 },
+    characterSheet: {
+      identity: { name: 'Mira', class: 'monk', level: 4 },
+      derived_stats: { hp: 30, max_hp: 30, level: 4 },
+    },
+    worldState: {
+      player_stats: { hp: 30, max_hp: 30 },
+      combat_state: {
+        active: true,
+        combatants: [{ name: 'Mira', hp: 30, max_hp: 30, is_player: true }],
+        turn_resources: {
+          action_available: true,
+          bonus_action_available: true,
+          reaction_available: true,
+          movement_remaining: 40,
+          used: [],
+        },
+      },
+    },
+    damage: 26,
+    damageType: 'bludgeoning',
+    source: 'falling from the ruined tower',
+  });
+
+  assert.equal(result.amount, 6);
+  assert.equal(result.player.hp, 24);
+  assert.equal(result.worldState.combat_state.turn_resources.reaction_available, false);
+  assert.match(result.safeguardLines.join(' '), /reduces the falling damage by 20/);
+});
+
+test('Slow Fall cannot apply after the Reaction is spent', () => {
+  const result = applyDamageToPlayer({
+    player: { name: 'Mira', hp: 30, max_hp: 30 },
+    characterSheet: {
+      identity: { name: 'Mira', class: 'monk', level: 4 },
+      derived_stats: { hp: 30, max_hp: 30, level: 4 },
+    },
+    worldState: {
+      player_stats: { hp: 30, max_hp: 30 },
+      combat_state: {
+        active: true,
+        combatants: [{ name: 'Mira', hp: 30, max_hp: 30, is_player: true }],
+        turn_resources: {
+          action_available: true,
+          bonus_action_available: true,
+          reaction_available: false,
+          movement_remaining: 40,
+          used: [],
+        },
+      },
+    },
+    damage: 12,
+    damageType: 'bludgeoning',
+    source: 'fall damage',
+  });
+
+  assert.equal(result.amount, 12);
+  assert.equal(result.player.hp, 18);
+  assert.equal(result.safeguards.length, 0);
+});

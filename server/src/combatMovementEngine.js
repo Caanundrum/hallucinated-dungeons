@@ -14,6 +14,7 @@ const {
   setHexPosition,
 } = require('./combatPositionEngine');
 const { applyConditionSpeedPenalty, getTurnBlockReason } = require('./conditionEngine');
+const { hasOriginFeat } = require('./originFeatEngine');
 const {
   resolveCreatureAction,
   resolveCreatureAttackHit,
@@ -142,9 +143,10 @@ function resolveCombatMovement({
 
   const movement = getMovementRecord({ message, combat, player, destination, characterSheet });
   if (!movement.ok) return blocked(worldState, movement.reply);
+  Object.assign(movement, getGrappledMovementCost({ message, combat, player, movement, characterSheet }));
   movement.hadTurnResources = Boolean(worldState.combat_state?.turn_resources);
 
-  if (movement.feet > getRemainingMovement(readyState)) {
+  if (movement.costFeet > getRemainingMovement(readyState)) {
     return blocked(readyState, `You only have ${getRemainingMovement(readyState)} ft of movement available, including any Remarkable Athlete movement.`);
   }
 
@@ -210,8 +212,8 @@ function finishCombatMovement({ opportunity, movement, characterSheet }) {
     ], opportunity.damageEvents);
   }
 
-  const special = spendRemarkableAthleteMovement(opportunity.worldState, movement.feet);
-  const spent = spendMovement(special.worldState, movement.feet - special.spent, 'combat movement', characterSheet);
+  const special = spendRemarkableAthleteMovement(opportunity.worldState, movement.costFeet);
+  const spent = spendMovement(special.worldState, movement.costFeet - special.spent, 'combat movement', characterSheet);
   if (!spent.ok) return blocked(spent.worldState, spent.reply);
   const nextState = recordMovement(spent.worldState, movement);
   const assumption = opportunity.assumedSceneZone
@@ -220,6 +222,7 @@ function finishCombatMovement({ opportunity, movement, characterSheet }) {
   return resolved('referee_combat_movement', nextState, [
     ...opportunity.lines,
     movement.speciesNote,
+    movement.grappleNote,
     `You move ${movement.feet} feet${movement.destinationText}.${movement.remarkableAthleteProtected ? ' Remarkable Athlete movement prevents Opportunity Attacks.' : ''} ${getRemainingMovement(nextState)} feet of movement remain.${assumption}`,
     'You can use another available combat resource or end your turn.',
   ], opportunity.damageEvents);
@@ -475,12 +478,61 @@ function getMovementRecord({ message = '', combat = {}, player = {}, destination
     type: 'movement',
     source: 'combat movement',
     feet,
+    costFeet: feet,
     mode,
     from,
     to: destination ? { ...destination, q: Number(destination.q), r: Number(destination.r) } : null,
     destinationText,
     speciesNote: getHalflingNimblenessNote({ message, combat, characterSheet }),
   };
+}
+
+function getGrappledMovementCost({ message = '', combat = {}, player = {}, movement = {}, characterSheet = {} } = {}) {
+  const grappled = (combat.combatants || []).find((combatant) => (
+    !combatant.is_player
+    && Number(combatant.hp || 0) > 0
+    && isGrappledByPlayer(combatant, player, characterSheet)
+  ));
+  if (!grappled) return { costFeet: movement.feet, grappledTargetId: null, grappleNote: '' };
+
+  const text = String(message || '');
+  const normalizedText = normalizeId(text);
+  const explicitCarry = /\b(?:drag|pull|haul|carry|bring|take)\b/i.test(text)
+    || (/\bmove\b/i.test(text) && (
+      normalizedText.includes(normalizeId(grappled.name))
+      || /\b(?:grappled (?:target|creature|enemy)|with me)\b/i.test(text)
+    ));
+  if (!explicitCarry) {
+    return {
+      costFeet: movement.feet,
+      grappledTargetId: null,
+      releasedTargetId: grappled.id || grappled.name,
+      grappleNote: `You release ${grappled.name} before moving away.`,
+    };
+  }
+
+  const fastWrestler = hasOriginFeat(characterSheet, 'grappler') && isSameSizeOrSmaller(player, grappled, characterSheet);
+  return {
+    costFeet: movement.feet * (fastWrestler ? 1 : 2),
+    grappledTargetId: grappled.id || grappled.name,
+    grappleNote: fastWrestler
+      ? `**Fast Wrestler:** you move ${grappled.name} with you without extra movement cost.`
+      : `Dragging ${grappled.name} costs ${movement.feet * 2} feet of movement for ${movement.feet} feet traveled.`,
+  };
+}
+
+function isGrappledByPlayer(target = {}, player = {}, characterSheet = {}) {
+  if (!(target.conditions || []).includes('grappled')) return false;
+  if (normalizeId(target.grappled_by) === 'player') return true;
+  const playerId = player.character_id || characterSheet.derived_stats?.character_id;
+  return Boolean(playerId && target.grappled_by_character_id === playerId);
+}
+
+function isSameSizeOrSmaller(player = {}, target = {}, characterSheet = {}) {
+  const sizes = ['tiny', 'small', 'medium', 'large', 'huge', 'gargantuan'];
+  const playerSize = normalizeId(player.size || characterSheet.derived_stats?.size || characterSheet.species_traits?.size || 'medium');
+  const targetSize = normalizeId(target.size || 'medium');
+  return Math.max(0, sizes.indexOf(targetSize)) <= Math.max(0, sizes.indexOf(playerSize));
 }
 
 function getHalflingNimblenessNote({ message = '', combat = {}, characterSheet = {} } = {}) {
@@ -505,6 +557,20 @@ function recordMovement(worldState = {}, movement = {}) {
   const combat = clone(worldState.combat_state);
   const player = combat.combatants.find((combatant) => combatant.is_player);
   if (player && movement.to) setHexPosition(player, movement.to);
+  const released = combat.combatants.find((combatant) => (
+    !combatant.is_player && (combatant.id === movement.releasedTargetId || combatant.name === movement.releasedTargetId)
+  ));
+  if (released) {
+    released.conditions = (released.conditions || []).filter((condition) => condition !== 'grappled');
+    delete released.grapple_escape_dc;
+    delete released.grappled_by;
+    delete released.grappled_by_name;
+    delete released.grappled_by_character_id;
+  }
+  const grappled = combat.combatants.find((combatant) => (
+    !combatant.is_player && (combatant.id === movement.grappledTargetId || combatant.name === movement.grappledTargetId)
+  ));
+  if (grappled && movement.to) setHexPosition(grappled, movement.to);
   if (player) player.last_movement = movement;
   return {
     ...worldState,

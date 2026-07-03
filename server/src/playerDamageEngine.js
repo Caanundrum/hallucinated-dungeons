@@ -1,5 +1,6 @@
 const { applyDamage } = require('./damageHealingEngine');
 const { buildResourceState, spendResource } = require('./resourceEngine');
+const { spendTurnResource } = require('./actionEconomy');
 
 function applyDamageToPlayer({
   player = {},
@@ -9,12 +10,13 @@ function applyDamageToPlayer({
   damageType = null,
   source = null,
 } = {}) {
-  const target = buildPlayerDamageTarget({ player, characterSheet, worldState });
-  const applied = applyDamage({ target, amount: damage, damageType, source });
+  const slowFall = applySlowFall({ characterSheet, worldState, damage, source });
+  const target = buildPlayerDamageTarget({ player, characterSheet, worldState: slowFall.worldState });
+  const applied = applyDamage({ target, amount: slowFall.damage, damageType, source });
   const safeguarded = applyFatalPlayerDamageSafeguards({
     player: applied.target,
     characterSheet,
-    worldState,
+    worldState: slowFall.worldState,
     damageResult: applied,
   });
 
@@ -22,9 +24,39 @@ function applyDamageToPlayer({
     ...applied,
     player: safeguarded.player,
     worldState: safeguarded.worldState,
-    safeguardLines: safeguarded.lines,
-    safeguards: safeguarded.safeguards,
+    safeguardLines: [...slowFall.lines, ...safeguarded.lines],
+    safeguards: [...slowFall.safeguards, ...safeguarded.safeguards],
   };
+}
+
+function applySlowFall({ characterSheet = {}, worldState = {}, damage = 0, source = null } = {}) {
+  const level = Number(characterSheet.identity?.level || characterSheet.derived_stats?.level || 1);
+  const rawDamage = Math.max(0, Number(damage || 0));
+  if (
+    normalizeId(characterSheet.identity?.class || characterSheet.identity?.class_name) !== 'monk'
+    || level < 4
+    || rawDamage <= 0
+    || !isFallingDamage(source)
+  ) {
+    return { damage: rawDamage, worldState, lines: [], safeguards: [] };
+  }
+
+  const reaction = spendTurnResource(worldState, 'reaction', 'Slow Fall', characterSheet);
+  if (!reaction.ok) {
+    return { damage: rawDamage, worldState: reaction.worldState, lines: [], safeguards: [] };
+  }
+
+  const reduction = Math.min(rawDamage, level * 5);
+  return {
+    damage: rawDamage - reduction,
+    worldState: reaction.worldState,
+    lines: [` **Slow Fall** uses your Reaction and reduces the falling damage by ${reduction} (${level} x 5).`],
+    safeguards: [{ id: 'monk.slow_fall', reaction_spent: Boolean(worldState.combat_state?.active), damage_reduced: reduction }],
+  };
+}
+
+function isFallingDamage(source) {
+  return /\b(?:fall|falling|fell|dropped|plummet)\b/i.test(String(source || ''));
 }
 
 function applyFatalPlayerDamageSafeguards({
@@ -127,6 +159,7 @@ function normalizeId(value) {
 
 module.exports = {
   applyDamageToPlayer,
+  applySlowFall,
   applyFatalPlayerDamageSafeguards,
   isKilledOutright,
 };

@@ -77,6 +77,7 @@ const {
 const {
   applyLuckyToImmediateD20,
   buildUnarmedAttack,
+  hasOriginFeat,
   isUnarmedAttackIntent,
   resolveOriginFeatAction,
   rollWeaponDamage,
@@ -2195,6 +2196,10 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
   });
   const lightExtra = getLightExtraAttack({ characterSheet, primaryAttack: attack, message });
   const propertyMode = getWeaponPropertyAttackMode({ attack, characterSheet, player, target, combat });
+  const grapplerAdvantage = hasOriginFeat(characterSheet, 'grappler')
+    && isGrappledByPlayer(target, player, characterSheet)
+    ? 'advantage'
+    : null;
   const propertySources = getWeaponPropertyAttackSources({ attack, characterSheet, player, target, combat });
   const visionOptions = getBlindFightingAttackOptions({
     characterSheet,
@@ -2204,7 +2209,10 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
     spatialMode: preparedAttack.spatialMode,
   });
   const attackModeBeforeHelp = combineAdvantageModes(
-    combineAdvantageModes(getAttackAdvantageMode(player, target, visionOptions), propertyMode),
+    combineAdvantageModes(
+      combineAdvantageModes(getAttackAdvantageMode(player, target, visionOptions), propertyMode),
+      grapplerAdvantage,
+    ),
     combineAdvantageModes(reckless.advantageMode, combat.turn_resources?.steady_aim ? 'advantage' : null),
   );
   const helped = applyHelpToAttack({
@@ -2218,6 +2226,7 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
       ...propertySources,
       ...reckless.sources,
       ...(combat.turn_resources?.steady_aim ? ['Steady Aim'] : []),
+      ...(grapplerAdvantage ? ['Grappler'] : []),
     ],
   });
   combat = helped.combat;
@@ -2328,6 +2337,16 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
       target.forced_movement = { feet: 5, direction: 'away_from_player', source: 'Tavern Brawler' };
       lines.push(`**Tavern Brawler** pushes ${target.name} 5 feet away, subject to available space in the scene.`);
     }
+    const punchAndGrab = applyPunchAndGrab({
+      message,
+      characterSheet,
+      attack,
+      target,
+      player,
+      combat,
+      rollDie,
+    });
+    lines.push(...punchAndGrab.lines);
     consumeEffectIds.push(...bonusDamage.expireEffectIds);
     if ((target.conditions || []).includes('sleep')) {
       target.conditions = (target.conditions || []).filter((condition) => condition !== 'sleep' && condition !== 'unconscious');
@@ -2603,6 +2622,10 @@ function resolveExtraWeaponAttackRoll({
   player = combat.combatants.find((combatant) => combatant.is_player);
   target = findCombatTarget(combat, target.name) || target;
   const propertyMode = getWeaponPropertyAttackMode({ attack, characterSheet, player, target, combat });
+  const grapplerAdvantage = hasOriginFeat(characterSheet, 'grappler')
+    && isGrappledByPlayer(target, player, characterSheet)
+    ? 'advantage'
+    : null;
   const visionOptions = getBlindFightingAttackOptions({
     characterSheet,
     attack,
@@ -2613,13 +2636,17 @@ function resolveExtraWeaponAttackRoll({
   let sources = [
     ...getAttackAdvantageSources(player, target, visionOptions),
     ...getWeaponPropertyAttackSources({ attack, characterSheet, player, target, combat }),
+    ...(grapplerAdvantage ? ['Grappler'] : []),
   ];
   const helped = applyHelpToAttack({
     worldState,
     combat,
     attacker: player,
     target,
-    advantageMode: combineAdvantageModes(getAttackAdvantageMode(player, target, visionOptions), propertyMode),
+    advantageMode: combineAdvantageModes(
+      combineAdvantageModes(getAttackAdvantageMode(player, target, visionOptions), propertyMode),
+      grapplerAdvantage,
+    ),
     sources,
   });
   worldState = helped.worldState;
@@ -2790,6 +2817,14 @@ function resolveCombatManeuver({ maneuver, message, worldState, characterSheet, 
   const target = findCombatTarget(combat, message) || combat.combatants.find((combatant) => !combatant.is_player && Number(combatant.hp) > 0);
   if (!player || !target) {
     return endCombat(worldState, 'There is no active enemy left for that maneuver. Combat ends before anyone has to explain the footwork.');
+  }
+  if (maneuver.type === 'grapple' && !canGrappleTarget(player, target, characterSheet)) {
+    return {
+      handled: true,
+      logType: 'referee_combat_grapple_blocked',
+      worldState: spent.worldState,
+      reply: `${target.name} is more than one size larger than you and cannot be grappled. Physics has filed a firm objection.`,
+    };
   }
 
   const dc = getUnarmedStrikeSaveDc(characterSheet);
@@ -3718,6 +3753,68 @@ function getAttackAdvantageSources(attacker = {}, target = {}, options = {}) {
     ...getSpellAttackAdvantageSources(target),
     ...getWeaponMasteryAdvantageSources(target),
   ];
+}
+
+function applyPunchAndGrab({
+  message = '',
+  characterSheet = {},
+  attack = {},
+  target = {},
+  player = {},
+  combat = {},
+  rollDie = defaultRollDie,
+} = {}) {
+  const wantsGrapple = /\b(?:grapple|grab|seize|wrestle|hold|pin)\b/i.test(String(message || ''));
+  if (
+    !wantsGrapple
+    || !hasOriginFeat(characterSheet, 'grappler')
+    || attack.isWeapon
+    || Number(target.hp || 0) <= 0
+    || combat.turn_resources?.punch_and_grab_used
+  ) return { lines: [] };
+
+  if (!hasFreeHandForGrapple(characterSheet)) {
+    return { lines: ['**Punch and Grab:** the Unarmed Strike hits, but you need a free hand to grapple the target.'] };
+  }
+  if (!canGrappleTarget(player, target, characterSheet)) {
+    return { lines: [`**Punch and Grab:** ${target.name} is too large for you to grapple.`] };
+  }
+
+  combat.turn_resources.punch_and_grab_used = true;
+  const dc = getUnarmedStrikeSaveDc(characterSheet);
+  const saveChoice = chooseBestSave(target, ['str', 'dex']);
+  const save = resolveSavingThrow({ target, ability: saveChoice.ability, dc, rollDie, bonus: saveChoice.bonus });
+  const lines = [
+    `**Punch and Grab:** ${target.name} makes a ${saveChoice.ability.toUpperCase()} save: ${save.automaticFailure ? save.text : `${save.text} vs DC ${dc}`}.`,
+  ];
+  if (save.success) {
+    lines.push(`${target.name} resists the grapple.`);
+    return { lines };
+  }
+
+  target.conditions = addCondition(target.conditions, 'grappled');
+  target.grapple_escape_dc = dc;
+  target.grappled_by = 'player';
+  target.grappled_by_name = player.name || characterSheet.identity?.name || 'You';
+  target.grappled_by_character_id = player.character_id || characterSheet.derived_stats?.character_id || null;
+  lines.push(`${target.name} is **grappled**. Escape DC ${dc}.`);
+  return { lines };
+}
+
+function isGrappledByPlayer(target = {}, player = {}, characterSheet = {}) {
+  if (!(target.conditions || []).includes('grappled')) return false;
+  if (normalizeId(target.grappled_by) === 'player') return true;
+  const playerId = player.character_id || characterSheet.derived_stats?.character_id;
+  return Boolean(playerId && target.grappled_by_character_id === playerId);
+}
+
+function canGrappleTarget(player = {}, target = {}, characterSheet = {}) {
+  const sizes = ['tiny', 'small', 'medium', 'large', 'huge', 'gargantuan'];
+  const playerSize = normalizeId(player.size || characterSheet.derived_stats?.size || characterSheet.species_traits?.size || 'medium');
+  const targetSize = normalizeId(target.size || 'medium');
+  const playerIndex = Math.max(0, sizes.indexOf(playerSize));
+  const targetIndex = Math.max(0, sizes.indexOf(targetSize));
+  return targetIndex <= playerIndex + 1;
 }
 
 function getSpellAttackAdvantageSources(target = {}) {

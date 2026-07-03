@@ -1162,4 +1162,9 @@ module.exports = {
   validateCharacter,
   abilityMod,
   ABILITIES,
+  buildAttackBreakdowns,
+  buildActiveEffects,
+  buildSaveModifiers,
+  calculateArmorClass,
+  calculateInitiative,
 };

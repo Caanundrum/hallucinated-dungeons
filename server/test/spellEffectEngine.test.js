@@ -498,6 +498,38 @@ test('Fire Bolt uses spell attack bonus and can consume a combat turn', () => {
   assert.match(outcome.reply, /12\+5 = 17 vs AC 12/);
 });
 
+test('Grappler grants Advantage on spell attacks against a creature grappled by the caster', () => {
+  const sheet = casterSheet({
+    identity: { name: 'Mira', class: 'wizard', class_name: 'Wizard', level: 4 },
+    features: [{ id: 'grappler', name: 'Grappler' }],
+  });
+  const cast = resolveSpellCast({
+    message: 'I cast Fire Bolt at the skeleton.',
+    content,
+    characterSheet: sheet,
+    worldState: combatWorld({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Mira', hp: 8, max_hp: 8, ac: 12, is_player: true },
+          { name: 'Skeleton', hp: 10, max_hp: 10, ac: 12, is_player: false, conditions: ['grappled'], grappled_by: 'player' },
+        ],
+      },
+    }),
+  });
+  const outcome = resolveSpellOutcome({
+    spellCast: cast,
+    characterSheet: cast.characterSheet,
+    worldState: cast.worldState,
+    rollDie: sequenceRolls([4, 15, 5]),
+  });
+
+  assert.match(outcome.reply, /15\+5 = 20 vs AC 12/);
+  assert.match(outcome.reply, /advantage from Grappler/i);
+});
+
 test('combat spells block explicit absent targets instead of retargeting first enemy', () => {
   const startingWorld = combatWorld();
   const cast = resolveSpellCast({

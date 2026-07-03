@@ -1,5 +1,5 @@
 {
-  "version": "4C.6-H35",
+  "version": "4D-level-4",
   "status_definitions": {
     "implemented": "Exposed and mechanically enforced for the current supported level/scope.",
     "partial": "Exposed and partially enforced, but missing at least one meaningful rules interaction.",
@@ -67,6 +67,8 @@
     "item_charges": "not_exposed"
   },
   "class_features": {
+    "ability_score_improvement": "implemented",
+    "slow_fall": "implemented",
     "rage": "implemented",
     "unarmored_defense": "implemented",
     "weapon_mastery": "partial",
@@ -98,6 +100,8 @@
     "arcane_recovery": "implemented"
   },
   "origin_feats": {
+    "ability_score_improvement": "implemented",
+    "grappler": "implemented",
     "alert": "partial",
     "crafter": "partial",
     "healer": "partial",

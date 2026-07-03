@@ -33,6 +33,7 @@ const content = {
   classAdvancement: mergeAdvancementCatalogs(
     readJson('class_level_advancement.json'),
     readJson('level_3_advancement.json'),
+    readJson('level_4_advancement.json'),
   ),
   itemEffects: readJson('item_effects.json'),
   abilityScoreMethods: [

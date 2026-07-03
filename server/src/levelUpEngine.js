@@ -1,5 +1,13 @@
 const { getContentBundle, byId } = require('./contentData');
-const { abilityMod } = require('./characterValidator');
+const {
+  ABILITIES,
+  abilityMod,
+  buildActiveEffects,
+  buildAttackBreakdowns,
+  buildSaveModifiers,
+  calculateArmorClass,
+  calculateInitiative,
+} = require('./characterValidator');
 const {
   getFightingStyleArmorBonus,
   getFightingStyleAttackBonus,
@@ -43,6 +51,8 @@ const SUPPORTED_LEVEL_UP_MECHANICS = new Set([
   'sorcerer_level_3',
   'warlock_level_3',
   'wizard_level_3',
+  'level_4_feat',
+  'slow_fall',
 ]);
 
 const METAMAGIC_OPTIONS = [
@@ -66,7 +76,18 @@ function getLevelUpPreview(characterSheet = {}, content = getContentBundle(), op
   const classId = normalizeId(characterSheet.identity?.class);
   const classData = byId(content.classes || [], classId);
   const advancement = getClassAdvancement(content, classId, nextLevel);
-  const hp = getFixedHpIncrease(characterSheet, classData);
+  const choiceSelections = normalizeChoiceSelections(options.payload?.choices || options.choices || {});
+  const abilityIncreasePlan = getLevelUpAbilityIncreases(choiceSelections);
+  const previewAbilities = applyAbilityIncreases(characterSheet.abilities, abilityIncreasePlan);
+  const baseHp = getFixedHpIncrease({ ...characterSheet, abilities: previewAbilities }, classData);
+  const oldConModifier = Number(characterSheet.abilities?.modifiers?.con || 0);
+  const newConModifier = Number(previewAbilities.modifiers?.con || oldConModifier);
+  const retroactiveConstitutionBonus = Math.max(0, newConModifier - oldConModifier) * currentLevel;
+  const hp = {
+    ...baseHp,
+    retroactiveConstitutionBonus,
+    increase: baseHp.increase + retroactiveConstitutionBonus,
+  };
   const blockers = [];
 
   if (currentLevel >= 20) {
@@ -85,7 +106,6 @@ function getLevelUpPreview(characterSheet = {}, content = getContentBundle(), op
     blockers.push(blocker('missing_advancement', `No advancement data is defined for ${classId || 'this class'} level ${nextLevel}.`));
   }
 
-  const choiceSelections = normalizeChoiceSelections(options.payload?.choices || options.choices || {});
   const requiredChoices = buildRequiredChoicePreviews({
     choices: advancement?.required_choices || [],
     characterSheet,
@@ -198,6 +218,10 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
   const currentSpellcasting = characterSheet.spellcasting || null;
   const currentProgression = characterSheet.progression || {};
   const levelUpChoices = normalizeChoiceSelections(payload.choices || {});
+  const abilityIncreases = getLevelUpAbilityIncreases(levelUpChoices);
+  const nextAbilities = applyAbilityIncreases(characterSheet.abilities, abilityIncreases, nextLevel);
+  const selectedGeneralFeatId = levelUpChoices.level_4_feat?.[0] || '';
+  const selectedGeneralFeat = byId(content.feats || [], selectedGeneralFeatId);
   const selectedSubclass = getSelectedSubclass({
     characterSheet,
     content,
@@ -245,11 +269,19 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
   const nextFeatures = [
     ...currentFeatures,
     ...preview.features.map((feature) => ({
+      id: feature.id,
       source: getSubclassFeatures(selectedSubclass, nextLevel).some((entry) => entry.id === feature.id) ? 'subclass' : 'class',
       level: nextLevel,
       name: feature.name,
       description: feature.description || '',
     })),
+    ...(selectedGeneralFeat && selectedGeneralFeat.id !== 'ability_score_improvement' ? [{
+      id: selectedGeneralFeat.id,
+      source: 'feat',
+      level: nextLevel,
+      name: selectedGeneralFeat.name,
+      description: selectedGeneralFeat.description || '',
+    }] : []),
   ];
   const nextDerivedStats = buildLeveledDerivedStats({
     currentDerived,
@@ -264,11 +296,15 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
     proficientSkills: nextProficientSkills,
     fightingStyle: selectedFightingStyle,
     hasJackOfAllTrades: Boolean(currentDerived.jack_of_all_trades || (advancement.runtime_mechanics || []).includes('jack_of_all_trades')),
+    abilityModifiers: nextAbilities.modifiers,
+    classData,
+    recalculateCore: Object.keys(abilityIncreases).length > 0
+      || Number(currentDerived.proficiency_bonus || nextPb) !== nextPb,
   });
   applyLevelThreeDerivedStats(nextDerivedStats, preview.classId, nextLevel, characterSheet, selectedSubclass);
   const pactWeaponAttack = buildPactWeaponAttack({
     weaponId: invocationState.pactWeaponId,
-    characterSheet,
+    characterSheet: { ...characterSheet, abilities: nextAbilities, derived_stats: nextDerivedStats },
     content,
     proficiencyBonus: nextPb,
   });
@@ -281,6 +317,7 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
 
   return {
     ...characterSheet,
+    abilities: nextAbilities,
     identity: {
       ...(characterSheet.identity || {}),
       level: nextLevel,
@@ -291,6 +328,7 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
     derived_stats: nextDerivedStats,
     features: dedupeFeatures(nextFeatures),
     resources: nextResources,
+    general_feats: mergeGeneralFeats(characterSheet.general_feats, selectedGeneralFeat, nextLevel, abilityIncreases),
     expertise_skills: nextExpertiseSkills,
     class_choices: {
       ...(characterSheet.class_choices || {}),
@@ -312,6 +350,7 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
       skills: nextProficientSkills,
       languages: nextLanguages,
     },
+    weapon_masteries: mergeWeaponMasteries(characterSheet.weapon_masteries, levelUpChoices.weapon_mastery, content),
     ...(nextSpellcasting ? {
       spellcasting: {
         ...nextSpellcasting,
@@ -357,6 +396,79 @@ function normalizeChoiceSelections(rawChoices = {}) {
     choiceId,
     [...new Set((Array.isArray(value) ? value : [value]).map(normalizeId).filter(Boolean))],
   ]));
+}
+
+function getLevelUpAbilityIncreases(selections = {}) {
+  const feat = selections.level_4_feat?.[0];
+  if (feat === 'grappler') {
+    const ability = selections.grappler_ability?.[0];
+    return ability ? { [ability]: 1 } : {};
+  }
+  if (feat !== 'ability_score_improvement') return {};
+  const primary = selections.asi_primary?.[0];
+  if (!primary) return {};
+  if (selections.asi_pattern?.[0] === 'split') {
+    const secondary = selections.asi_secondary?.[0];
+    return secondary && secondary !== primary ? { [primary]: 1, [secondary]: 1 } : { [primary]: 1 };
+  }
+  return { [primary]: 2 };
+}
+
+function getAbilityChoiceAmount(choiceId = '', selections = {}) {
+  if (normalizeId(choiceId) === 'asi_primary' && selections.asi_pattern?.[0] === 'plus_two') return 2;
+  return 1;
+}
+
+function applyAbilityIncreases(abilities = {}, increases = {}, level = null) {
+  if (Object.keys(increases || {}).length === 0) return abilities;
+  const currentScores = abilities.final_scores || {};
+  const finalScores = Object.fromEntries(ABILITIES.map((ability) => [
+    ability,
+    Math.min(20, Number(currentScores[ability] || 10) + Number(increases[ability] || 0)),
+  ]));
+  const modifiers = Object.fromEntries(ABILITIES.map((ability) => [ability, abilityMod(finalScores[ability])]));
+  const history = level && Object.keys(increases).length
+    ? [...(abilities.level_up_increases || []), { level, increases: { ...increases } }]
+    : (abilities.level_up_increases || []);
+  return { ...abilities, final_scores: finalScores, modifiers, level_up_increases: history };
+}
+
+function meetsFeatPrerequisite(feat = {}, characterSheet = {}, targetLevel = 1) {
+  const prerequisite = feat.prerequisite || {};
+  if (Number(prerequisite.level || 0) > Number(targetLevel || 0)) return false;
+  if (prerequisite.any_ability) {
+    const minimum = Number(prerequisite.any_ability.minimum || 0);
+    const scores = characterSheet.abilities?.final_scores || {};
+    if (!(prerequisite.any_ability.abilities || []).some((ability) => Number(scores[ability] || 0) >= minimum)) return false;
+  }
+  return true;
+}
+
+function mergeGeneralFeats(current = [], feat = null, level = 1, increases = {}) {
+  if (!feat) return current || [];
+  return [
+    ...(current || []),
+    { id: feat.id, name: feat.name, level, ability_increases: { ...increases } },
+  ];
+}
+
+function mergeWeaponMasteries(current = [], selected = [], content = {}) {
+  const merged = [...(current || [])];
+  const known = new Set(merged.map((entry) => normalizeId(entry.weapon_id || entry.id || entry)));
+  for (const weaponId of selected || []) {
+    if (known.has(normalizeId(weaponId))) continue;
+    const weapon = byId(content.equipment || [], weaponId);
+    if (!weapon?.mastery) continue;
+    merged.push({
+      weapon_id: weapon.id,
+      name: weapon.name,
+      mastery: weapon.mastery,
+      mastery_name: titleCase(weapon.mastery),
+      description: weapon.description || '',
+    });
+    known.add(normalizeId(weaponId));
+  }
+  return merged;
 }
 
 function buildRequiredChoicePreviews({
@@ -405,6 +517,56 @@ function getChoiceOptions({ choice = {}, characterSheet = {}, content = {}, clas
         name: skill.name || titleCase(skill.id),
         description: skill.description || '',
         meta: `${String(skill.ability || '').toUpperCase()} skill proficiency`,
+      }));
+  }
+
+  if (choice.type === 'general_feat') {
+    const currentLevel = getCharacterLevel(characterSheet);
+    const known = new Set((characterSheet.general_feats || []).map((entry) => normalizeId(entry.id || entry)));
+    return (content.feats || [])
+      .filter((feat) => normalizeId(feat.category) === 'general')
+      .filter((feat) => feat.repeatable || !known.has(normalizeId(feat.id)))
+      .filter((feat) => meetsFeatPrerequisite(feat, characterSheet, currentLevel + 1))
+      .map((feat) => ({
+        id: feat.id,
+        name: feat.name,
+        description: feat.description || '',
+        meta: feat.repeatable ? 'General Feat - Repeatable' : 'General Feat',
+      }));
+  }
+
+  if (choice.type === 'ability_increase') {
+    const scores = characterSheet.abilities?.final_scores || {};
+    const allowed = new Set((choice.allowed || ABILITIES).map(normalizeId));
+    const amount = getAbilityChoiceAmount(choice.id, selections);
+    const excluded = normalizeId(choice.id) === 'asi_secondary'
+      ? new Set(selections.asi_primary || [])
+      : new Set();
+    return ABILITIES
+      .filter((ability) => allowed.has(ability))
+      .filter((ability) => !excluded.has(ability))
+      .filter((ability) => Number(scores[ability] || 0) + amount <= 20)
+      .map((ability) => ({
+        id: ability,
+        name: ability.toUpperCase(),
+        description: `Increase ${ability.toUpperCase()} from ${Number(scores[ability] || 0)} to ${Number(scores[ability] || 0) + amount}.`,
+        meta: `+${amount}, maximum 20`,
+      }));
+  }
+
+  if (choice.type === 'weapon_mastery') {
+    const known = new Set((characterSheet.weapon_masteries || []).map((entry) => normalizeId(entry.weapon_id || entry.id || entry)));
+    const classData = byId(content.classes || [], classId);
+    const proficiencies = new Set([...(classData?.weapons || []), ...(characterSheet.proficiencies?.weapons || [])].map(normalizeId));
+    return (content.equipment || [])
+      .filter((item) => item.type === 'weapon' && item.mastery)
+      .filter((item) => !known.has(normalizeId(item.id)))
+      .filter((item) => isWeaponProficientForLevelUp(item, proficiencies))
+      .map((item) => ({
+        id: item.id,
+        name: item.name,
+        description: item.description || '',
+        meta: `${titleCase(item.mastery)} mastery`,
       }));
   }
 
@@ -574,12 +736,28 @@ function getChoiceOptions({ choice = {}, characterSheet = {}, content = {}, clas
     return (choice.options || []).map((option) => ({
       id: option.id,
       name: option.name || titleCase(option.id),
-      description: option.description || '',
+      description: option.description || getLevelUpOptionDescription(choice.id, option.id),
       meta: option.meta || '',
     }));
   }
 
   return [];
+}
+
+function getLevelUpOptionDescription(choiceId = '', optionId = '') {
+  if (normalizeId(choiceId) !== 'asi_pattern') return '';
+  return normalizeId(optionId) === 'plus_two'
+    ? 'Increase one ability score by 2, to a maximum of 20.'
+    : 'Increase two different ability scores by 1 each, to a maximum of 20.';
+}
+
+function isWeaponProficientForLevelUp(weapon = {}, proficiencies = new Set()) {
+  if (proficiencies.has(normalizeId(weapon.id))) return true;
+  if (weapon.weapon_category && proficiencies.has(normalizeId(weapon.weapon_category))) return true;
+  if (proficiencies.has('finesse') && (weapon.properties || []).includes('finesse')) return true;
+  return proficiencies.has('light_martial')
+    && normalizeId(weapon.weapon_category) === 'martial'
+    && (weapon.properties || []).includes('light');
 }
 
 function validateRequiredChoices(requiredChoices = [], selections = {}) {
@@ -642,6 +820,9 @@ function buildLeveledDerivedStats({
   proficientSkills = characterSheet.proficiencies?.skills || [],
   hasJackOfAllTrades = false,
   fightingStyle = '',
+  abilityModifiers = characterSheet.abilities?.modifiers || {},
+  classData = {},
+  recalculateCore = false,
 } = {}) {
   const nextDerived = {
     ...currentDerived,
@@ -661,11 +842,49 @@ function buildLeveledDerivedStats({
     nextDerived.skill_modifiers = buildSkillModifiersForLevelUp({
       skills: content.skills,
       proficientSkills,
-      abilityModifiers: characterSheet.abilities?.modifiers || {},
+      abilityModifiers,
       pb: nextPb,
       expertiseSkills: nextExpertiseSkills,
       jackOfAllTrades: hasJackOfAllTrades,
     });
+  }
+
+  if (recalculateCore) {
+    const activeEffects = [
+      ...(characterSheet.active_effects || []),
+      ...buildActiveEffects(characterSheet.equipped || {}, content),
+    ];
+    const armor = calculateArmorClass(
+      characterSheet.equipped || {},
+      content,
+      abilityModifiers,
+      activeEffects,
+      classData,
+      { choices: { ...(characterSheet.class_choices || {}), ...(fightingStyle ? { fighting_style: fightingStyle } : {}) } },
+    );
+    const initiative = calculateInitiative(abilityModifiers, nextPb, activeEffects);
+    nextDerived.armor_class = armor.total;
+    nextDerived.armor_class_breakdown = armor.parts;
+    nextDerived.initiative = initiative.total;
+    nextDerived.initiative_breakdown = initiative.parts;
+    nextDerived.saving_throw_modifiers = buildSaveModifiers(
+      characterSheet.proficiencies?.saving_throws || classData.saving_throws || [],
+      abilityModifiers,
+      nextPb,
+    );
+    nextDerived.attack_breakdowns = buildAttackBreakdowns(
+      characterSheet.equipped || {},
+      content,
+      abilityModifiers,
+      nextPb,
+      activeEffects,
+      { choices: { ...(characterSheet.class_choices || {}), ...(fightingStyle ? { fighting_style: fightingStyle } : {}) } },
+    );
+    if (characterSheet.spellcasting?.ability) {
+      const castingModifier = Number(abilityModifiers[characterSheet.spellcasting.ability] || 0);
+      nextDerived.spell_attack_bonus = castingModifier + nextPb;
+      nextDerived.spell_save_dc = 8 + castingModifier + nextPb;
+    }
   }
 
   return applyFightingStyleToDerivedStats(nextDerived, characterSheet, fightingStyle);
@@ -882,10 +1101,13 @@ function mergeResources(current = {}, advancementResources = {}, extra = {}) {
     const existing = merged[key];
     if (existing && typeof existing === 'object' && !Array.isArray(existing)) {
       const max = value.max ?? existing.max;
+      const oldMax = Number(existing.max ?? existing.remaining ?? max ?? 0);
+      const oldRemaining = Number(existing.remaining ?? oldMax);
+      const spentUses = Math.max(0, oldMax - oldRemaining);
       merged[key] = {
         ...existing,
         ...value,
-        remaining: Math.min(Number(existing.remaining ?? value.remaining ?? max ?? 0), Number(max ?? existing.remaining ?? 0)),
+        remaining: Math.max(0, Number(max ?? oldRemaining) - spentUses),
         max,
       };
     } else {
@@ -942,16 +1164,40 @@ function mergeSpellcasting(current, advancementSpellcasting, levelUpChoices = {}
         ]),
       ],
     } : {}),
-    slots: {
-      ...((current || {}).slots || {}),
-      ...(advancementSpellcasting.slots || {}),
-    },
+    slots: mergeSpellSlots(current || {}, advancementSpellcasting),
     slots_max: {
       ...((current || {}).slots_max || (current || {}).slots || {}),
       ...(advancementSpellcasting.slots || {}),
     },
     ...(advancementSpellcasting.pact_slot_level ? { pact_slot_level: advancementSpellcasting.pact_slot_level } : {}),
   };
+}
+
+function mergeSpellSlots(current = {}, advancement = {}) {
+  const currentSlots = current.slots || {};
+  const currentMax = current.slots_max || currentSlots;
+  const nextMax = advancement.slots || {};
+  const merged = { ...currentSlots };
+  const oldPactLevel = Number(current.pact_slot_level || 0);
+  const nextPactLevel = Number(advancement.pact_slot_level || oldPactLevel || 0);
+
+  if (oldPactLevel && nextPactLevel && oldPactLevel !== nextPactLevel) {
+    const oldRemaining = Number(currentSlots[oldPactLevel] || 0);
+    const oldCapacity = Number(currentMax[oldPactLevel] ?? oldRemaining);
+    const spent = Math.max(0, oldCapacity - oldRemaining);
+    merged[oldPactLevel] = Number(nextMax[oldPactLevel] || 0);
+    merged[nextPactLevel] = Math.max(0, Number(nextMax[nextPactLevel] || 0) - spent);
+  }
+
+  for (const [level, capacityValue] of Object.entries(nextMax)) {
+    if (oldPactLevel && nextPactLevel && oldPactLevel !== nextPactLevel && Number(level) === nextPactLevel) continue;
+    const capacity = Number(capacityValue || 0);
+    const oldCapacity = Number(currentMax[level] ?? currentSlots[level] ?? 0);
+    const oldRemaining = Number(currentSlots[level] ?? oldCapacity);
+    const spent = Math.max(0, oldCapacity - oldRemaining);
+    merged[level] = Math.max(0, capacity - spent);
+  }
+  return merged;
 }
 
 function applySubclassSpellcasting(spellcasting, selectedSubclass = null, choices = {}) {

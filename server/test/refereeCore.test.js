@@ -2137,6 +2137,56 @@ test('grapple is handled as an Attack action option and tracks escape DC', () =>
   assert.match(result.reply, /DEX save: 4\+1 = 5 vs DC 13/);
 });
 
+test('Grappler Punch and Grab adds a grapple save to a hit and grants later attack Advantage', () => {
+  const grappler = {
+    ...characterSheet,
+    identity: { name: 'Sir Testalot', class: 'fighter', level: 4 },
+    features: [{ id: 'grappler', name: 'Grappler' }],
+    equipped: {},
+    derived_stats: {
+      ...characterSheet.derived_stats,
+      proficiency_bonus: 2,
+      attack_breakdowns: [{ name: 'Unarmed Strike', attack_total: 5, damage_formula: '1d4+3', is_unarmed: true }],
+    },
+  };
+  const first = adjudicate({
+    message: 'I punch the cultist and grab him with Punch and Grab.',
+    worldState: worldState({
+      combat_state: {
+        active: true,
+        round: 1,
+        turn_index: 0,
+        combatants: [
+          { name: 'Sir Testalot', hp: 12, max_hp: 12, ac: 16, is_player: true },
+          { name: 'Cultist', hp: 20, max_hp: 20, ac: 12, is_player: false, saves: { str: 0, dex: 0 } },
+        ],
+      },
+    }),
+    characterSheet: grappler,
+    rollDie: sequenceRolls([15, 2, 4]),
+  });
+  const cultist = first.worldState.combat_state.combatants.find((combatant) => combatant.name === 'Cultist');
+
+  assert.equal(cultist.conditions.includes('grappled'), true);
+  assert.match(first.reply, /Punch and Grab/);
+
+  const nextTurn = {
+    ...first.worldState,
+    combat_state: {
+      ...first.worldState.combat_state,
+      turn_resources: undefined,
+    },
+  };
+  const second = adjudicate({
+    message: 'I punch the grappled cultist again.',
+    worldState: nextTurn,
+    characterSheet: grappler,
+    rollDie: sequenceRolls([7, 18, 3]),
+  });
+  assert.match(second.reply, /advantage from Grappler/i);
+  assert.match(second.reply, /18\+5/);
+});
+
 test('Unarmed Fighting damages one player-grappled creature at the start of the next player turn', () => {
   const fighter = {
     ...characterSheet,

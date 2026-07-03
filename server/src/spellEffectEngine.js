@@ -213,15 +213,20 @@ function resolveSpellAttack({ spell, rule, known = {}, characterSheet, worldStat
   const attackBonus = baseAttackBonus + activeAttackBonus + conditionAttackBonus;
   const conditionMode = getAttackMode({ attacker, target });
   const activeAdvantageSources = getActiveSpellAttackAdvantageSources(worldState, characterSheet);
+  const grapplerAdvantage = getGrapplerSpellAttackAdvantage({ characterSheet, attacker, target });
   const attackSources = [
     ...getAttackModeSources({ attacker, target }),
     ...activeAdvantageSources,
+    ...(grapplerAdvantage ? ['Grappler'] : []),
   ];
   const lucky = applyLuckyToImmediateD20({
     message: worldState.__spell_message,
     worldState,
     characterSheet,
-    advantageMode: combineAdvantageModes(conditionMode, activeAdvantageSources.length ? 'advantage' : null),
+    advantageMode: combineAdvantageModes(
+      conditionMode,
+      activeAdvantageSources.length || grapplerAdvantage ? 'advantage' : null,
+    ),
     sources: attackSources,
   });
   const attackMode = lucky.advantageMode;
@@ -300,11 +305,26 @@ function resolveMultiSpellAttack({ spell, rule, known = {}, characterSheet, worl
   const context = getSpellTargetContext({ spell, spellCastMessage: worldState.__spell_message, worldState, characterSheet });
   if (!context?.target) return noSpellTarget(worldState, spell);
   const { combat, target, activeCombat } = context;
+  const attacker = getPlayerCombatant(combat, characterSheet, worldState);
   const attackBonus = getSpellAttackBonus(characterSheet, known) + getActiveSpellAttackBonus(worldState, characterSheet);
   const lines = [`You cast **${spell.name}** at ${target.name}, making ${rule.attacks} spell attacks.`];
+  const conditionMode = getAttackMode({ attacker, target });
+  const conditionSources = getAttackModeSources({ attacker, target });
+  const activeAdvantageSources = getActiveSpellAttackAdvantageSources(worldState, characterSheet);
+  const grapplerAdvantage = getGrapplerSpellAttackAdvantage({ characterSheet, attacker, target });
+  const advantageSources = [
+    ...conditionSources,
+    ...activeAdvantageSources,
+    ...(grapplerAdvantage ? ['Grappler'] : []),
+  ];
+  const advantageMode = combineAdvantageModes(
+    conditionMode,
+    activeAdvantageSources.length || grapplerAdvantage ? 'advantage' : null,
+  );
+  if (advantageMode) lines.push(`Spell attacks have ${advantageMode} from ${formatList(advantageSources)}.`);
   let total = 0;
   for (let index = 1; index <= Number(rule.attacks || 1); index += 1) {
-    const roll = rollD20WithMode(rollDie, null);
+    const roll = rollD20WithMode(rollDie, advantageMode);
     const attackTotal = roll.natural + attackBonus;
     const crit = roll.natural === 20;
     const hit = roll.natural !== 1 && (crit || attackTotal >= Number(target.ac || 10));
@@ -324,6 +344,14 @@ function resolveMultiSpellAttack({ spell, rule, known = {}, characterSheet, worl
     : { worldState, combat, line: '' };
   if (blessedState.line) lines.push(blessedState.line);
   return finishSpellAction({ spell, worldState: blessedState.worldState, combat: blessedState.combat, lines, activeCombat });
+}
+
+function getGrapplerSpellAttackAdvantage({ characterSheet = {}, attacker = {}, target = {} } = {}) {
+  if (!hasOriginFeat(characterSheet, 'grappler')) return false;
+  if (!(target.conditions || []).includes('grappled')) return false;
+  if (String(target.grappled_by || '').toLowerCase().trim() === 'player') return true;
+  const playerId = attacker.character_id || characterSheet.derived_stats?.character_id;
+  return Boolean(playerId && target.grappled_by_character_id === playerId);
 }
 
 function getPotentCantripMissDamage({ spell = {}, rule = {}, characterSheet = {}, target = {}, rollDie = defaultRollDie } = {}) {

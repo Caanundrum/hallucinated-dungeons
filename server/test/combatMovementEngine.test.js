@@ -75,6 +75,83 @@ test('Remarkable Athlete critical movement avoids Opportunity Attacks and spends
   assert.doesNotMatch(result.reply, /Cultist uses/);
 });
 
+test('Grappler Fast Wrestler moves a same-size grappled target without extra movement cost', () => {
+  const grappledWorld = combatWorld({
+    combat_state: {
+      ...combatWorld().combat_state,
+      combatants: [
+        { id: 'ari', name: 'Ari', size: 'medium', hp: 12, max_hp: 12, ac: 14, is_player: true },
+        {
+          id: 'cultist', name: 'Cultist', size: 'medium', hp: 8, max_hp: 8, ac: 12, is_player: false,
+          conditions: ['grappled'], grappled_by: 'player', reaction_available: false,
+          attack: { name: 'dagger', attack_bonus: 3, damage_formula: '1d4+1' },
+        },
+      ],
+    },
+  });
+  const result = resolveCombatMovement({
+    message: 'I drag the grappled cultist 15 feet with me.',
+    worldState: grappledWorld,
+    characterSheet: {
+      ...characterSheet,
+      identity: { name: 'Ari', class: 'fighter', level: 4 },
+      features: [{ id: 'grappler', name: 'Grappler' }],
+    },
+  });
+
+  assert.equal(result.worldState.combat_state.turn_resources.movement_remaining, 15);
+  assert.match(result.reply, /Fast Wrestler/);
+});
+
+test('dragging a grappled creature without Grappler costs twice the distance moved', () => {
+  const grappledWorld = combatWorld({
+    combat_state: {
+      ...combatWorld().combat_state,
+      combatants: [
+        { id: 'ari', name: 'Ari', size: 'medium', hp: 12, max_hp: 12, ac: 14, is_player: true },
+        {
+          id: 'cultist', name: 'Cultist', size: 'medium', hp: 8, max_hp: 8, ac: 12, is_player: false,
+          conditions: ['grappled'], grappled_by: 'player', reaction_available: false,
+          attack: { name: 'dagger', attack_bonus: 3, damage_formula: '1d4+1' },
+        },
+      ],
+    },
+  });
+  const result = resolveCombatMovement({
+    message: 'I drag the grappled cultist 15 feet with me.',
+    worldState: grappledWorld,
+    characterSheet,
+  });
+
+  assert.equal(result.worldState.combat_state.turn_resources.movement_remaining, 0);
+  assert.match(result.reply, /costs 30 feet of movement/);
+});
+
+test('moving away without taking a grappled creature releases the grapple', () => {
+  const result = resolveCombatMovement({
+    message: 'I move 10 feet away.',
+    worldState: combatWorld({
+      combat_state: {
+        ...combatWorld().combat_state,
+        combatants: [
+          { id: 'ari', name: 'Ari', size: 'medium', hp: 12, max_hp: 12, ac: 14, is_player: true },
+          {
+            id: 'cultist', name: 'Cultist', size: 'medium', hp: 8, max_hp: 8, ac: 12, is_player: false,
+            conditions: ['grappled'], grappled_by: 'player', reaction_available: false,
+            attack: { name: 'dagger', attack_bonus: 3, damage_formula: '1d4+1' },
+          },
+        ],
+      },
+    }),
+    characterSheet,
+  });
+  const cultist = result.worldState.combat_state.combatants.find((entry) => entry.name === 'Cultist');
+
+  assert.equal(cultist.conditions.includes('grappled'), false);
+  assert.equal(result.worldState.combat_state.turn_resources.movement_remaining, 20);
+  assert.match(result.reply, /release Cultist/);
+});
+
 function sequenceRolls(values) {
   let index = 0;
   return () => values[index++] ?? values[values.length - 1] ?? 1;

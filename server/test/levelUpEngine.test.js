@@ -1131,3 +1131,195 @@ test('Draconic Sorcery continues adding one HP on later level increases', () => 
   assert.equal(hp.perLevelBonus, 1);
   assert.equal(hp.increase, 7);
 });
+
+function completeLevelFourChoices(sheet, content, primaryAbility) {
+  const choices = {
+    level_4_feat: ['ability_score_improvement'],
+    asi_pattern: ['plus_two'],
+    asi_primary: [primaryAbility],
+  };
+  for (let pass = 0; pass < 6; pass += 1) {
+    const preview = getLevelUpPreview(sheet, content, { choices });
+    for (const choice of preview.requiredChoices.filter((entry) => entry.active && !choices[entry.id])) {
+      const available = choice.options.filter((option) => {
+        const requirement = option.requires_choice;
+        return !requirement || (choices[requirement.choice_id] || []).includes(requirement.option_id);
+      });
+      choices[choice.id] = available.slice(0, Number(choice.count || 0)).map((option) => option.id);
+    }
+  }
+  return choices;
+}
+
+test('all twelve classes apply one complete level 4 package with ASI and class-table gains', () => {
+  const content = getContentBundle();
+  const primaryAbilities = {
+    barbarian: 'str', bard: 'cha', cleric: 'wis', druid: 'wis', fighter: 'str', monk: 'dex',
+    paladin: 'cha', ranger: 'wis', rogue: 'dex', sorcerer: 'cha', warlock: 'cha', wizard: 'int',
+  };
+  const results = new Map();
+
+  for (const [classId, primaryAbility] of Object.entries(primaryAbilities)) {
+    const sheet = baseSheet({
+      identity: { class: classId, class_name: classId, level: 3, experience_points: 2700, level_up_available: true },
+      progression: { experience_points: 2700, next_level_xp: 2700 },
+      abilities: {
+        final_scores: { str: 16, dex: 16, con: 14, int: 16, wis: 16, cha: 16 },
+        modifiers: { str: 3, dex: 3, con: 2, int: 3, wis: 3, cha: 3 },
+      },
+      proficiencies: {
+        saving_throws: ['str', 'con'], skills: ['athletics', 'perception'], tools: [], languages: [],
+        armor: [], weapons: ['simple', 'martial'],
+      },
+      derived_stats: {
+        level: 3, hp: 24, max_hp: 24, armor_class: 14, initiative: 3, speed: classId === 'monk' ? 40 : 30,
+        proficiency_bonus: 2, skill_modifiers: {}, saving_throw_modifiers: {}, attack_breakdowns: [],
+        spell_attack_bonus: 5, spell_save_dc: 13,
+      },
+      resources: {
+        second_wind: { name: 'Second Wind', remaining: 2, max: 2, reset: 'long_rest' },
+        focus_points: { name: 'Focus Points', remaining: 3, max: 3, reset: 'short_rest' },
+        lay_on_hands: { name: 'Lay on Hands', remaining: 15, max: 15, reset: 'long_rest' },
+        sorcery_points: { name: 'Sorcery Points', remaining: 3, max: 3, reset: 'long_rest' },
+      },
+      spellcasting: ['bard', 'cleric', 'druid', 'paladin', 'ranger', 'sorcerer', 'warlock', 'wizard'].includes(classId) ? {
+        ability: primaryAbility,
+        cantrips_known: ['light'],
+        spells_prepared: ['cure_wounds'],
+        spellbook_spells: classId === 'wizard' ? ['magic_missile', 'shield', 'burning_hands', 'misty_step'] : undefined,
+        slots: classId === 'warlock' ? { 1: 0, 2: 2 } : { 1: 4, 2: 2 },
+        slots_max: classId === 'warlock' ? { 1: 0, 2: 2 } : { 1: 4, 2: 2 },
+      } : undefined,
+    });
+    const choices = completeLevelFourChoices(sheet, content, primaryAbility);
+    const preview = getLevelUpPreview(sheet, content, { choices });
+    assert.equal(preview.canApply, true, `${classId}: ${preview.blockers.map((entry) => entry.message).join(' | ')}`);
+    const result = applyLevelUp({ characterSheet: sheet, content, payload: { choices } });
+    assert.equal(result.ok, true, classId);
+    assert.equal(result.characterSheet.identity.level, 4, classId);
+    assert.equal(result.characterSheet.abilities.final_scores[primaryAbility], 18, classId);
+    assert.equal(result.characterSheet.progression.next_level_xp, 6500, classId);
+    results.set(classId, result.characterSheet);
+  }
+
+  assert.equal(results.get('fighter').resources.second_wind.max, 3);
+  assert.equal(results.get('fighter').weapon_masteries.length, 1);
+  assert.equal(results.get('monk').resources.focus_points.max, 4);
+  assert(results.get('monk').features.some((feature) => feature.name === 'Slow Fall'));
+  assert.equal(results.get('paladin').resources.lay_on_hands.max, 20);
+  assert.equal(results.get('sorcerer').resources.sorcery_points.max, 4);
+  assert.deepEqual(results.get('wizard').spellcasting.slots, { 1: 4, 2: 3 });
+  assert.equal(results.get('wizard').spellcasting.spellbook_spells.length, 6);
+  assert.equal(results.get('warlock').spellcasting.slots[2], 2);
+});
+
+test('level 4 ASI enforces score caps and split-score uniqueness', () => {
+  const content = getContentBundle();
+  const sheet = baseSheet({
+    identity: { level: 3, experience_points: 2700 },
+    progression: { experience_points: 2700 },
+    abilities: {
+      final_scores: { str: 19, dex: 20, con: 14, int: 8, wis: 12, cha: 10 },
+      modifiers: { str: 4, dex: 5, con: 2, int: -1, wis: 1, cha: 0 },
+    },
+  });
+  const plusTwo = getLevelUpPreview(sheet, content, { choices: {
+    level_4_feat: ['ability_score_improvement'], asi_pattern: ['plus_two'], asi_primary: ['str'], weapon_mastery: ['longsword'],
+  } });
+  const duplicateSplit = getLevelUpPreview(sheet, content, { choices: {
+    level_4_feat: ['ability_score_improvement'], asi_pattern: ['split'], asi_primary: ['str'], asi_secondary: ['str'], weapon_mastery: ['longsword'],
+  } });
+
+  assert(plusTwo.blockers.some((entry) => entry.type === 'invalid_choice'));
+  assert(duplicateSplit.blockers.some((entry) => entry.type === 'invalid_choice'));
+});
+
+test('Grappler is prerequisite-gated and applies its chosen ability increase', () => {
+  const content = getContentBundle();
+  const qualified = baseSheet({
+    identity: { class: 'rogue', class_name: 'Rogue', level: 3, experience_points: 2700 },
+    progression: { experience_points: 2700 },
+    abilities: {
+      final_scores: { str: 10, dex: 15, con: 14, int: 10, wis: 12, cha: 10 },
+      modifiers: { str: 0, dex: 2, con: 2, int: 0, wis: 1, cha: 0 },
+    },
+  });
+  const result = applyLevelUp({
+    characterSheet: qualified,
+    content,
+    payload: { choices: { level_4_feat: ['grappler'], grappler_ability: ['dex'] } },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.characterSheet.abilities.final_scores.dex, 16);
+  assert(result.characterSheet.features.some((feature) => feature.name === 'Grappler'));
+
+  const unqualified = baseSheet({
+    identity: { class: 'rogue', class_name: 'Rogue', level: 3, experience_points: 2700 },
+    progression: { experience_points: 2700 },
+    abilities: {
+      final_scores: { str: 10, dex: 12, con: 14, int: 10, wis: 12, cha: 10 },
+      modifiers: { str: 0, dex: 1, con: 2, int: 0, wis: 1, cha: 0 },
+    },
+  });
+  const preview = getLevelUpPreview(unqualified, content, { choices: { level_4_feat: ['grappler'], grappler_ability: ['dex'] } });
+  assert(preview.blockers.some((entry) => entry.type === 'invalid_choice'));
+});
+
+test('Constitution ASI grants retroactive HP while casting ASI updates spell math', () => {
+  const content = getContentBundle();
+  const fighter = baseSheet({
+    identity: { level: 3, experience_points: 2700 }, progression: { experience_points: 2700 },
+    abilities: { final_scores: { str: 16, dex: 10, con: 15, int: 8, wis: 12, cha: 10 }, modifiers: { str: 3, dex: 0, con: 2, int: -1, wis: 1, cha: 0 } },
+    derived_stats: { level: 3, hp: 30, max_hp: 30 },
+  });
+  const fighterChoices = { level_4_feat: ['ability_score_improvement'], asi_pattern: ['plus_two'], asi_primary: ['con'], weapon_mastery: ['longsword'] };
+  const fighterResult = applyLevelUp({ characterSheet: fighter, content, payload: { choices: fighterChoices } });
+  assert.equal(fighterResult.ok, true);
+  assert.equal(fighterResult.characterSheet.derived_stats.max_hp, 42);
+
+  const wizard = baseSheet({
+    identity: { class: 'wizard', class_name: 'Wizard', level: 3, experience_points: 2700 }, progression: { experience_points: 2700 },
+    abilities: { final_scores: { str: 8, dex: 14, con: 14, int: 16, wis: 12, cha: 10 }, modifiers: { str: -1, dex: 2, con: 2, int: 3, wis: 1, cha: 0 } },
+    derived_stats: { level: 3, hp: 20, max_hp: 20, proficiency_bonus: 2, spell_attack_bonus: 5, spell_save_dc: 13 },
+    spellcasting: { ability: 'int', cantrips_known: ['light'], spells_prepared: ['magic_missile'], spellbook_spells: ['magic_missile', 'shield', 'burning_hands', 'misty_step'], slots: { 1: 4, 2: 2 }, slots_max: { 1: 4, 2: 2 } },
+  });
+  const choices = completeLevelFourChoices(wizard, content, 'int');
+  const wizardResult = applyLevelUp({ characterSheet: wizard, content, payload: { choices } });
+  assert.equal(wizardResult.ok, true);
+  assert.equal(wizardResult.characterSheet.derived_stats.spell_attack_bonus, 6);
+  assert.equal(wizardResult.characterSheet.derived_stats.spell_save_dc, 14);
+});
+
+test('level 4 preserves spent spell slots while adding newly gained capacity', () => {
+  const content = getContentBundle();
+  const bard = baseSheet({
+    identity: { class: 'bard', class_name: 'Bard', level: 3, experience_points: 2700 },
+    progression: { experience_points: 2700 },
+    abilities: { final_scores: { str: 8, dex: 14, con: 14, int: 10, wis: 12, cha: 16 }, modifiers: { str: -1, dex: 2, con: 2, int: 0, wis: 1, cha: 3 } },
+    spellcasting: {
+      ability: 'cha', cantrips_known: ['light', 'mage_hand'], spells_prepared: ['cure_wounds'],
+      slots: { 1: 2, 2: 1 }, slots_max: { 1: 4, 2: 2 },
+    },
+  });
+  const choices = completeLevelFourChoices(bard, content, 'cha');
+  const result = applyLevelUp({ characterSheet: bard, content, payload: { choices } });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.characterSheet.spellcasting.slots, { 1: 2, 2: 2 });
+  assert.deepEqual(result.characterSheet.spellcasting.slots_max, { 1: 4, 2: 3 });
+});
+
+test('level 4 resource increases preserve spent uses and add new capacity', () => {
+  const content = getContentBundle();
+  const fighter = baseSheet({
+    identity: { class: 'fighter', class_name: 'Fighter', level: 3, experience_points: 2700 },
+    progression: { experience_points: 2700 },
+    resources: { second_wind: { name: 'Second Wind', remaining: 1, max: 2, reset: 'long_rest' } },
+  });
+  const choices = completeLevelFourChoices(fighter, content, 'str');
+  const result = applyLevelUp({ characterSheet: fighter, content, payload: { choices } });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.characterSheet.resources.second_wind.remaining, 2);
+  assert.equal(result.characterSheet.resources.second_wind.max, 3);
+});
