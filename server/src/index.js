@@ -71,6 +71,7 @@ const {
   isQaToolsEnabled,
   normalizeQaCharacterName,
 } = require('./qaTools');
+const { buildQaLevelFourRoster } = require('./qaLevelFourFixtures');
 
 // ── Setup ──────────────────────────────────────────────────────────────────
 const app    = express();
@@ -2161,6 +2162,74 @@ app.post('/qa/level-up-ready', async (req, res) => {
   } catch (err) {
     console.error('qa level-up-ready error:', err);
     res.status(500).json({ ok: false, error: 'QA level-up preparation failed.' });
+  }
+});
+
+app.post('/qa/seed-level-four-roster', async (req, res) => {
+  if (!isQaToolsEnabled()) {
+    res.status(404).json({ ok: false, error: 'Not found.' });
+    return;
+  }
+
+  if (!hasValidQaToolsSecret(req)) {
+    res.status(403).json({ ok: false, error: 'QA tools secret is invalid.' });
+    return;
+  }
+
+  try {
+    const { sessionId, sessionToken, characterName } = req.body || {};
+    const qaCharacterName = normalizeQaCharacterName(characterName);
+    let targetSessionId = sessionId || null;
+
+    if (targetSessionId || sessionToken) {
+      if (!isValidSessionToken(targetSessionId, sessionToken)) {
+        res.status(401).json({ ok: false, error: 'Session token is invalid.' });
+        return;
+      }
+    } else if (qaCharacterName) {
+      const character = await db.getActiveQaCharacterByName(qaCharacterName);
+      targetSessionId = character?.session_id || null;
+      if (!targetSessionId || !hasLiveCharacterSocket(character?.id)) {
+        res.status(409).json({ ok: false, error: 'That QA character is not active in a visible session.' });
+        return;
+      }
+    } else {
+      res.status(400).json({ ok: false, error: 'Provide a signed session or an active QA character name.' });
+      return;
+    }
+
+    const campaign = await db.getOrCreateDefaultCampaign();
+    const roster = buildQaLevelFourRoster({ sessionId: targetSessionId, campaignId: campaign.id });
+    const saved = [];
+    for (const fixture of roster) {
+      saved.push(await db.upsertQaFixtureForSession(targetSessionId, fixture.characterSheet));
+    }
+
+    const activeCharacter = await db.getCharacterForSession(targetSessionId);
+    const characters = await db.getAccessibleCharacters(targetSessionId);
+    io.to(targetSessionId).emit('character_data', {
+      campaign,
+      content: getContentBundle(),
+      characters: characters.map(summarizeCharacterForClient),
+      character: activeCharacter?.character_sheet || null,
+      activeCharacterId: activeCharacter?.id || null,
+    });
+
+    res.json({
+      ok: true,
+      sessionId: targetSessionId,
+      fixtures: saved.map((entry) => ({
+        characterId: entry.id,
+        name: entry.character_sheet.identity.name,
+        classId: entry.character_sheet.identity.class,
+        level: entry.character_sheet.identity.level,
+        xp: entry.character_sheet.progression?.experience_points,
+        levelUpReady: Boolean(entry.character_sheet.progression?.level_up_available?.ready),
+      })),
+    });
+  } catch (err) {
+    console.error('qa seed-level-four-roster error:', err);
+    res.status(500).json({ ok: false, error: 'QA level 4 roster preparation failed.' });
   }
 });
 

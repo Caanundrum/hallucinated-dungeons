@@ -186,6 +186,71 @@ async function saveCharacterForSession(sessionId, characterSheet) {
   return data;
 }
 
+async function upsertQaFixtureForSession(sessionId, characterSheet) {
+  const name = String(characterSheet?.identity?.name || '').trim();
+  if (!/^QA L4 (Barbarian|Bard|Cleric|Druid|Fighter|Monk|Paladin|Ranger|Rogue|Sorcerer|Warlock|Wizard)$/.test(name)) {
+    throw new Error('Only the protected level 4 QA fixture roster can use this operation.');
+  }
+
+  await getOrCreateDefaultCampaign();
+  const { data: matches, error: findError } = await supabase
+    .from('characters')
+    .select('id, name')
+    .eq('campaign_id', DEFAULT_CAMPAIGN_ID)
+    .eq('owner_session_id', sessionId)
+    .ilike('name', name)
+    .order('updated_at', { ascending: false })
+    .limit(10);
+  if (findError) throw findError;
+
+  const existing = (matches || []).find((entry) => normalizeName(entry.name) === normalizeName(name));
+  const timestamp = new Date().toISOString();
+  let result;
+  if (existing) {
+    const { data, error } = await supabase
+      .from('characters')
+      .update({
+        owner_session_id: sessionId,
+        name,
+        status: 'active',
+        character_sheet: characterSheet,
+        updated_at: timestamp,
+      })
+      .eq('id', existing.id)
+      .select('*')
+      .single();
+    if (error) throw error;
+    result = data;
+  } else {
+    const { data, error } = await supabase
+      .from('characters')
+      .insert({
+        session_id: null,
+        campaign_id: DEFAULT_CAMPAIGN_ID,
+        owner_session_id: sessionId,
+        name,
+        character_sheet: characterSheet,
+        status: 'active',
+        updated_at: timestamp,
+      })
+      .select('*')
+      .single();
+    if (error) throw error;
+    result = data;
+  }
+
+  const { error: linkError } = await supabase
+    .from('campaign_characters')
+    .upsert({
+      campaign_id: DEFAULT_CAMPAIGN_ID,
+      character_id: result.id,
+      status: 'available',
+      updated_at: timestamp,
+    }, { onConflict: 'campaign_id,character_id' });
+  if (linkError) throw linkError;
+  return result;
+}
+
 async function updateCharacterSheet(characterId, characterSheet) {
   const { data, error } = await supabase
     .from('characters')
@@ -548,6 +613,7 @@ module.exports = {
   setActiveCharacterForSession,
   clearActiveCharacterForSession,
   saveCharacterForSession,
+  upsertQaFixtureForSession,
   updateCharacterSheet,
   upsertCharacterPresence,
   getCharacterPresenceForCampaign,
