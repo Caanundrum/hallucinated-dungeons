@@ -1,6 +1,7 @@
 const {
   ensureTurnResources,
   grantMovement,
+  spendProtectedMovement,
   spendMovement,
   spendTurnResource,
 } = require('./actionEconomy');
@@ -151,7 +152,8 @@ function resolveCombatMovement({
   }
 
   const protectedByRemarkableAthlete = movement.feet <= getRemarkableAthleteMovement(readyState);
-  const opportunity = protectedByRemarkableAthlete
+  const protectedByFeature = movement.feet <= Number(readyState.combat_state?.turn_resources?.protected_movement_remaining || 0);
+  const opportunity = protectedByRemarkableAthlete || protectedByFeature
     ? noOpportunityAttackResult({ worldState: { ...readyState, combat_state: combat } })
     : resolveOpportunityAttacks({
         message,
@@ -162,6 +164,7 @@ function resolveCombatMovement({
         allowReactionWindow: true,
       });
   movement.remarkableAthleteProtected = protectedByRemarkableAthlete;
+  movement.featureProtected = protectedByFeature;
   if (opportunity.paused) {
     return pauseCombatMovement({ opportunity, movement });
   }
@@ -212,8 +215,9 @@ function finishCombatMovement({ opportunity, movement, characterSheet }) {
     ], opportunity.damageEvents);
   }
 
-  const special = spendRemarkableAthleteMovement(opportunity.worldState, movement.costFeet);
-  const spent = spendMovement(special.worldState, movement.costFeet - special.spent, 'combat movement', characterSheet);
+  const featureMovement = spendProtectedMovement(opportunity.worldState, movement.costFeet);
+  const special = spendRemarkableAthleteMovement(featureMovement.worldState, movement.costFeet - featureMovement.spent);
+  const spent = spendMovement(special.worldState, movement.costFeet - featureMovement.spent - special.spent, 'combat movement', characterSheet);
   if (!spent.ok) return blocked(spent.worldState, spent.reply);
   const nextState = recordMovement(spent.worldState, movement);
   const assumption = opportunity.assumedSceneZone
@@ -223,7 +227,7 @@ function finishCombatMovement({ opportunity, movement, characterSheet }) {
     ...opportunity.lines,
     movement.speciesNote,
     movement.grappleNote,
-    `You move ${movement.feet} feet${movement.destinationText}.${movement.remarkableAthleteProtected ? ' Remarkable Athlete movement prevents Opportunity Attacks.' : ''} ${getRemainingMovement(nextState)} feet of movement remain.${assumption}`,
+    `You move ${movement.feet} feet${movement.destinationText}.${movement.remarkableAthleteProtected ? ' Remarkable Athlete movement prevents Opportunity Attacks.' : ''}${movement.featureProtected ? ` ${featureMovement.source} prevents Opportunity Attacks.` : ''} ${getRemainingMovement(nextState)} feet of movement remain.${assumption}`,
     'You can use another available combat resource or end your turn.',
   ], opportunity.damageEvents);
 }
@@ -677,7 +681,8 @@ function getPlayerConditionSubject(characterSheet = {}, worldState = {}) {
 
 function getRemainingMovement(worldState = {}) {
   return Number(worldState.combat_state?.turn_resources?.movement_remaining || 0)
-    + getRemarkableAthleteMovement(worldState);
+    + getRemarkableAthleteMovement(worldState)
+    + Number(worldState.combat_state?.turn_resources?.protected_movement_remaining || 0);
 }
 
 function getDeclaredMovementFeet(message = '') {

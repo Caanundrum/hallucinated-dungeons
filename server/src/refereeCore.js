@@ -18,7 +18,9 @@ const {
 const {
   beginPlayerTurn,
   continuePlayerTurn,
+  grantProtectedMovement,
   setTurnFlag,
+  spendAttackAction,
   spendTurnResource,
 } = require('./actionEconomy');
 const { resolveCreatureTurns, resumeCreatureTurns } = require('./creatureTurnEngine');
@@ -1751,7 +1753,8 @@ function resolveCombatAction({ message, intent, worldState, characterSheet, curr
 
   if (intent.castsSpell) return null;
 
-  const maneuver = isUnarmedAttackIntent(message) ? null : getCombatManeuverIntent(message);
+  const declaresCunningStrike = /\bcunning\s+strike\b/i.test(String(message || ''));
+  const maneuver = isUnarmedAttackIntent(message) || declaresCunningStrike ? null : getCombatManeuverIntent(message);
   if (maneuver) {
     return resolveCombatManeuver({ maneuver, message, worldState, characterSheet, rollDie });
   }
@@ -1774,7 +1777,7 @@ function resolveCombatAction({ message, intent, worldState, characterSheet, curr
     return { handled: true, logType: 'referee_combat_dodge', ...continued };
   }
 
-  if (/\b(?:disengage|carefully withdraw|withdraw safely)\b/i.test(message)) {
+  if (!declaresCunningStrike && /\b(?:disengage|carefully withdraw|withdraw safely)\b/i.test(message)) {
     return finishCombatMovementAction({
       result: resolveDisengageAction({ message, worldState, characterSheet, rollDie }),
       characterSheet,
@@ -2110,8 +2113,10 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
       reply: reckless.reply,
     };
   }
+  const cunningValidation = validateCunningStrikeDeclaration({ message, worldState, characterSheet });
+  if (cunningValidation) return cunningValidation;
 
-  const spent = spendTurnResource(worldState, 'action', 'Attack', characterSheet);
+  const spent = spendAttackAction(worldState, characterSheet, declaredAttack);
   if (!spent.ok) {
     return {
       handled: true,
@@ -2310,10 +2315,14 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
     const flatBonuses = getActiveDamageBonuses(attackState, { attack, characterSheet });
     const fightingStyleBonus = getFightingStyleDamageBonus({ characterSheet, attack, message });
     const flatBonusTotal = flatBonuses.reduce((sum, bonus) => sum + Number(bonus.value || 0), 0) + fightingStyleBonus.total;
+    const cunningStrike = getCunningStrikeChoice({ message, characterSheet, attack, advantageMode, sneakAttackUsed, target });
     const sneakAttack = sneakAttackUsed
       ? { total: 0, die: `${getSneakAttackDice(characterSheet)}d6` }
-      : getSneakAttackDamage({ characterSheet, attack, advantageMode, rollDie, crit: isCrit });
+      : getSneakAttackDamage({ characterSheet, attack, advantageMode, rollDie, crit: isCrit, diceReduction: cunningStrike ? 1 : 0 });
     sneakAttackUsed ||= sneakAttack.total > 0;
+    if (/\bcunning\s+strike\b/i.test(message) && !cunningStrike && sneakAttack.total === 0) {
+      lines.push('**Cunning Strike:** Sneak Attack was not available on this hit, so no Sneak Attack die is sacrificed and no Cunning Strike option applies.');
+    }
     if (sneakAttack.total > 0 && combat.turn_resources) combat.turn_resources.sneak_attack_used = true;
     const frenzy = getFrenzyDamage({ characterSheet, worldState: attackState, combat, reckless, attack, rollDie });
     const colossus = getColossusSlayerDamage({ characterSheet, combat, target, attack, rollDie });
@@ -2347,6 +2356,28 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
       rollDie,
     });
     lines.push(...punchAndGrab.lines);
+    if (cunningStrike && sneakAttack.total > 0 && Number(target.hp) > 0) {
+      const cunning = applyCunningStrike({ choice: cunningStrike, target, combat, characterSheet, rollDie });
+      lines.push(...cunning.lines);
+      if (cunning.withdraw) {
+        const protectedMovement = grantProtectedMovement(
+          { ...attackState, combat_state: combat },
+          Math.floor(Number(characterSheet.derived_stats?.speed || 30) / 2),
+          'Cunning Strike: Withdraw',
+          characterSheet,
+        );
+        attackState = protectedMovement.worldState;
+        combat = cloneCombatState(attackState.combat_state);
+        target = findCombatTarget(combat, target.name) || target;
+      }
+    }
+    if (wantsStunningStrike(message) && Number(target.hp) > 0) {
+      const stunning = applyStunningStrike({ worldState: { ...attackState, combat_state: combat }, characterSheet, targetName: target.name, attack, rollDie });
+      attackState = stunning.worldState;
+      combat = cloneCombatState(attackState.combat_state);
+      target = findCombatTarget(combat, target.name) || target;
+      lines.push(...stunning.lines);
+    }
     consumeEffectIds.push(...bonusDamage.expireEffectIds);
     if ((target.conditions || []).includes('sleep')) {
       target.conditions = (target.conditions || []).filter((condition) => condition !== 'sleep' && condition !== 'unconscious');
@@ -2385,15 +2416,17 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
   } else if (criticalMiss) {
     lines.push('**Critical miss.** The attack fails no matter how pretty the math looked in the margins.');
     if (wantsDivineSmite(message)) lines.push('**Divine Smite:** no weapon hit occurred, so no Bonus Action, free use, or spell slot is spent.');
+    if (/\bcunning\s+strike\b/i.test(message)) lines.push('**Cunning Strike:** the attack missed, so no Sneak Attack die is sacrificed.');
     lines.push(...applyWeaponMasteryOnMiss({ attack, target, characterSheet }).lines);
   } else {
     lines.push('Miss. The attack fails to connect, which is rude but rules-compliant.');
     if (wantsDivineSmite(message)) lines.push('**Divine Smite:** no weapon hit occurred, so no Bonus Action, free use, or spell slot is spent.');
+    if (/\bcunning\s+strike\b/i.test(message)) lines.push('**Cunning Strike:** the attack missed, so no Sneak Attack die is sacrificed.');
     lines.push(...applyWeaponMasteryOnMiss({ attack, target, characterSheet }).lines);
   }
   consumeEffectIds.push(...attackBonusDice.expireEffectIds);
-  if ((target.conditions || []).includes('guiding_bolt_advantage')) {
-    target.conditions = (target.conditions || []).filter((condition) => condition !== 'guiding_bolt_advantage');
+  if ((target.conditions || []).some((condition) => ['guiding_bolt_advantage', 'stunning_strike_advantage'].includes(condition))) {
+    target.conditions = (target.conditions || []).filter((condition) => !['guiding_bolt_advantage', 'stunning_strike_advantage'].includes(condition));
   }
 
   if (Number(target.hp) <= 0) {
@@ -2749,8 +2782,8 @@ function resolveExtraWeaponAttackRoll({
     lines.push(`The ${attackLabel} misses.`);
     if (applyMastery) lines.push(...applyWeaponMasteryOnMiss({ attack, target, characterSheet }).lines);
   }
-  if ((target.conditions || []).includes('guiding_bolt_advantage')) {
-    target.conditions = (target.conditions || []).filter((condition) => condition !== 'guiding_bolt_advantage');
+  if ((target.conditions || []).some((condition) => ['guiding_bolt_advantage', 'stunning_strike_advantage'].includes(condition))) {
+    target.conditions = (target.conditions || []).filter((condition) => !['guiding_bolt_advantage', 'stunning_strike_advantage'].includes(condition));
   }
   if (Number(target.hp) <= 0) lines.push(`${target.name} falls.`);
 
@@ -3720,17 +3753,114 @@ function isThrownWeaponAttackIntent(message = '', characterSheet = {}) {
   return sheetWeapons.some((weapon) => attackNameAppearsInMessage(weapon, message));
 }
 
-function getSneakAttackDamage({ characterSheet = {}, attack = {}, advantageMode = null, rollDie = defaultRollDie, crit = false } = {}) {
+function getSneakAttackDamage({ characterSheet = {}, attack = {}, advantageMode = null, rollDie = defaultRollDie, crit = false, diceReduction = 0 } = {}) {
   if (normalizeTargetPhrase(characterSheet.identity?.class) !== 'rogue') return { total: 0, die: '1d6' };
   if (advantageMode !== 'advantage') return { total: 0, die: '1d6' };
   if (!isSneakAttackWeapon(attack)) return { total: 0, die: '1d6' };
 
-  const dice = getSneakAttackDice(characterSheet);
+  const dice = Math.max(0, getSneakAttackDice(characterSheet) - Number(diceReduction || 0));
+  if (!dice) return { total: 0, die: '0d6' };
   const formula = `${dice}d6`;
   const damage = rollDamageFormula(formula, rollDie, { crit });
   return {
     total: damage.total,
     die: `${crit ? dice * 2 : dice}d6`,
+  };
+}
+
+function getCunningStrikeChoice({ message = '', characterSheet = {}, attack = {}, advantageMode = null, sneakAttackUsed = false, target = {} } = {}) {
+  if (normalizeTargetPhrase(characterSheet.identity?.class) !== 'rogue' || Number(characterSheet.identity?.level || 1) < 5) return null;
+  if (sneakAttackUsed || advantageMode !== 'advantage' || !isSneakAttackWeapon(attack)) return null;
+  const text = String(message || '').toLowerCase();
+  if (!/\bcunning\s+strike\b/.test(text)) return null;
+  if (/\bpoison\b/.test(text)) {
+    const tools = (characterSheet.proficiencies?.tools || []).map(normalizeTargetPhrase);
+    return tools.some((tool) => tool.includes('poisoner')) ? 'poison' : null;
+  }
+  if (/\btrip\b|\bknock\b.*\bprone\b/.test(text)) {
+    return ['huge', 'gargantuan'].includes(normalizeTargetPhrase(target.size || 'medium')) ? null : 'trip';
+  }
+  if (/\bwithdraw\b|\bmove\b.*\baway\b/.test(text)) return 'withdraw';
+  return null;
+}
+
+function validateCunningStrikeDeclaration({ message = '', worldState = {}, characterSheet = {} } = {}) {
+  const text = String(message || '').toLowerCase();
+  if (!/\bcunning\s+strike\b/.test(text)) return null;
+  if (normalizeTargetPhrase(characterSheet.identity?.class) !== 'rogue' || Number(characterSheet.identity?.level || 1) < 5) {
+    return { handled: true, logType: 'referee_cunning_strike_unavailable', worldState, reply: 'Cunning Strike requires Rogue level 5. No action or Sneak Attack damage is spent.' };
+  }
+  if (!/\b(?:poison|trip|withdraw)\b/.test(text)) {
+    return { handled: true, logType: 'referee_cunning_strike_choice_required', worldState, reply: 'Choose a Cunning Strike option: **Poison**, **Trip**, or **Withdraw**. No action is spent yet.' };
+  }
+  if (/\bpoison\b/.test(text) && !(characterSheet.proficiencies?.tools || []).map(normalizeTargetPhrase).some((tool) => tool.includes('poisoner'))) {
+    return { handled: true, logType: 'referee_cunning_strike_poison_kit', worldState, reply: "Cunning Strike: Poison requires proficiency with a Poisoner's Kit. No action or Sneak Attack die is spent." };
+  }
+  const target = findCombatTarget(worldState.combat_state || {}, message);
+  if (/\btrip\b/.test(text) && target && ['huge', 'gargantuan'].includes(normalizeTargetPhrase(target.size || 'medium'))) {
+    return { handled: true, logType: 'referee_cunning_strike_trip_size', worldState, reply: `Cunning Strike: Trip works only on a Large or smaller creature; ${target.name} is ${target.size}. No action or Sneak Attack die is spent.` };
+  }
+  return null;
+}
+
+function applyCunningStrike({ choice, target = {}, combat = {}, characterSheet = {}, rollDie = defaultRollDie } = {}) {
+  const dc = 8 + Number(characterSheet.abilities?.modifiers?.dex || 0) + Number(characterSheet.derived_stats?.proficiency_bonus || 3);
+  if (choice === 'withdraw') {
+    return { withdraw: true, lines: [`**Cunning Strike - Withdraw:** you trade 1d6 of Sneak Attack damage to gain ${Math.floor(Number(characterSheet.derived_stats?.speed || 30) / 2)} feet of movement that does not provoke Opportunity Attacks.`] };
+  }
+  if (choice === 'poison') {
+    const tools = (characterSheet.proficiencies?.tools || []).map(normalizeTargetPhrase);
+    if (!tools.some((tool) => tool.includes('poisoner'))) return { lines: ['**Cunning Strike - Poison:** you need proficiency with a Poisoner\'s Kit. The Sneak Attack die is not sacrificed.'] };
+    const save = resolveSavingThrow({ target, ability: 'con', dc, bonus: Number(target.saves?.con || 0), rollDie });
+    if (!save.success) {
+      target.conditions = [...new Set([...(target.conditions || []), 'poisoned'])];
+      target.cunning_strike_poison_dc = dc;
+      target.cunning_strike_poison_expires_round = Number(combat.round || 1) + 10;
+    }
+    return { lines: [`**Cunning Strike - Poison:** ${target.name} makes a CON save (${save.text} vs DC ${dc}) and ${save.success ? 'resists the poison' : 'is Poisoned for up to 1 minute, repeating the save at the end of each turn'}.`] };
+  }
+  const sizeOrder = ['tiny', 'small', 'medium', 'large', 'huge', 'gargantuan'];
+  if (sizeOrder.indexOf(normalizeTargetPhrase(target.size || 'medium')) > sizeOrder.indexOf('large')) return { lines: [`**Cunning Strike - Trip:** ${target.name} is too large to trip. The Sneak Attack die is not sacrificed.`] };
+  const save = resolveSavingThrow({ target, ability: 'dex', dc, bonus: Number(target.saves?.dex || 0), rollDie });
+  if (!save.success) target.conditions = [...new Set([...(target.conditions || []), 'prone'])];
+  return { lines: [`**Cunning Strike - Trip:** ${target.name} makes a DEX save (${save.text} vs DC ${dc}) and ${save.success ? 'keeps its footing' : 'falls Prone'}.`] };
+}
+
+function wantsStunningStrike(message = '') {
+  return /\bstunning\s+strike\b|\bspend\b.*\bfocus\b.*\bstun\b/i.test(String(message || ''));
+}
+
+function applyStunningStrike({ worldState = {}, characterSheet = {}, targetName = '', attack = {}, rollDie = defaultRollDie } = {}) {
+  const classId = normalizeTargetPhrase(characterSheet.identity?.class || characterSheet.identity?.class_name);
+  const level = Number(characterSheet.identity?.level || characterSheet.derived_stats?.level || 1);
+  const combat = cloneCombatState(worldState.combat_state || {});
+  const target = findCombatTarget(combat, targetName);
+  const resources = buildResourceState(characterSheet, worldState);
+  if (classId !== 'monk' || level < 5 || !target) return { worldState, lines: ['**Stunning Strike:** this character cannot apply that feature to the hit.'] };
+  if (combat.turn_resources?.stunning_strike_used) return { worldState, lines: ['**Stunning Strike:** it can be used only once per turn. No Focus Point is spent.'] };
+  const category = normalizeTargetPhrase(attack.weaponCategory || attack.weapon_category);
+  const properties = (attack.properties || []).map(normalizeTargetPhrase);
+  const attackKind = normalizeTargetPhrase(attack.attackKind || attack.attack_kind || 'melee');
+  const monkWeapon = !attack.isWeapon || (attackKind !== 'ranged' && (category === 'simple' || (category === 'martial' && properties.includes('light'))));
+  if (!monkWeapon) return { worldState, lines: ['**Stunning Strike:** the hit must use an Unarmed Strike or Monk weapon. No Focus Point is spent.'] };
+  if (Number(resources.focus_points?.remaining || 0) <= 0) return { worldState: mergeWorldResources(worldState, resources), lines: ['**Stunning Strike:** no Focus Points remain.'] };
+  const spent = spendResource({ worldState: { ...worldState, combat_state: combat }, characterSheet, resource: 'focus_points' });
+  const nextCombat = cloneCombatState(spent.worldState.combat_state || combat);
+  const nextTarget = findCombatTarget(nextCombat, targetName);
+  nextCombat.turn_resources.stunning_strike_used = true;
+  const dc = 8 + Number(characterSheet.abilities?.modifiers?.wis || 0) + Number(characterSheet.derived_stats?.proficiency_bonus || 3);
+  const save = resolveSavingThrow({ target: nextTarget, ability: 'con', dc, bonus: Number(nextTarget.saves?.con || 0), rollDie });
+  nextTarget.stunning_strike_until_player_turn = true;
+  if (save.success) {
+    nextTarget.speed_before_stunning_strike = Number(nextTarget.speed || 30);
+    nextTarget.speed = Math.floor(Number(nextTarget.speed || 30) / 2);
+    nextTarget.conditions = [...new Set([...(nextTarget.conditions || []), 'stunning_strike_slowed', 'stunning_strike_advantage'])];
+  } else {
+    nextTarget.conditions = [...new Set([...(nextTarget.conditions || []), 'stunned'])];
+  }
+  return {
+    worldState: { ...spent.worldState, combat_state: nextCombat },
+    lines: [`**Stunning Strike:** you spend 1 Focus Point. ${nextTarget.name} makes a CON save (${save.text} vs DC ${dc}) and ${save.success ? 'resists the stun; its Speed is halved and the next attack against it has Advantage until your next turn' : 'is Stunned until the start of your next turn'}. Focus Points: ${Number(spent.resources.focus_points.remaining)}/${Number(spent.resources.focus_points.max)}.`],
   };
 }
 
@@ -3822,6 +3952,7 @@ function getSpellAttackAdvantageSources(target = {}) {
   const sources = [];
   if (conditions.includes('faerie_fire')) sources.push('Faerie Fire');
   if (conditions.includes('guiding_bolt_advantage')) sources.push('Guiding Bolt');
+  if (conditions.includes('stunning_strike_advantage')) sources.push('Stunning Strike');
   if (conditions.includes('sleep') || conditions.includes('unconscious')) sources.push('unconscious target');
   return sources;
 }

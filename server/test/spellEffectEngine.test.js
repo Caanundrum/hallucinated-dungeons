@@ -1342,3 +1342,61 @@ test('Scorching Ray resolves three independent spell attacks instead of utility 
   assert.match(outcome.reply, /Ray 3/);
   assert.doesNotMatch(outcome.reply, /effect is now active in the scene/);
 });
+
+test('level 5 damaging cantrips scale their damage dice', () => {
+  const wizard = casterSheet({ identity: { name: 'Mira', level: 5, class: 'wizard', class_name: 'Wizard' } });
+  const cast = resolveSpellCast({ message: 'I cast Fire Bolt at the Skeleton.', content, characterSheet: wizard, worldState: combatWorld({ combat_state: { active: true, round: 1, turn_index: 0, combatants: [{ name: 'Mira', hp: 30, max_hp: 30, ac: 15, is_player: true }, { name: 'Skeleton', hp: 40, max_hp: 40, ac: 12, is_player: false }] } }) });
+  const outcome = resolveSpellOutcome({ spellCast: cast, characterSheet: cast.characterSheet, worldState: cast.worldState, rollDie: sequenceRolls([15, 4, 5]) });
+  const skeleton = outcome.worldState.combat_state.combatants.find((entry) => entry.name === 'Skeleton');
+
+  assert.equal(skeleton.hp, 31);
+  assert.match(outcome.reply, /Hit for 9 fire damage/);
+});
+
+test('level 5 Eldritch Blast fires two beams and applies selected blast invocations', () => {
+  const warlock = casterSheet({
+    identity: { name: 'Vex', level: 5, class: 'warlock', class_name: 'Warlock' },
+    abilities: { modifiers: { cha: 3 } },
+    class_choices: { eldritch_invocations: ['agonizing_blast', 'repelling_blast'] },
+    derived_stats: { spell_attack_bonus: 6, spell_save_dc: 14 },
+    spellcasting: { ability: 'cha', cantrips_known: ['eldritch_blast'], spells_prepared: [], slots: { 3: 2 }, pact_slot_level: 3 },
+  });
+  const cast = resolveSpellCast({ message: 'I cast Eldritch Blast at the Skeleton.', content, characterSheet: warlock, worldState: combatWorld({ combat_state: { active: true, round: 1, turn_index: 0, combatants: [{ name: 'Vex', hp: 30, max_hp: 30, ac: 15, is_player: true }, { name: 'Skeleton', hp: 40, max_hp: 40, ac: 12, is_player: false }] } }) });
+  const outcome = resolveSpellOutcome({ spellCast: cast, characterSheet: cast.characterSheet, worldState: cast.worldState, rollDie: sequenceRolls([15, 4, 14, 5]) });
+  const skeleton = outcome.worldState.combat_state.combatants.find((entry) => entry.name === 'Skeleton');
+
+  assert.equal(skeleton.hp, 25);
+  assert.equal(skeleton.forced_movement.feet, 20);
+  assert.match(outcome.reply, /making 2 spell attacks/);
+  assert.match(outcome.reply, /Agonizing Blast/);
+  assert.match(outcome.reply, /Repelling Blast/);
+});
+
+test('level 3 damage spells use deterministic saves and damage', () => {
+  const wizard = casterSheet({
+    identity: { name: 'Mira', level: 5, class: 'wizard', class_name: 'Wizard' },
+    derived_stats: { spell_attack_bonus: 6, spell_save_dc: 14 },
+    spellcasting: { ability: 'int', spells_prepared: ['fireball'], spellbook_spells: ['fireball'], slots: { 3: 1 } },
+  });
+  const cast = resolveSpellCast({ message: 'I cast Fireball at the Skeleton.', content, characterSheet: wizard, worldState: combatWorld({ player_stats: { hp: 30, max_hp: 30, spell_slots: { 3: 1 } }, combat_state: { active: true, round: 1, turn_index: 0, combatants: [{ name: 'Mira', hp: 30, max_hp: 30, ac: 15, is_player: true }, { name: 'Skeleton', hp: 40, max_hp: 40, ac: 12, is_player: false, saves: { dex: 0 } }] } }) });
+  const outcome = resolveSpellOutcome({ spellCast: cast, characterSheet: cast.characterSheet, worldState: cast.worldState, rollDie: sequenceRolls([1, 4, 4, 4, 4, 4, 4, 4, 4]) });
+  const skeleton = outcome.worldState.combat_state.combatants.find((entry) => entry.name === 'Skeleton');
+
+  assert.equal(skeleton.hp, 8);
+  assert.match(outcome.reply, /32 fire damage/);
+});
+
+test('Faithful Steed free casting adds the bonded mount to authoritative scene state', () => {
+  const paladin = paladinSheet({
+    identity: { name: 'Ari', level: 5, class: 'paladin', class_name: 'Paladin' },
+    resources: { spell_uses: { 'class_feature:faithful_steed:find_steed': { name: 'Faithful Steed', spell_id: 'find_steed', source: 'faithful_steed', source_name: 'Faithful Steed', remaining: 1, max: 1, reset: 'long_rest' } } },
+    spellcasting: { ability: 'cha', always_prepared_spells: ['find_steed'], spells_prepared: ['find_steed'], slots: { 2: 2 } },
+  });
+  const cast = resolveSpellCast({ message: 'I cast Find Steed.', content, characterSheet: paladin, worldState: worldState({ player_stats: { spell_slots: { 2: 2 }, resources: paladin.resources } }) });
+  const outcome = resolveSpellOutcome({ spellCast: cast, characterSheet: cast.characterSheet, worldState: cast.worldState });
+
+  assert.equal(cast.characterSheet.resources.spell_uses['class_feature:faithful_steed:find_steed'].remaining, 0);
+  assert.equal(cast.characterSheet.spellcasting.slots[2], 2);
+  assert.equal(outcome.worldState.player_stats.companions[0].id, 'faithful_steed');
+  assert(outcome.worldState.scene_presence.present_npcs.includes("Ari's Faithful Steed"));
+});

@@ -1042,3 +1042,29 @@ test('Monk Deflect Attacks can spend Focus to damage the original attacker after
   assert.equal(result.worldState.combat_state.combatants.find((entry) => entry.id === 'goblin-1').hp, 0);
   assert.match(result.reply, /fails its DEX save.*takes 12 damage/);
 });
+
+test('level 5 Rogue Uncanny Dodge halves one visible attack damage with its Reaction', () => {
+  const rogue = {
+    identity: { name: 'Shade', class: 'rogue', level: 5, subclass: 'thief' },
+    abilities: { modifiers: { dex: 4 } },
+    derived_stats: { armor_class: 15, max_hp: 30 },
+  };
+  const world = combatWorld();
+  world.player_stats.hp = 18;
+  world.player_stats.max_hp = 30;
+  world.combat_state.combatants[0].hp = 18;
+  world.combat_state.combatants[0].max_hp = 30;
+  const goblin = world.combat_state.combatants.find((entry) => !entry.is_player);
+  const options = getReactionOptions({ trigger: 'damage_taken', worldState: world, characterSheet: rogue, context: { actor: goblin, attack: { name: 'blade' }, damageTaken: 7 } });
+  const pending = {
+    id: 'reaction_uncanny_dodge', kind: 'player_reaction', trigger: 'damage_taken', trigger_label: 'Goblin blade', trigger_prompt: 'Goblin dealt 7 damage.', resume_stage: 'after_attack',
+    options, damage_frame: { damage_taken: 7, attack: { name: 'blade' } },
+  };
+  const result = resolvePendingReactionChoice({ message: 'I use Uncanny Dodge.', worldState: { ...world, pending_reaction: pending }, characterSheet: rogue });
+
+  assert.equal(result.resolved, true);
+  assert.equal(result.worldState.player_stats.hp, 22);
+  assert.equal(result.worldState.combat_state.combatants[0].hp, 22);
+  assert.equal(result.worldState.combat_state.turn_resources.reaction_available, false);
+  assert.match(result.reply, /from 7 to 3/);
+});

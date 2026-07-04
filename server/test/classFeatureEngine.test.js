@@ -69,6 +69,89 @@ test('Second Wind heals the active fighter and spends its resource', () => {
   assert.match(result.reply, /Second Wind/);
 });
 
+test('level 5 Second Wind grants Tactical Shift protected movement', () => {
+  const result = resolveFeatureAction({
+    message: 'I use Second Wind.',
+    worldState: combatWorld(),
+    characterSheet: sheet('fighter', { identity: { name: 'Ari', class: 'fighter', level: 5 }, derived_stats: { hp: 12, max_hp: 12, speed: 30, proficiency_bonus: 3 } }),
+    rollDie: sequenceRolls([2]),
+  });
+
+  assert.equal(result.worldState.combat_state.turn_resources.protected_movement_remaining, 15);
+  assert.match(result.reply, /Tactical Shift/);
+});
+
+test('Font of Inspiration exchanges a spell slot for one d8 inspiration use', () => {
+  const result = resolveFeatureAction({
+    message: 'I use Font of Inspiration to restore Bardic Inspiration with a level 1 spell slot.',
+    worldState: {
+      player_stats: {
+        spell_slots: { 1: 2, 2: 1, 3: 1 },
+        resources: { bardic_inspiration: { name: 'Bardic Inspiration', remaining: 1, max: 4, reset: 'short_rest', die: '1d8' } },
+      },
+    },
+    characterSheet: sheet('bard', { identity: { name: 'Ari', class: 'bard', level: 5 }, spellcasting: { ability: 'cha', slots: { 1: 2, 2: 1, 3: 1 } } }),
+  });
+
+  assert.equal(result.worldState.player_stats.spell_slots[1], 1);
+  assert.equal(result.worldState.player_stats.resources.bardic_inspiration.remaining, 2);
+  assert.match(result.reply, /No action is required/);
+});
+
+test('Sear Undead damages failed Turn Undead targets at level 5', () => {
+  const result = resolveFeatureAction({
+    message: 'I use Turn Undead.',
+    worldState: combatWorld({
+      player_stats: { hp: 12, max_hp: 12, resources: { channel_divinity: { name: 'Channel Divinity', remaining: 2, max: 2, reset: 'short_rest' } } },
+      combat_state: {
+        active: true, round: 1, turn_index: 0,
+        combatants: [
+          { name: 'Ari', hp: 12, max_hp: 12, ac: 16, is_player: true },
+          { name: 'Skeleton', hp: 20, max_hp: 20, ac: 13, is_player: false, creature_type: 'undead', saves: { wis: 0 } },
+        ],
+      },
+    }),
+    characterSheet: sheet('cleric', { identity: { name: 'Ari', class: 'cleric', level: 5 }, abilities: { modifiers: { wis: 3 } }, derived_stats: { spell_save_dc: 14, proficiency_bonus: 3 } }),
+    rollDie: sequenceRolls([1, 4, 4, 4]),
+  });
+
+  assert.equal(result.worldState.combat_state.combatants[1].hp, 8);
+  assert.match(result.reply, /Sear Undead/);
+});
+
+test('Wild Resurgence exchanges an empty Wild Shape pool and a spell slot', () => {
+  const druid = sheet('druid', {
+    identity: { name: 'Ari', class: 'druid', level: 5 },
+    spellcasting: { ability: 'wis', slots: { 1: 2, 2: 1 }, slots_max: { 1: 4, 2: 3 } },
+    resources: {
+      wild_shape: { name: 'Wild Shape', remaining: 0, max: 2, reset: 'short_rest' },
+      wild_resurgence_slot: { name: 'Wild Resurgence Slot Recovery', remaining: 1, max: 1, reset: 'long_rest' },
+    },
+  });
+  const result = resolveFeatureAction({
+    message: 'I use Wild Resurgence to exchange a spell slot and regain Wild Shape.',
+    worldState: { player_stats: { spell_slots: { 1: 2, 2: 1 }, resources: druid.resources } },
+    characterSheet: druid,
+  });
+
+  assert.equal(result.worldState.player_stats.spell_slots[1], 1);
+  assert.equal(result.worldState.player_stats.resources.wild_shape.remaining, 1);
+});
+
+test('Memorize Spell swaps prepared Wizard spells only after a rest', () => {
+  const result = resolveFeatureAction({
+    message: 'I prepare Fireball instead of Shield after my rest.',
+    worldState: { time_state: { scene_time: 'after a short rest' } },
+    characterSheet: sheet('wizard', {
+      identity: { name: 'Ari', class: 'wizard', level: 5 },
+      spellcasting: { ability: 'int', spellbook_spells: ['shield', 'fireball'], spells_prepared: ['shield'] },
+    }),
+  });
+
+  assert.deepEqual(result.characterSheet.spellcasting.spells_prepared, ['fireball']);
+  assert.match(result.reply, /Fireball/);
+});
+
 test('unavailable feature resources do not spend the combat Bonus Action', () => {
   const result = resolveFeatureAction({
     message: 'I use Second Wind.',

@@ -11,6 +11,7 @@ const {
   getConditionD20Modifier,
   formatConditionD20Sources,
   getTurnBlockReason,
+  resolveSavingThrow,
 } = require('./conditionEngine');
 const { getActiveDamageResistances } = require('./spellEffectEngine');
 const { consumeSapAfterAttack } = require('./weaponRulesEngine');
@@ -283,6 +284,12 @@ function resolveCreatureTurns({
       });
     }
     if (Number(player.hp || 0) <= 0) break;
+  }
+
+  for (const index of actingIndexes) {
+    const poison = resolveCunningStrikePoisonSave(combatants[index], combat.round, rollDie);
+    combatants[index] = poison.actor;
+    if (poison.line) lines.push(poison.line);
   }
 
   combat.round = Number(combat.round || 1) + (advanceRound ? 1 : 0);
@@ -610,6 +617,40 @@ function clearPlayerTurnConditions(conditions = []) {
 
 function clearCreatureTurnConditions(conditions = []) {
   return (conditions || []).filter((condition) => !/^command$/i.test(String(condition)));
+}
+
+function resolveCunningStrikePoisonSave(actor = {}, round = 1, rollDie = defaultRollDie) {
+  if (!(actor.conditions || []).includes('poisoned') || !actor.cunning_strike_poison_dc) return { actor, line: '' };
+  if (Number(round || 1) >= Number(actor.cunning_strike_poison_expires_round || Infinity)) {
+    return {
+      actor: {
+        ...actor,
+        conditions: (actor.conditions || []).filter((condition) => condition !== 'poisoned'),
+        cunning_strike_poison_dc: undefined,
+        cunning_strike_poison_expires_round: undefined,
+      },
+      line: `**Cunning Strike poison:** ${actor.name} is no longer Poisoned as the effect reaches its 1-minute limit.`,
+    };
+  }
+  if (Number(actor.cunning_strike_poison_last_round || 0) === Number(round || 1)) return { actor, line: '' };
+  const dc = Number(actor.cunning_strike_poison_dc);
+  const save = resolveSavingThrow({ target: actor, ability: 'con', dc, bonus: Number(actor.saves?.con || 0), rollDie });
+  if (!save.success) {
+    return {
+      actor: { ...actor, cunning_strike_poison_last_round: Number(round || 1) },
+      line: `**Cunning Strike poison:** ${actor.name} fails its end-of-turn CON save (${save.text} vs DC ${dc}) and remains Poisoned.`,
+    };
+  }
+  return {
+    actor: {
+      ...actor,
+      conditions: (actor.conditions || []).filter((condition) => condition !== 'poisoned'),
+      cunning_strike_poison_dc: undefined,
+      cunning_strike_poison_expires_round: undefined,
+      cunning_strike_poison_last_round: undefined,
+    },
+    line: `**Cunning Strike poison:** ${actor.name} succeeds on its end-of-turn CON save (${save.text} vs DC ${dc}) and is no longer Poisoned.`,
+  };
 }
 
 function buildPlayerCombatant(characterSheet, worldState) {

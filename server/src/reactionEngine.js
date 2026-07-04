@@ -79,6 +79,18 @@ const REACTION_DEFINITIONS = {
         && ['physical', 'bludgeoning', 'piercing', 'slashing', ''].includes(type);
     },
   }),
+  uncanny_dodge: defineReactionDefinition({
+    id: 'uncanny_dodge',
+    trigger: REACTION_TRIGGERS.DAMAGE_TAKEN,
+    label: 'Use Uncanny Dodge',
+    optionType: 'feature_reaction',
+    canOffer({ context, characterSheet }) {
+      return normalizeText(characterSheet.identity?.class || characterSheet.identity?.class_name) === 'rogue'
+        && getCharacterLevel(characterSheet) >= 5
+        && Number(context.damageTaken || 0) > 0
+        && context.actor?.visible !== false;
+    },
+  }),
 };
 
 function buildAttackHitReaction({
@@ -289,7 +301,7 @@ function resolveFeatureReaction({ option = {}, message = '', worldState = {}, ch
   if (option.id === 'cutting_words') {
     const spent = spendResource({ worldState: spentReaction.worldState, characterSheet, resource: 'bardic_inspiration' });
     if (!spent.ok) return unavailableReaction({ worldState, pendingReaction, reply: 'Cutting Words needs a Bardic Inspiration use.' });
-    const reduction = rollDie(6);
+    const reduction = rollDie(getBardicInspirationDie(characterSheet));
     const frame = { ...(pendingReaction.attack_frame || {}) };
     frame.attack_total = Number(frame.attack_total || 0) - reduction;
     frame.roll_text = `${frame.roll_text || 'attack'} - ${reduction} Cutting Words`;
@@ -305,7 +317,7 @@ function resolveFeatureReaction({ option = {}, message = '', worldState = {}, ch
     const spent = spendResource({ worldState: spentReaction.worldState, characterSheet, resource: 'bardic_inspiration' });
     if (!spent.ok) return unavailableReaction({ worldState, pendingReaction, reply: 'Cutting Words needs a Bardic Inspiration use.' });
     const damageTaken = Number(pendingReaction.damage_frame?.damage_taken || 0);
-    const reductionRoll = rollDie(6);
+    const reductionRoll = rollDie(getBardicInspirationDie(characterSheet));
     const prevented = Math.min(damageTaken, reductionRoll);
     const combat = clone(spent.worldState.combat_state || {});
     const player = (combat.combatants || []).find((entry) => entry.is_player);
@@ -380,7 +392,33 @@ function resolveFeatureReaction({ option = {}, message = '', worldState = {}, ch
       reply: `You spend your **Reaction** for **Deflect Attacks**, reducing the damage by ${prevented} (${reduction} rolled reduction).${redirect}`,
     };
   }
+  if (option.id === 'uncanny_dodge') {
+    const damageTaken = Number(pendingReaction.damage_frame?.damage_taken || 0);
+    const prevented = Math.ceil(damageTaken / 2);
+    const combat = clone(spentReaction.worldState.combat_state || {});
+    const player = (combat.combatants || []).find((entry) => entry.is_player);
+    if (player) player.hp = Math.min(Number(player.max_hp || player.hp || 0), Number(player.hp || 0) + prevented);
+    const currentHp = Number(spentReaction.worldState.player_stats?.hp || 0);
+    const maxHp = Number(spentReaction.worldState.player_stats?.max_hp || characterSheet.derived_stats?.max_hp || currentHp + prevented);
+    return {
+      handled: true,
+      resolved: true,
+      logType: 'referee_reaction_uncanny_dodge',
+      pendingReaction: { ...pendingReaction, chosen_option: option },
+      worldState: {
+        ...spentReaction.worldState,
+        combat_state: combat,
+        player_stats: { ...(spentReaction.worldState.player_stats || {}), hp: Math.min(maxHp, currentHp + prevented) },
+        pending_reaction: null,
+      },
+      reply: `You spend your **Reaction** for **Uncanny Dodge**, halving the attack's damage from ${damageTaken} to ${Math.floor(damageTaken / 2)}.`,
+    };
+  }
   return unavailableReaction({ worldState, pendingReaction });
+}
+
+function getBardicInspirationDie(characterSheet = {}) {
+  return getCharacterLevel(characterSheet) >= 5 ? 8 : 6;
 }
 
 function spendWeaponReaction({

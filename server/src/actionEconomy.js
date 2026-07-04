@@ -42,8 +42,20 @@ function beginPlayerTurn(worldState = {}, characterSheet = {}) {
     ...worldState,
     combat_state: {
       ...combat,
+      combatants: (combat.combatants || []).map(clearExpiredPlayerTurnConditions),
       turn_resources: buildFreshTurnResources(characterSheet, worldState),
     },
+  };
+}
+
+function clearExpiredPlayerTurnConditions(combatant = {}) {
+  if (!combatant.stunning_strike_until_player_turn) return combatant;
+  return {
+    ...combatant,
+    conditions: (combatant.conditions || []).filter((condition) => !['stunned', 'stunning_strike_slowed', 'stunning_strike_advantage'].includes(condition)),
+    stunning_strike_until_player_turn: undefined,
+    speed_before_stunning_strike: undefined,
+    speed: combatant.speed_before_stunning_strike ?? combatant.speed,
   };
 }
 
@@ -162,6 +174,64 @@ function grantActionSurgeAction(worldState = {}, characterSheet = {}) {
   };
 }
 
+function spendAttackAction(worldState = {}, characterSheet = {}, attack = {}) {
+  if (!worldState.combat_state?.active) return { ok: true, worldState, extraAttack: false };
+
+  const readyState = ensureTurnResources(worldState, characterSheet);
+  const resources = readyState.combat_state.turn_resources;
+  const remaining = Number(resources.attack_action_attacks_remaining || 0);
+  if (remaining > 0) {
+    return {
+      ok: true,
+      extraAttack: true,
+      worldState: {
+        ...readyState,
+        combat_state: {
+          ...readyState.combat_state,
+          turn_resources: {
+            ...resources,
+            attack_action_attacks_remaining: remaining - 1,
+            used: [
+              ...(resources.used || []),
+              { resource: 'extra_attack', label: 'Extra Attack' },
+            ],
+          },
+        },
+      },
+    };
+  }
+
+  const spent = spendTurnResource(readyState, 'action', 'Attack', characterSheet);
+  if (!spent.ok) return spent;
+  const attacksPerAction = getAttacksPerAction(characterSheet, attack);
+  return {
+    ...spent,
+    extraAttack: false,
+    worldState: {
+      ...spent.worldState,
+      combat_state: {
+        ...spent.worldState.combat_state,
+        turn_resources: {
+          ...spent.worldState.combat_state.turn_resources,
+          attack_action_attacks_remaining: Math.max(0, attacksPerAction - 1),
+        },
+      },
+    },
+  };
+}
+
+function getAttacksPerAction(characterSheet = {}, attack = {}) {
+  if (Number(characterSheet.derived_stats?.attacks_per_action || 0) >= 2) return 2;
+  const classId = normalizeId(characterSheet.identity?.class || characterSheet.identity?.class_name);
+  const level = Number(characterSheet.identity?.level || characterSheet.derived_stats?.level || 1);
+  if (level >= 5 && ['barbarian', 'fighter', 'monk', 'paladin', 'ranger'].includes(classId)) return 2;
+  const invocations = [
+    characterSheet.class_choices?.eldritch_invocation,
+    ...(characterSheet.class_choices?.eldritch_invocations || []),
+  ].map(normalizeId);
+  return level >= 5 && invocations.includes('thirsting_blade') && attack.pact_weapon ? 2 : 1;
+}
+
 function spendMovement(worldState = {}, feet, label = 'movement', characterSheet = {}) {
   if (!worldState.combat_state?.active) return { ok: true, worldState };
 
@@ -229,6 +299,46 @@ function grantMovement(worldState = {}, feet, label = 'Dash', characterSheet = {
   };
 }
 
+function grantProtectedMovement(worldState = {}, feet, label = 'protected movement', characterSheet = {}) {
+  if (!worldState.combat_state?.active) return { ok: true, worldState };
+  const readyState = ensureTurnResources(worldState, characterSheet);
+  const resources = readyState.combat_state.turn_resources;
+  const granted = Math.max(0, Number(feet || 0));
+  return {
+    ok: true,
+    worldState: {
+      ...readyState,
+      combat_state: {
+        ...readyState.combat_state,
+        turn_resources: {
+          ...resources,
+          protected_movement_remaining: Number(resources.protected_movement_remaining || 0) + granted,
+          protected_movement_source: label,
+          used: [...(resources.used || []), { resource: 'protected_movement_grant', label, feet: granted }],
+        },
+      },
+    },
+  };
+}
+
+function spendProtectedMovement(worldState = {}, feet = 0) {
+  const resources = worldState.combat_state?.turn_resources || {};
+  const available = Math.max(0, Number(resources.protected_movement_remaining || 0));
+  const spent = Math.min(available, Math.max(0, Number(feet || 0)));
+  if (!spent) return { worldState, spent: 0, source: '' };
+  return {
+    spent,
+    source: resources.protected_movement_source || 'Protected movement',
+    worldState: {
+      ...worldState,
+      combat_state: {
+        ...worldState.combat_state,
+        turn_resources: { ...resources, protected_movement_remaining: available - spent },
+      },
+    },
+  };
+}
+
 function setTurnFlag(worldState = {}, flag, value = true, characterSheet = {}) {
   if (!flag || !worldState.combat_state?.active) return worldState;
 
@@ -271,6 +381,9 @@ function describeAvailableResources(resources = {}) {
   const available = [];
   if (resources.action_available) available.push('Action');
   if (resources.extra_action_available) available.push('Action Surge action');
+  if (Number(resources.attack_action_attacks_remaining || 0) > 0) {
+    available.push(`${Number(resources.attack_action_attacks_remaining)} Extra Attack`);
+  }
   if (resources.bonus_action_available) available.push('Bonus Action');
   if (resources.reaction_available) available.push('Reaction');
   if (Number(resources.movement_remaining || 0) > 0) {
@@ -278,6 +391,9 @@ function describeAvailableResources(resources = {}) {
   }
   if (Number(resources.remarkable_athlete_movement_remaining || 0) > 0) {
     available.push(`${Number(resources.remarkable_athlete_movement_remaining)} ft Remarkable Athlete movement`);
+  }
+  if (Number(resources.protected_movement_remaining || 0) > 0) {
+    available.push(`${Number(resources.protected_movement_remaining)} ft protected movement`);
   }
   return available.length ? available.join(', ') : 'no major combat resources';
 }
@@ -338,9 +454,16 @@ module.exports = {
   describeAvailableResources,
   ensureTurnResources,
   grantActionSurgeAction,
+  grantProtectedMovement,
+  spendAttackAction,
   spendTurnResource,
   spendMovement,
+  spendProtectedMovement,
   grantMovement,
   getSpellActionResource,
   setTurnFlag,
 };
+
+function normalizeId(value = '') {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}

@@ -11,6 +11,7 @@ const {
   ensureTurnResources,
   grantActionSurgeAction,
   grantMovement,
+  spendAttackAction,
   setTurnFlag,
   spendTurnResource,
   spendMovement,
@@ -181,4 +182,32 @@ test('spell casting times map to combat resources', () => {
   assert.equal(getSpellActionResource({ casting_time: 'Bonus Action' }), 'bonus_action');
   assert.equal(getSpellActionResource({ casting_time: 'Reaction' }), 'reaction');
   assert.equal(getSpellActionResource({ casting_time: '1 minute' }), null);
+});
+
+test('level 5 Extra Attack spends one Action across two attacks', () => {
+  const fighter = { identity: { class: 'fighter', level: 5 }, derived_stats: { speed: 30, attacks_per_action: 2 } };
+  const started = beginPlayerTurn(combatWorld(), fighter);
+  const first = spendAttackAction(started, fighter, { name: 'Longsword' });
+  const second = spendAttackAction(first.worldState, fighter, { name: 'Longsword' });
+  const third = spendAttackAction(second.worldState, fighter, { name: 'Longsword' });
+
+  assert.equal(first.ok, true);
+  assert.equal(first.worldState.combat_state.turn_resources.attack_action_attacks_remaining, 1);
+  assert.equal(second.ok, true);
+  assert.equal(second.extraAttack, true);
+  assert.equal(second.worldState.combat_state.turn_resources.attack_action_attacks_remaining, 0);
+  assert.equal(third.ok, false);
+});
+
+test('Thirsting Blade grants Extra Attack only with the pact weapon', () => {
+  const warlock = {
+    identity: { class: 'warlock', level: 5 },
+    class_choices: { eldritch_invocations: ['pact_of_the_blade', 'thirsting_blade'] },
+    derived_stats: { speed: 30 },
+  };
+  const pact = spendAttackAction(beginPlayerTurn(combatWorld(), warlock), warlock, { pact_weapon: true });
+  const ordinary = spendAttackAction(beginPlayerTurn(combatWorld(), warlock), warlock, { pact_weapon: false });
+
+  assert.equal(pact.worldState.combat_state.turn_resources.attack_action_attacks_remaining, 1);
+  assert.equal(ordinary.worldState.combat_state.turn_resources.attack_action_attacks_remaining, 0);
 });

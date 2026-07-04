@@ -1034,7 +1034,7 @@ test('all remaining level 3 classes expose complete choices and apply one cohere
       },
       spellcasting: ['bard', 'cleric', 'druid', 'paladin', 'ranger', 'sorcerer', 'warlock', 'wizard'].includes(classId) ? {
         ability: classId === 'wizard' ? 'int' : ['cleric', 'druid', 'ranger'].includes(classId) ? 'wis' : 'cha',
-        cantrips_known: ['light'],
+        cantrips_known: classId === 'warlock' ? ['eldritch_blast'] : ['light'],
         spells_prepared: ['cure_wounds'],
         always_prepared_spells: classId === 'ranger' ? ['hunter_mark'] : [],
         spellbook_spells: classId === 'wizard' ? ['magic_missile', 'shield'] : undefined,
@@ -1184,7 +1184,7 @@ test('all twelve classes apply one complete level 4 package with ASI and class-t
       },
       spellcasting: ['bard', 'cleric', 'druid', 'paladin', 'ranger', 'sorcerer', 'warlock', 'wizard'].includes(classId) ? {
         ability: primaryAbility,
-        cantrips_known: ['light'],
+        cantrips_known: classId === 'warlock' ? ['eldritch_blast'] : ['light'],
         spells_prepared: ['cure_wounds'],
         spellbook_spells: classId === 'wizard' ? ['magic_missile', 'shield', 'burning_hands', 'misty_step'] : undefined,
         slots: classId === 'warlock' ? { 1: 0, 2: 2 } : { 1: 4, 2: 2 },
@@ -1321,5 +1321,133 @@ test('level 4 resource increases preserve spent uses and add new capacity', () =
 
   assert.equal(result.ok, true);
   assert.equal(result.characterSheet.resources.second_wind.remaining, 2);
+  assert.equal(result.characterSheet.resources.second_wind.max, 3);
+});
+
+function completeLevelFiveChoices(sheet, content) {
+  const choices = {};
+  for (let pass = 0; pass < 8; pass += 1) {
+    const preview = getLevelUpPreview(sheet, content, { choices });
+    for (const choice of preview.requiredChoices.filter((entry) => entry.active && !choices[entry.id])) {
+      const available = choice.options.filter((option) => {
+        const requirement = option.requires_choice;
+        return !requirement || (choices[requirement.choice_id] || []).includes(requirement.option_id);
+      });
+      choices[choice.id] = available.slice(0, Number(choice.count || 0)).map((option) => option.id);
+    }
+  }
+  return choices;
+}
+
+test('all twelve classes apply one coherent level 5 package', () => {
+  const content = getContentBundle();
+  const casterClasses = new Set(['bard', 'cleric', 'druid', 'paladin', 'ranger', 'sorcerer', 'warlock', 'wizard']);
+  const subclasses = {
+    barbarian: 'berserker', bard: 'college_of_lore', cleric: 'life_domain', druid: 'circle_of_the_land',
+    fighter: 'champion', monk: 'warrior_of_the_open_hand', paladin: 'oath_of_devotion', ranger: 'hunter',
+    rogue: 'thief', sorcerer: 'draconic_sorcery', warlock: 'fiend_patron', wizard: 'evoker',
+  };
+  const results = new Map();
+
+  for (const classId of Object.keys(subclasses)) {
+    const isWarlock = classId === 'warlock';
+    const isWizard = classId === 'wizard';
+    const sheet = baseSheet({
+      identity: { class: classId, class_name: classId, subclass: subclasses[classId], level: 4, experience_points: 6500, level_up_available: true },
+      progression: { experience_points: 6500, next_level_xp: 6500 },
+      abilities: {
+        final_scores: { str: 16, dex: 16, con: 14, int: 18, wis: 18, cha: 18 },
+        modifiers: { str: 3, dex: 3, con: 2, int: 4, wis: 4, cha: 4 },
+      },
+      proficiencies: { saving_throws: ['str', 'con'], skills: ['athletics', 'perception'], tools: ['poisoners_kit'], languages: [], armor: [], weapons: ['simple', 'martial'] },
+      class_choices: {
+        subclass: subclasses[classId],
+        ...(classId === 'druid' ? { land_type: 'temperate' } : {}),
+        ...(isWarlock ? { eldritch_invocations: ['pact_of_the_blade', 'armor_of_shadows', 'devils_sight'] } : {}),
+      },
+      class_choice_details: isWarlock ? { pact_of_the_blade: { pact_weapon: 'longsword' } } : {},
+      derived_stats: {
+        level: 4, hp: 30, max_hp: 30, speed: classId === 'monk' ? 40 : 30, proficiency_bonus: 2,
+        skill_modifiers: {}, saving_throw_modifiers: {}, attack_breakdowns: [], spell_attack_bonus: 6, spell_save_dc: 14,
+      },
+      resources: {
+        second_wind: { name: 'Second Wind', remaining: 1, max: 3, reset: 'long_rest', recover_on_short_rest: 1 },
+        focus_points: { name: 'Focus Points', remaining: 2, max: 4, reset: 'short_rest' },
+        lay_on_hands: { name: 'Lay on Hands', remaining: 10, max: 20, reset: 'long_rest' },
+        sorcery_points: { name: 'Sorcery Points', remaining: 2, max: 4, reset: 'long_rest' },
+        spell_uses: classId === 'ranger' ? { 'class_feature:favored_enemy:hunter_mark': { name: "Hunter's Mark", spell_id: 'hunter_mark', remaining: 1, max: 2, reset: 'long_rest' } } : undefined,
+      },
+      spellcasting: casterClasses.has(classId) ? {
+        ability: classId === 'wizard' ? 'int' : ['bard', 'sorcerer', 'warlock'].includes(classId) ? 'cha' : 'wis',
+        cantrips_known: isWarlock ? ['eldritch_blast'] : ['light'],
+        spells_prepared: ['cure_wounds'],
+        always_prepared_spells: [],
+        spellbook_spells: isWizard ? ['magic_missile', 'shield', 'burning_hands', 'misty_step', 'web', 'scorching_ray'] : undefined,
+        slots: isWarlock ? { 1: 0, 2: 1 } : { 1: 2, 2: 1 },
+        slots_max: isWarlock ? { 1: 0, 2: 2 } : { 1: 4, 2: 3 },
+        ...(isWarlock ? { pact_slot_level: 2 } : {}),
+      } : undefined,
+    });
+    const choices = completeLevelFiveChoices(sheet, content);
+    const preview = getLevelUpPreview(sheet, content, { choices });
+    assert.equal(preview.canApply, true, `${classId}: ${preview.blockers.map((entry) => entry.message).join(' | ')}`);
+    const result = applyLevelUp({ characterSheet: sheet, content, payload: { choices } });
+    assert.equal(result.ok, true, classId);
+    assert.equal(result.characterSheet.identity.level, 5, classId);
+    assert.equal(result.characterSheet.derived_stats.proficiency_bonus, 3, classId);
+    assert.equal(result.characterSheet.progression.next_level_xp, 14000, classId);
+    results.set(classId, result.characterSheet);
+  }
+
+  for (const classId of ['barbarian', 'fighter', 'monk', 'paladin', 'ranger']) {
+    assert.equal(results.get(classId).derived_stats.attacks_per_action, 2, classId);
+  }
+  assert.equal(results.get('barbarian').derived_stats.speed, 40);
+  assert.equal(results.get('monk').derived_stats.martial_arts_die, '1d8');
+  assert.equal(results.get('monk').resources.focus_points.remaining, 3);
+  assert.equal(results.get('monk').resources.focus_points.max, 5);
+  assert.equal(results.get('rogue').derived_stats.sneak_attack_dice, '3d6');
+  assert.equal(results.get('sorcerer').resources.sorcery_points.remaining, 3);
+  assert.equal(results.get('sorcerer').resources.sorcery_points.max, 5);
+  assert.equal(results.get('bard').resources.bardic_inspiration.max, 4);
+  assert.equal(results.get('bard').resources.bardic_inspiration.die, '1d8');
+  assert.equal(results.get('paladin').resources.spell_uses['class_feature:faithful_steed:find_steed'].remaining, 1);
+  assert.equal(results.get('ranger').resources.spell_uses['class_feature:favored_enemy:hunter_mark'].remaining, 2);
+  assert.equal(results.get('ranger').resources.spell_uses['class_feature:favored_enemy:hunter_mark'].max, 3);
+  assert.equal(results.get('warlock').spellcasting.pact_slot_level, 3);
+  assert.deepEqual(results.get('warlock').spellcasting.slots, { 1: 0, 2: 0, 3: 1 });
+  assert.equal(results.get('wizard').spellcasting.spellbook_spells.length, 8);
+  assert(results.get('cleric').spellcasting.always_prepared_spells.includes('revivify'));
+  assert(results.get('druid').spellcasting.always_prepared_spells.includes('lightning_bolt'));
+  assert(results.get('sorcerer').spellcasting.always_prepared_spells.includes('fly'));
+  assert(results.get('warlock').spellcasting.always_prepared_spells.includes('fireball'));
+});
+
+test('unsupported level 5 invocations keep the preview honestly gated', () => {
+  const sheet = baseSheet({
+    identity: { class: 'warlock', class_name: 'Warlock', subclass: 'fiend_patron', level: 4, experience_points: 6500 },
+    progression: { experience_points: 6500 },
+    class_choices: { eldritch_invocations: ['pact_of_the_blade', 'armor_of_shadows', 'devils_sight'] },
+    class_choice_details: { pact_of_the_blade: { pact_weapon: 'longsword' } },
+    spellcasting: { ability: 'cha', cantrips_known: ['eldritch_blast'], spells_prepared: ['hex'], slots: { 2: 2 }, slots_max: { 2: 2 }, pact_slot_level: 2 },
+  });
+  const preview = getLevelUpPreview(sheet, getContentBundle(), { choices: {
+    eldritch_invocations: ['eldritch_smite', 'ascendant_step'],
+    prepared_spells: ['fireball'],
+  } });
+
+  assert.equal(preview.canApply, false);
+  assert(preview.blockers.some((entry) => entry.type === 'unsupported_mechanic' && entry.mechanic === 'eldritch_smite'));
+});
+
+test('level 5 preserves spent resources while increasing their capacity', () => {
+  const content = getContentBundle();
+  const fighter = baseSheet({
+    identity: { class: 'fighter', level: 4, experience_points: 6500 }, progression: { experience_points: 6500 },
+    resources: { second_wind: { name: 'Second Wind', remaining: 1, max: 3, reset: 'long_rest', recover_on_short_rest: 1 } },
+  });
+  const result = applyLevelUp({ characterSheet: fighter, content });
+  assert.equal(result.ok, true);
+  assert.equal(result.characterSheet.resources.second_wind.remaining, 1);
   assert.equal(result.characterSheet.resources.second_wind.max, 3);
 });

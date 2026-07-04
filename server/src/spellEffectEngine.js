@@ -43,6 +43,7 @@ const CONCENTRATION_DURATIONS = {
 
 const SPELL_OUTCOMES = {
   chill_touch: { type: 'spell_attack', damage: '1d10', damage_type: 'necrotic' },
+  eldritch_blast: { type: 'multi_spell_attack', attacks: 1, scale_attacks: true, damage: '1d10', damage_type: 'force' },
   fire_bolt: { type: 'spell_attack', damage: '1d10', damage_type: 'fire' },
   guiding_bolt: { type: 'spell_attack', damage: '4d6', damage_type: 'radiant', condition_on_hit: 'guiding_bolt_advantage', rider: 'The next attack against the target has advantage before the end of your next turn.' },
   produce_flame: { type: 'spell_attack', damage: '1d8', damage_type: 'fire' },
@@ -65,6 +66,12 @@ const SPELL_OUTCOMES = {
   suggestion: { type: 'save_effect', save: 'wis', effect: 'The target follows the declared reasonable course of action while the spell lasts.' },
   blindness_deafness: { type: 'save_effect', save: 'con', effect: 'The target suffers the declared Blinded or Deafened condition while the spell lasts.' },
   sleep: { type: 'sleep_pool', dice: '5d8' },
+  fireball: { type: 'saving_throw', save: 'dex', damage: '8d6', damage_type: 'fire', half_on_success: true },
+  lightning_bolt: { type: 'saving_throw', save: 'dex', damage: '8d6', damage_type: 'lightning', half_on_success: true },
+  fear: { type: 'save_effect', save: 'wis', effect: 'The target is Frightened while the spell lasts, repeating saves as the spell allows.' },
+  sleet_storm: { type: 'save_effect', save: 'dex', effect: 'The target falls Prone in the icy, heavily obscured area on a failed save.' },
+  stinking_cloud: { type: 'save_effect', save: 'con', effect: 'The target loses its action retching on a failed save while inside the cloud.' },
+  mass_healing_word: { type: 'healing', healing: '2d4+spell_mod' },
 };
 
 const BONUS_DIE_RULES = {
@@ -258,7 +265,7 @@ function resolveSpellAttack({ spell, rule, known = {}, characterSheet, worldStat
   let outcomeWorldState = lucky.worldState;
 
   if (hit) {
-    const damage = rollFormula(rule.damage, rollDie, { crit: criticalHit, empoweredRerolls: spell.metamagic?.empowered_rerolls });
+    const damage = rollFormula(getScaledCantripDamage(rule.damage, spell, characterSheet), rollDie, { crit: criticalHit, empoweredRerolls: spell.metamagic?.empowered_rerolls });
     const damageType = spell.metamagic?.damage_type || rule.damage_type;
     const applied = applyDamage({ target, amount: damage.total, damageType, source: spell.name });
     Object.assign(target, applied.target);
@@ -307,7 +314,11 @@ function resolveMultiSpellAttack({ spell, rule, known = {}, characterSheet, worl
   const { combat, target, activeCombat } = context;
   const attacker = getPlayerCombatant(combat, characterSheet, worldState);
   const attackBonus = getSpellAttackBonus(characterSheet, known) + getActiveSpellAttackBonus(worldState, characterSheet);
-  const lines = [`You cast **${spell.name}** at ${target.name}, making ${rule.attacks} spell attacks.`];
+  const attackCount = rule.scale_attacks ? getCantripBeamCount(characterSheet) : Number(rule.attacks || 1);
+  const agonizingBonus = hasInvocationForSpell(characterSheet, 'agonizing_blast', spell.id)
+    ? Number(characterSheet.abilities?.modifiers?.cha || 0)
+    : 0;
+  const lines = [`You cast **${spell.name}** at ${target.name}, making ${attackCount} spell attacks.`];
   const conditionMode = getAttackMode({ attacker, target });
   const conditionSources = getAttackModeSources({ attacker, target });
   const activeAdvantageSources = getActiveSpellAttackAdvantageSources(worldState, characterSheet);
@@ -323,7 +334,8 @@ function resolveMultiSpellAttack({ spell, rule, known = {}, characterSheet, worl
   );
   if (advantageMode) lines.push(`Spell attacks have ${advantageMode} from ${formatList(advantageSources)}.`);
   let total = 0;
-  for (let index = 1; index <= Number(rule.attacks || 1); index += 1) {
+  let hitCount = 0;
+  for (let index = 1; index <= attackCount; index += 1) {
     const roll = rollD20WithMode(rollDie, advantageMode);
     const attackTotal = roll.natural + attackBonus;
     const crit = roll.natural === 20;
@@ -333,10 +345,15 @@ function resolveMultiSpellAttack({ spell, rule, known = {}, characterSheet, worl
       continue;
     }
     const damage = rollFormula(rule.damage, rollDie, { crit });
-    const applied = applyDamage({ target, amount: damage.total, damageType: rule.damage_type, source: spell.name });
+    const applied = applyDamage({ target, amount: damage.total + agonizingBonus, damageType: rule.damage_type, source: spell.name });
     Object.assign(target, applied.target);
+    hitCount += 1;
     total += applied.amount;
-    lines.push(`Ray ${index}: ${roll.text}${formatSigned(attackBonus)} = ${attackTotal}; ${crit ? 'Critical hit, ' : ''}${applied.amount} ${rule.damage_type} damage.`);
+    lines.push(`Ray ${index}: ${roll.text}${formatSigned(attackBonus)} = ${attackTotal}; ${crit ? 'Critical hit, ' : ''}${applied.amount} ${rule.damage_type} damage${agonizingBonus ? ` including Agonizing Blast ${formatSigned(agonizingBonus)}` : ''}.`);
+  }
+  if (hitCount && hasInvocationForSpell(characterSheet, 'repelling_blast', spell.id)) {
+    target.forced_movement = { feet: hitCount * 10, direction: 'away_from_player', source: 'Repelling Blast' };
+    lines.push(`**Repelling Blast:** the hits can push ${target.name} up to ${hitCount * 10} feet away, subject to available space.`);
   }
   lines.push(`${target.name}: ${target.hp} HP remaining. Total damage: ${total}.`);
   const blessedState = Number(target.hp || 0) <= 0
@@ -405,7 +422,7 @@ function resolveSavingThrowSpell({ spell, rule, known = {}, characterSheet, worl
   const saveBonus = getTargetSaveBonus(target, rule.save);
   const save = resolveSavingThrow({ target, ability: rule.save, dc, rollDie, bonus: saveBonus, mode: spell.metamagic?.save_disadvantage ? 'disadvantage' : null });
   const success = save.success;
-  const damage = rollFormula(rule.damage, rollDie, { empoweredRerolls: spell.metamagic?.empowered_rerolls });
+  const damage = rollFormula(getScaledCantripDamage(rule.damage, spell, characterSheet), rollDie, { empoweredRerolls: spell.metamagic?.empowered_rerolls });
   const potentCantrip = success && Number(spell.level || 0) === 0 && isEvoker(characterSheet);
   const appliedDamage = success && (rule.half_on_success || potentCantrip) ? Math.floor(damage.total / 2) : success ? 0 : damage.total;
   const damageType = spell.metamagic?.damage_type || rule.damage_type;
@@ -559,6 +576,7 @@ function resolveHealingSpell({ spell, rule, known = {}, characterSheet, worldSta
 }
 
 function resolveUtilitySpell({ spell, worldState, characterSheet = {} }) {
+  if (spell.id === 'find_steed') return resolveFindSteed({ spell, worldState, characterSheet });
   const effectSummary = formatUtilitySpellEffectSummary(spell, worldState);
   const lore = getHuntersLoreText({ spell, worldState, characterSheet });
   const reply = `You cast **${spell.name}**.${effectSummary ? ` ${effectSummary}` : ''} Its effect is now active in the scene: ${spell.description}${lore ? ` ${lore}` : ''}`;
@@ -570,6 +588,38 @@ function resolveUtilitySpell({ spell, worldState, characterSheet = {} }) {
     reply,
     narrationGuidance: buildUtilitySpellNarrationGuidance({ spell, worldState }),
     narrationRequirements: getUtilitySpellNarrationRequirements({ spell, worldState }),
+    consumesTurn: consumesCombatTurn(spell),
+  };
+}
+
+function resolveFindSteed({ spell, worldState, characterSheet = {} }) {
+  const actor = characterSheet.identity?.name || 'the paladin';
+  const companion = {
+    id: 'faithful_steed',
+    name: `${actor}'s Faithful Steed`,
+    source: 'Find Steed',
+    creature_type: 'celestial_fey_or_fiend',
+    present: true,
+  };
+  const companions = [
+    ...(worldState.player_stats?.companions || []).filter((entry) => entry.id !== companion.id),
+    companion,
+  ];
+  const nextState = stripInternalState({
+    ...worldState,
+    player_stats: { ...(worldState.player_stats || {}), companions },
+    scene_presence: {
+      ...(worldState.scene_presence || {}),
+      present_npcs: [...new Set([...(worldState.scene_presence?.present_npcs || []), companion.name])],
+    },
+  });
+  return {
+    handled: true,
+    logType: 'spell_find_steed',
+    spell,
+    worldState: nextState,
+    reply: `You cast **Find Steed**. ${companion.name} appears in the scene as your bonded otherworldly mount and remains until dismissed or replaced.`,
+    narrationGuidance: `Narrate ${companion.name} arriving as a bonded magical mount. Do not invent combat statistics or a map position that the entity layer has not established.`,
     consumesTurn: consumesCombatTurn(spell),
   };
 }
@@ -1700,6 +1750,33 @@ function formatBonusDieTag(bonus = null) {
 function combineAdvantageModes(left = null, right = null) {
   if (left && right && left !== right) return null;
   return left || right || null;
+}
+
+function getScaledCantripDamage(formula = '', spell = {}, characterSheet = {}) {
+  if (Number(spell.level || 0) !== 0 || spell.id === 'eldritch_blast') return formula;
+  const level = Number(characterSheet.identity?.level || characterSheet.derived_stats?.level || 1);
+  const multiplier = level >= 17 ? 4 : level >= 11 ? 3 : level >= 5 ? 2 : 1;
+  return String(formula).replace(/^(\d+)d/i, (_, dice) => `${Number(dice) * multiplier}d`);
+}
+
+function getCantripBeamCount(characterSheet = {}) {
+  const level = Number(characterSheet.identity?.level || characterSheet.derived_stats?.level || 1);
+  return level >= 17 ? 4 : level >= 11 ? 3 : level >= 5 ? 2 : 1;
+}
+
+function hasInvocation(characterSheet = {}, invocationId = '') {
+  const selected = [
+    characterSheet.class_choices?.eldritch_invocation,
+    ...(characterSheet.class_choices?.eldritch_invocations || []),
+  ].map(normalizeName).filter(Boolean);
+  return selected.includes(normalizeName(invocationId));
+}
+
+function hasInvocationForSpell(characterSheet = {}, invocationId = '', spellId = '') {
+  if (!hasInvocation(characterSheet, invocationId)) return false;
+  const selectedCantrip = normalizeName(characterSheet.class_choice_details?.[invocationId]?.cantrip || '');
+  if (selectedCantrip) return selectedCantrip === normalizeName(spellId);
+  return normalizeName(spellId) === 'eldritch blast';
 }
 
 module.exports = {

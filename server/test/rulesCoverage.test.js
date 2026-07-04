@@ -12,7 +12,7 @@ test('builds a machine-readable coverage matrix for all exposed content catalogs
   const content = getContentBundle();
   const matrix = buildRulesCoverageMatrix({ content });
 
-  assert.equal(matrix.version, '4D-level-4');
+  assert.equal(matrix.version, '4D-level-5');
   assert.equal(matrix.sections.classes.entries.length, content.classes.length);
   assert.equal(matrix.sections.subclasses.entries.length, content.subclasses.length);
   assert.equal(matrix.sections.species.entries.length, content.species.length);
@@ -24,6 +24,7 @@ test('builds a machine-readable coverage matrix for all exposed content catalogs
   assert.ok(matrix.sections.resources.entries.length >= 12);
   assert.equal(matrix.sections.weapon_masteries.entries.length, 8);
   assert.equal(matrix.sections.fighting_styles.entries.length, 10);
+  assert.equal(matrix.sections.eldritch_invocations.entries.length, content.eldritchInvocations.length);
   assert.ok(matrix.summary.exposed_total > 0);
 });
 

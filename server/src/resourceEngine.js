@@ -330,6 +330,15 @@ function completeLongRestResources({ characterSheet = {}, worldState = {} } = {}
 function completeShortRestResources({ characterSheet = {}, worldState = {} } = {}) {
   const resources = buildResourceState(characterSheet, worldState);
   const notes = [];
+  const classId = normalizeId(characterSheet.identity?.class || characterSheet.identity?.class_name);
+  const level = getCharacterLevel(characterSheet);
+  if (classId === 'bard' && level >= 5 && resources.bardic_inspiration) {
+    resources.bardic_inspiration = {
+      ...resources.bardic_inspiration,
+      die: '1d8',
+      reset: 'short_rest',
+    };
+  }
   for (const [key, resource] of Object.entries(resources)) {
     if (!isCounterResource(resource)) continue;
     if (resource.reset === 'short_rest') {
@@ -348,6 +357,16 @@ function completeShortRestResources({ characterSheet = {}, worldState = {} } = {
       key,
       resetResourceUse(use, 'short_rest'),
     ]));
+  }
+  if (classId === 'sorcerer' && level >= 5 && resources.sorcerous_restoration && resources.sorcery_points) {
+    const available = Number(resources.sorcerous_restoration.remaining || 0);
+    const missing = Math.max(0, Number(resources.sorcery_points.max || level) - Number(resources.sorcery_points.remaining || 0));
+    const restored = Math.min(2, missing);
+    if (available > 0 && restored > 0) {
+      resources.sorcerous_restoration = { ...resources.sorcerous_restoration, remaining: available - 1 };
+      resources.sorcery_points = { ...resources.sorcery_points, remaining: Number(resources.sorcery_points.remaining || 0) + restored };
+      notes.push(`Sorcerous Restoration recovers ${restored} Sorcery Point${restored === 1 ? '' : 's'}.`);
+    }
   }
   return { resources, notes };
 }
@@ -383,7 +402,12 @@ function applyClassResourceDefaults(resources, characterSheet = {}, worldResourc
   }
   if (classId === 'bard') {
     const max = Math.max(1, Number(abilityMods.cha || 0));
-    defaults.bardic_inspiration = { ...RESOURCE_DEFINITIONS.bardic_inspiration, remaining: max, max };
+    defaults.bardic_inspiration = {
+      ...RESOURCE_DEFINITIONS.bardic_inspiration,
+      remaining: max,
+      max,
+      ...(level >= 5 ? { die: '1d8', reset: 'short_rest' } : {}),
+    };
   }
   if (classId === 'cleric' && level >= 2) defaults.channel_divinity = RESOURCE_DEFINITIONS.channel_divinity;
   if (classId === 'druid' && level >= 2) defaults.wild_shape = RESOURCE_DEFINITIONS.wild_shape;
@@ -394,6 +418,7 @@ function applyClassResourceDefaults(resources, characterSheet = {}, worldResourc
   if (classId === 'sorcerer') {
     defaults.innate_sorcery = RESOURCE_DEFINITIONS.innate_sorcery;
     if (level >= 2) defaults.sorcery_points = { ...RESOURCE_DEFINITIONS.sorcery_points, remaining: level, max: level };
+    if (level >= 5) defaults.sorcerous_restoration = { name: 'Sorcerous Restoration', remaining: 1, max: 1, reset: 'long_rest' };
   }
   if (classId === 'warlock' && level >= 2) defaults.magical_cunning = RESOURCE_DEFINITIONS.magical_cunning;
   if (classId === 'wizard') defaults.arcane_recovery = RESOURCE_DEFINITIONS.arcane_recovery;

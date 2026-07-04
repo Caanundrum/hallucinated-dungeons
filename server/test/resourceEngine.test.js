@@ -300,3 +300,27 @@ test('repairs Forest Gnome Speak with Animals uses on legacy sheets', () => {
   assert.equal(speech.max, 3);
   assert.equal(speech.reset, 'long_rest');
 });
+
+test('level 5 Bardic Inspiration and Sorcerous Restoration use short-rest rules', () => {
+  const bard = {
+    identity: { class: 'bard', level: 5 },
+    abilities: { modifiers: { cha: 4 } },
+    resources: { bardic_inspiration: { name: 'Bardic Inspiration', remaining: 0, max: 4, reset: 'short_rest', die: '1d8' } },
+  };
+  const bardRest = completeShortRestResources({ characterSheet: bard, worldState: { player_stats: { resources: bard.resources } } });
+  assert.equal(bardRest.resources.bardic_inspiration.remaining, 4);
+  assert.equal(bardRest.resources.bardic_inspiration.die, '1d8');
+
+  const sorcerer = {
+    identity: { class: 'sorcerer', level: 5 },
+    resources: {
+      sorcery_points: { name: 'Sorcery Points', remaining: 1, max: 5, reset: 'long_rest' },
+      sorcerous_restoration: { name: 'Sorcerous Restoration', remaining: 1, max: 1, reset: 'long_rest' },
+    },
+  };
+  const first = completeShortRestResources({ characterSheet: sorcerer, worldState: { player_stats: { resources: sorcerer.resources } } });
+  const second = completeShortRestResources({ characterSheet: sorcerer, worldState: { player_stats: { resources: first.resources } } });
+  assert.equal(first.resources.sorcery_points.remaining, 3);
+  assert.equal(first.resources.sorcerous_restoration.remaining, 0);
+  assert.equal(second.resources.sorcery_points.remaining, 3);
+});

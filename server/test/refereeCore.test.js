@@ -1226,6 +1226,84 @@ test('drawing a weapon alone does not conjure combat', () => {
   assert.equal(result, null);
 });
 
+function levelFiveCombatSheet(classId, overrides = {}) {
+  return {
+    identity: { name: 'Ari', class: classId, class_name: classId, level: 5 },
+    abilities: { modifiers: { str: 3, dex: 4, con: 2, wis: 3, cha: 3 } },
+    proficiencies: { tools: ['poisoners_kit'] },
+    equipped: { main_hand: 'shortsword' },
+    resources: {},
+    derived_stats: {
+      hp: 35, max_hp: 35, armor_class: 16, initiative: 4, speed: 30, proficiency_bonus: 3,
+      attacks_per_action: ['fighter', 'monk'].includes(classId) ? 2 : undefined,
+      attack_breakdowns: [{ weapon_id: 'shortsword', name: 'Shortsword', ability: 'dex', attack_total: 7, damage_formula: '1d6+4', damage_type: 'piercing', weapon_category: 'martial', properties: ['finesse', 'light'], isWeapon: true }],
+    },
+    ...overrides,
+  };
+}
+
+function levelFiveCombatState(targetOverrides = {}) {
+  return worldState({
+    player_stats: { hp: 35, max_hp: 35, armor_class: 16, speed: 30 },
+    combat_state: {
+      active: true, round: 1, turn_index: 0,
+      combatants: [
+        { name: 'Ari', initiative: 18, hp: 35, max_hp: 35, ac: 16, is_player: true },
+        { name: 'Ogre', initiative: 8, hp: 60, max_hp: 60, ac: 10, size: 'large', saves: { con: 0, dex: 0 }, conditions: [], is_player: false, ...targetOverrides },
+      ],
+    },
+  });
+}
+
+test('level 5 Fighter makes two attacks with one Attack action', () => {
+  const fighter = levelFiveCombatSheet('fighter');
+  const first = adjudicate({ message: 'I attack the Ogre with my shortsword.', worldState: levelFiveCombatState(), characterSheet: fighter, rollDie: sequenceRolls([15, 3]) });
+  const second = adjudicate({ message: 'I attack the Ogre again with my shortsword.', worldState: first.worldState, characterSheet: fighter, rollDie: sequenceRolls([14, 4]) });
+  const third = adjudicate({ message: 'I attack the Ogre a third time.', worldState: second.worldState, characterSheet: fighter, rollDie: sequenceRolls([20]) });
+
+  assert.equal(first.worldState.combat_state.turn_resources.attack_action_attacks_remaining, 1);
+  assert.match(first.reply, /1 Extra Attack/);
+  assert.equal(second.worldState.combat_state.turn_resources.attack_action_attacks_remaining, 0);
+  assert.match(second.reply, /Hit for/);
+  assert.match(third.reply, /Action is already spent/);
+});
+
+test('level 5 Monk can spend Focus for Stunning Strike on a hit', () => {
+  const monk = levelFiveCombatSheet('monk', {
+    resources: { focus_points: { name: 'Focus Points', remaining: 5, max: 5, reset: 'short_rest' } },
+    derived_stats: {
+      hp: 35, max_hp: 35, armor_class: 16, initiative: 4, speed: 40, proficiency_bonus: 3, attacks_per_action: 2,
+      attack_breakdowns: [{ weapon_id: 'shortsword', name: 'Shortsword', ability: 'dex', attack_total: 7, damage_formula: '1d8+4', damage_type: 'piercing', weapon_category: 'martial', properties: ['finesse', 'light'], isWeapon: true }],
+    },
+  });
+  const result = adjudicate({ message: 'I attack the Ogre with my shortsword and use Stunning Strike if I hit.', worldState: levelFiveCombatState(), characterSheet: monk, rollDie: sequenceRolls([15, 4, 1]) });
+  const ogre = result.worldState.combat_state.combatants.find((entry) => entry.name === 'Ogre');
+
+  assert(ogre.conditions.includes('stunned'));
+  assert.equal(result.worldState.player_stats.resources.focus_points.remaining, 4);
+  assert.match(result.reply, /Stunning Strike/);
+});
+
+test('level 5 Rogue Cunning Strike trades one Sneak Attack die to Trip', () => {
+  const rogue = levelFiveCombatSheet('rogue', {
+    derived_stats: {
+      hp: 35, max_hp: 35, armor_class: 16, initiative: 4, speed: 30, proficiency_bonus: 3, sneak_attack_dice: '3d6',
+      attack_breakdowns: [{ weapon_id: 'shortsword', name: 'Shortsword', ability: 'dex', attack_total: 7, damage_formula: '1d6+4', damage_type: 'piercing', weapon_category: 'martial', properties: ['finesse', 'light'], isWeapon: true }],
+    },
+  });
+  const result = adjudicate({
+    message: 'I attack the Ogre with my shortsword and use Cunning Strike to Trip it.',
+    worldState: levelFiveCombatState({ conditions: ['guiding_bolt_advantage'] }),
+    characterSheet: rogue,
+    rollDie: sequenceRolls([15, 14, 3, 4, 5, 1]),
+  });
+  const ogre = result.worldState.combat_state.combatants.find((entry) => entry.name === 'Ogre');
+
+  assert(ogre.conditions.includes('prone'), result.reply);
+  assert.match(result.reply, /Sneak Attack 2d6/);
+  assert.match(result.reply, /Cunning Strike - Trip/);
+});
+
 test('throw verbs without a known weapon do not become weapon attacks', () => {
   const result = adjudicate({
     message: 'I throw the cultist over the table.',

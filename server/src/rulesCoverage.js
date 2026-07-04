@@ -96,7 +96,7 @@ function buildRulesCoverageMatrix({ content = getContentBundle(), catalog = DEFA
       actions: buildSection('actions', ACTION_ORDER.map((id) => actionEntry(id, catalog))),
       conditions: buildSection('conditions', CORE_CONDITIONS.map((id) => simpleEntry('condition', id, titleCase(id), statusFrom(catalog.conditions?.[id])))),
       resources: buildSection('resources', Object.entries(catalog.resources || {}).map(([id, status]) => simpleEntry('resource', id, titleCase(id), statusFrom(status)))),
-      classes: buildSection('classes', (content.classes || []).map((item) => classEntry(item, catalog))),
+      classes: buildSection('classes', (content.classes || []).map((item) => classEntry(item, catalog, content))),
       subclasses: buildSection('subclasses', (content.subclasses || []).map(subclassEntry)),
       species: buildSection('species', (content.species || []).map((item) => speciesEntry(item, catalog))),
       origin_feats: buildSection('origin_feats', (content.feats || []).map((item) => featEntry(item, catalog))),
@@ -105,6 +105,7 @@ function buildRulesCoverageMatrix({ content = getContentBundle(), catalog = DEFA
       equipment_rules: buildSection('equipment_rules', buildEquipmentRuleEntries(content, catalog)),
       weapon_masteries: buildSection('weapon_masteries', buildWeaponMasteryEntries(catalog)),
       fighting_styles: buildSection('fighting_styles', buildFightingStyleEntries(catalog)),
+      eldritch_invocations: buildSection('eldritch_invocations', (content.eldritchInvocations || []).map(invocationEntry)),
     },
   };
 
@@ -138,13 +139,20 @@ function simpleEntry(category, id, name, status, extra = {}) {
   };
 }
 
-function classEntry(item, catalog) {
-  const featureEntries = (item.class_features || []).map((feature) => {
+function classEntry(item, catalog, content = {}) {
+  const baseFeatures = (item.class_features || []).map((feature) => ({ ...feature, level: 1 }));
+  const advancementFeatures = Object.entries(content.classAdvancement?.levels?.[item.id] || {})
+    .flatMap(([level, advancement]) => (advancement.features || []).map((feature) => ({ ...feature, level: Number(level) })));
+  const featureEntries = [...baseFeatures, ...advancementFeatures].map((feature) => {
     const status = statusFrom(catalog.class_features?.[feature.id]);
-    return simpleEntry('class_feature', feature.id, feature.name, status, {
+    const currentStatus = feature.level > 1 && feature.level <= 5 && !catalog.class_features?.[feature.id]
+      ? STATUS.IMPLEMENTED
+      : status;
+    return simpleEntry('class_feature', feature.id, feature.name, currentStatus, {
       description: feature.description || '',
       parent_id: item.id,
       parent_name: item.name,
+      level: feature.level,
     });
   });
   const status = aggregateStatus(featureEntries);
@@ -158,6 +166,17 @@ function classEntry(item, catalog) {
       spellbook_spells: item.spellcasting.spellbook_spells || 0,
       slots: item.spellcasting.slots || {},
     } : null,
+  });
+}
+
+function invocationEntry(item = {}) {
+  const status = item.implemented === false ? STATUS.DEFERRED : STATUS.IMPLEMENTED;
+  return simpleEntry('eldritch_invocation', item.id, item.name, status, {
+    description: item.description || '',
+    minimum_level: Number(item.minimum_level || 2),
+    implementation: item.implemented === false
+      ? 'The option is visible but mechanically gated until its complete runtime contract exists.'
+      : 'Selection, persistence, sheet context, and the current runtime effect are implemented.',
   });
 }
 

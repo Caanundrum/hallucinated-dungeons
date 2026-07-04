@@ -1,9 +1,11 @@
 const {
   grantMovement,
+  grantProtectedMovement,
   grantActionSurgeAction,
   setTurnFlag,
   spendTurnResource,
 } = require('./actionEconomy');
+const { getContentBundle } = require('./contentData');
 const { rollDie } = require('./dice');
 const {
   buildResourceState,
@@ -42,10 +44,12 @@ function resolveFeatureAction({ message = '', worldState = {}, characterSheet = 
   if (intent.id === 'turn_undead') return resolveTurnUndead({ worldState, characterSheet, rollDie });
   if (intent.id === 'innate_sorcery') return resolveInnateSorcery({ worldState, characterSheet });
   if (intent.id === 'font_of_magic') return resolveFontOfMagic({ message, worldState, characterSheet });
+  if (intent.id === 'font_of_inspiration') return resolveFontOfInspiration({ message, worldState, characterSheet });
   if (intent.id === 'magical_cunning') return resolveMagicalCunning({ worldState, characterSheet });
   if (intent.id === 'pact_of_the_blade') return resolvePactOfTheBlade({ worldState, characterSheet });
   if (intent.id === 'wild_companion') return resolveWildCompanion({ message, worldState, characterSheet });
   if (intent.id === 'wild_shape') return resolveWildShape({ message, worldState, characterSheet });
+  if (intent.id === 'wild_resurgence') return resolveWildResurgence({ message, worldState, characterSheet });
   if (intent.id === 'bardic_inspiration') return resolveBardicInspiration({ message, worldState, characterSheet });
   if (intent.id === 'patient_defense') return resolvePatientDefense({ worldState, characterSheet });
   if (intent.id === 'step_of_the_wind') return resolveStepOfTheWind({ worldState, characterSheet });
@@ -55,6 +59,7 @@ function resolveFeatureAction({ message = '', worldState = {}, characterSheet = 
   if (intent.id === 'lands_aid') return resolveLandsAid({ message, worldState, characterSheet, rollDie });
   if (intent.id === 'divine_sense') return resolveDivineSense({ worldState, characterSheet });
   if (intent.id === 'rest_subclass_choice') return resolveRestSubclassChoice({ message, worldState, characterSheet });
+  if (intent.id === 'memorize_spell') return resolveMemorizeSpell({ message, worldState, characterSheet });
   if (intent.id === 'arcane_recovery') {
     return {
       handled: true,
@@ -79,10 +84,12 @@ function getFeatureIntent(message = '') {
   if (/\bchannel\s+divinity\b/.test(text)) return { id: 'channel_divinity' };
   if (/\binnate\s+sorcery\b/.test(text)) return { id: 'innate_sorcery' };
   if (/\bfont\s+of\s+magic\b|\bconvert\b.*\b(?:sorcery points?|spell slots?)\b|\bcreate\b.*\bspell slot\b.*\bsorcery\b/.test(text)) return { id: 'font_of_magic' };
+  if (/\bfont\s+of\s+inspiration\b|\b(?:restore|regain|recover)\b.*\bbardic\s+inspiration\b.*\bspell\s+slot\b|\bspell\s+slot\b.*\b(?:restore|regain|recover)\b.*\bbardic\s+inspiration\b/.test(text)) return { id: 'font_of_inspiration' };
   if (/\bmagical\s+cunning\b/.test(text)) return { id: 'magical_cunning' };
   if (/\b(?:conjure|summon|create|call|manifest|bind)\b.*\b(?:pact of the blade|pact weapon)\b|\bpact of the blade\b.*\b(?:weapon|conjure|summon|manifest)\b/.test(text)) return { id: 'pact_of_the_blade' };
   if (isWildCompanionDismissal(text)) return { id: 'wild_companion' };
   if (/\bwild\s+companion\b|\bfind\s+familiar\b.*\bwild\s*shape\b|\bwild\s*shape\b.*\bfind\s+familiar\b/.test(text)) return { id: 'wild_companion' };
+  if (/\bwild\s+resurgence\b|\b(?:spell slot|wild shape)\b.*\b(?:restore|regain|recover|exchange|trade)\b.*\b(?:wild shape|spell slot)\b/.test(text)) return { id: 'wild_resurgence' };
   if (/\bwild\s*shape\b|\bshape\s*change\b|\bturn\s+into\s+(?:a|an|the)?\s*(?:wolf|cat|badger|spider|rat|dog|mastiff|goat|boar|scouting beast|[a-z -]*beast)\b/.test(text)) return { id: 'wild_shape' };
   if (/\bbardic\s+inspiration\b/.test(text)) return { id: 'bardic_inspiration' };
   if (/\bpatient\s+defense\b|\bfocus(?:ed)?\s+dodge\b/.test(text)) return { id: 'patient_defense' };
@@ -94,6 +101,7 @@ function getFeatureIntent(message = '') {
   if (/\bdivine\s+sense\b/.test(text)) return { id: 'divine_sense' };
   if (/\b(?:choose|change|switch|attune)\b.*\b(?:arid|polar|temperate|tropical|colossus slayer|horde breaker)\b/.test(text)) return { id: 'rest_subclass_choice' };
   if (/\barcane\s+recovery\b/.test(text)) return { id: 'arcane_recovery' };
+  if (/\bmemorize\s+spell\b|\b(?:prepare|memorize)\b.+\binstead\s+of\b.+\bafter\b.*\brest\b/.test(text)) return { id: 'memorize_spell' };
   return null;
 }
 
@@ -336,12 +344,15 @@ function resolveSecondWind({ worldState = {}, characterSheet = {}, rollDie = def
   const level = getCharacterLevel(characterSheet);
   const healingRoll = rollDamageFormula(`1d10+${level}`, rollDie);
   const healed = healActiveCharacter(spent.worldState, characterSheet, healingRoll.total);
+  const tacticalShift = getCharacterLevel(characterSheet) >= 5
+    ? grantProtectedMovement(healed.worldState, Math.floor(Number(characterSheet.derived_stats?.speed || healed.worldState.player_stats?.speed || 30) / 2), 'Tactical Shift', characterSheet)
+    : { worldState: healed.worldState };
 
   return {
     handled: true,
     logType: 'feature_second_wind',
-    worldState: healed.worldState,
-    reply: `You use **Second Wind** as a Bonus Action and regain ${healed.applied} HP (${healingRoll.rolls.join(' + ')} + ${level}). HP: ${healed.beforeHp} -> ${healed.afterHp}. Uses left: ${remainingResourceText(healed.worldState, characterSheet, 'second_wind')}.`,
+    worldState: tacticalShift.worldState,
+    reply: `You use **Second Wind** as a Bonus Action and regain ${healed.applied} HP (${healingRoll.rolls.join(' + ')} + ${level}). HP: ${healed.beforeHp} -> ${healed.afterHp}. Uses left: ${remainingResourceText(tacticalShift.worldState, characterSheet, 'second_wind')}.${level >= 5 ? ` **Tactical Shift** lets you move up to ${Math.floor(Number(characterSheet.derived_stats?.speed || 30) / 2)} feet without provoking Opportunity Attacks.` : ''}`,
   };
 }
 
@@ -549,9 +560,18 @@ function resolveTurnUndead({ worldState = {}, characterSheet = {}, rollDie = def
       return combatant;
     }
     turnedAny = true;
-    lines.push(`${combatant.name} makes a WIS save: ${save.automaticFailure ? save.text : `${save.text} vs DC ${dc}`}. Save fails; it is **turned** for 1 minute or until damaged.`);
+    let nextCombatant = { ...combatant };
+    let searText = '';
+    if (getCharacterLevel(characterSheet) >= 5) {
+      const dice = Math.max(1, getSpellcastingModifier(characterSheet));
+      const sear = rollDamageFormula(`${dice}d8`, rollDie);
+      const applied = applyDamage({ target: nextCombatant, amount: sear.total, damageType: 'radiant', source: 'Sear Undead' });
+      nextCombatant = applied.target;
+      searText = ` **Sear Undead** deals ${applied.amount} radiant damage (${sear.rolls.join(' + ')}).`;
+    }
+    lines.push(`${combatant.name} makes a WIS save: ${save.automaticFailure ? save.text : `${save.text} vs DC ${dc}`}. Save fails; it is **turned** for 1 minute or until damaged.${searText}`);
     return {
-      ...combatant,
+      ...nextCombatant,
       conditions: addCondition(combatant.conditions, 'turn_undead'),
     };
   });
@@ -1009,6 +1029,7 @@ function resolveBardicInspiration({ message = '', worldState = {}, characterShee
   const spent = spendFeatureCost({ worldState, characterSheet, actionResource: 'bonus_action', actionLabel: 'Bardic Inspiration', resource: 'bardic_inspiration' });
   if (!spent.ok) return spent.result;
 
+  const die = getCharacterLevel(characterSheet) >= 5 ? '1d8' : '1d6';
   const effect = {
     id: `bardic_inspiration_${normalizeId(target)}`,
     name: 'Bardic Inspiration',
@@ -1021,7 +1042,7 @@ function resolveBardicInspiration({ message = '', worldState = {}, characterShee
     remaining_rounds: 600,
     mechanical_effect: 'Another creature can add the Bardic Inspiration die to a failed D20 Test if it can turn the roll into a success.',
     rules_effects: [
-      { target: 'bardic_inspiration_die', die: '1d6', label: 'Bardic Inspiration', target_bound: true },
+      { target: 'bardic_inspiration_die', die, label: 'Bardic Inspiration', target_bound: true },
     ],
   };
   const nextState = addOrReplaceFeatureEffect(spent.worldState, effect, characterSheet);
@@ -1029,8 +1050,79 @@ function resolveBardicInspiration({ message = '', worldState = {}, characterShee
     handled: true,
     logType: 'feature_bardic_inspiration',
     worldState: nextState,
-    reply: `You grant **Bardic Inspiration** to ${target} as a Bonus Action. They carry a d6 that can help a failed d20 test if it is enough to matter. Uses left: ${remainingResourceText(nextState, characterSheet, 'bardic_inspiration')}.`,
+    reply: `You grant **Bardic Inspiration** to ${target} as a Bonus Action. They carry a ${die.slice(1)} that can help a failed d20 test if it is enough to matter. Uses left: ${remainingResourceText(nextState, characterSheet, 'bardic_inspiration')}.`,
   };
+}
+
+function resolveFontOfInspiration({ message = '', worldState = {}, characterSheet = {} } = {}) {
+  if (!isClass(characterSheet, 'bard')) return wrongClass('Font of Inspiration', 'Bard', worldState);
+  if (getCharacterLevel(characterSheet) < 5) return levelRequired('Font of Inspiration', 'Bard', 5, worldState);
+  const resources = buildResourceState(characterSheet, worldState);
+  const inspiration = resources.bardic_inspiration;
+  if (Number(inspiration?.remaining || 0) >= Number(inspiration?.max || 0)) {
+    return { handled: true, logType: 'feature_font_inspiration_full', worldState: mergeWorldResources(worldState, resources), reply: 'Bardic Inspiration is already full, so no spell slot is spent.' };
+  }
+  const slots = { ...(worldState.player_stats?.spell_slots || characterSheet.spellcasting?.slots || {}) };
+  const requestedLevel = Number(String(message).match(/(?:level\s*)?(\d)(?:st|nd|rd|th)?[- ]level\s+spell\s+slot|level\s+(\d)\s+spell\s+slot/i)?.slice(1).find(Boolean) || 0);
+  const slotLevel = requestedLevel || Object.keys(slots).map(Number).filter((level) => Number(slots[level] || 0) > 0).sort((a, b) => a - b)[0];
+  if (!slotLevel || Number(slots[slotLevel] || 0) <= 0) {
+    return { handled: true, logType: 'feature_font_inspiration_no_slot', worldState: mergeWorldResources(worldState, resources), reply: 'Font of Inspiration needs an available spell slot. No Bardic Inspiration or action is changed.' };
+  }
+  const nextResources = { ...resources, bardic_inspiration: { ...inspiration, die: '1d8', reset: 'short_rest', remaining: Number(inspiration.remaining || 0) + 1 } };
+  const nextSlots = { ...slots, [slotLevel]: Number(slots[slotLevel]) - 1 };
+  return {
+    handled: true,
+    logType: 'feature_font_of_inspiration',
+    worldState: mergeWorldResources({ ...worldState, player_stats: { ...(worldState.player_stats || {}), spell_slots: nextSlots } }, nextResources),
+    reply: `You expend one level ${slotLevel} spell slot through **Font of Inspiration** and regain one Bardic Inspiration use. Bardic Inspiration: ${nextResources.bardic_inspiration.remaining}/${nextResources.bardic_inspiration.max}; level ${slotLevel} slots: ${nextSlots[slotLevel]}. No action is required.`,
+  };
+}
+
+function resolveWildResurgence({ message = '', worldState = {}, characterSheet = {} } = {}) {
+  if (!isClass(characterSheet, 'druid')) return wrongClass('Wild Resurgence', 'Druid', worldState);
+  if (getCharacterLevel(characterSheet) < 5) return levelRequired('Wild Resurgence', 'Druid', 5, worldState);
+  const resources = buildResourceState(characterSheet, worldState);
+  const slots = { ...(worldState.player_stats?.spell_slots || characterSheet.spellcasting?.slots || {}) };
+  const wantsSlot = /(?:regain|recover|restore|gain).*(?:spell slot)|wild shape.*(?:for|into|to).*(?:spell slot)/i.test(message);
+  if (wantsSlot) {
+    if (Number(resources.wild_shape?.remaining || 0) <= 0 || Number(resources.wild_resurgence_slot?.remaining || 0) <= 0) {
+      return { handled: true, logType: 'feature_wild_resurgence_unavailable', worldState: mergeWorldResources(worldState, resources), reply: 'Wild Resurgence cannot restore a spell slot right now; it needs one Wild Shape use and its once-per-Long-Rest slot recovery.' };
+    }
+    const max = Number(characterSheet.spellcasting?.slots_max?.['1'] || 0);
+    if (Number(slots['1'] || 0) >= max) return { handled: true, logType: 'feature_wild_resurgence_slot_full', worldState, reply: 'Your level 1 spell slots are already full, so no Wild Shape use is spent.' };
+    const nextResources = {
+      ...resources,
+      wild_shape: { ...resources.wild_shape, remaining: Number(resources.wild_shape.remaining) - 1 },
+      wild_resurgence_slot: { ...resources.wild_resurgence_slot, remaining: Number(resources.wild_resurgence_slot.remaining) - 1 },
+    };
+    return { handled: true, logType: 'feature_wild_resurgence_slot', worldState: mergeWorldResources({ ...worldState, player_stats: { ...(worldState.player_stats || {}), spell_slots: { ...slots, 1: Number(slots['1'] || 0) + 1 } } }, nextResources), reply: `You spend one Wild Shape use through **Wild Resurgence** and regain one level 1 spell slot. Wild Shape: ${nextResources.wild_shape.remaining}/${nextResources.wild_shape.max}.` };
+  }
+  if (Number(resources.wild_shape?.remaining || 0) > 0) return { handled: true, logType: 'feature_wild_resurgence_shape_not_empty', worldState: mergeWorldResources(worldState, resources), reply: 'Wild Resurgence can exchange a spell slot for Wild Shape only when no Wild Shape uses remain. Nothing is spent.' };
+  const slotLevel = Object.keys(slots).map(Number).filter((level) => Number(slots[level] || 0) > 0).sort((a, b) => a - b)[0];
+  if (!slotLevel) return { handled: true, logType: 'feature_wild_resurgence_no_slot', worldState, reply: 'No spell slot is available to exchange for Wild Shape.' };
+  const nextResources = { ...resources, wild_shape: { ...resources.wild_shape, remaining: 1 } };
+  return { handled: true, logType: 'feature_wild_resurgence_shape', worldState: mergeWorldResources({ ...worldState, player_stats: { ...(worldState.player_stats || {}), spell_slots: { ...slots, [slotLevel]: Number(slots[slotLevel]) - 1 } } }, nextResources), reply: `You expend one level ${slotLevel} spell slot through **Wild Resurgence** and regain one Wild Shape use. No action is required.` };
+}
+
+function resolveMemorizeSpell({ message = '', worldState = {}, characterSheet = {} } = {}) {
+  if (!isClass(characterSheet, 'wizard')) return wrongClass('Memorize Spell', 'Wizard', worldState);
+  if (getCharacterLevel(characterSheet) < 5) return levelRequired('Memorize Spell', 'Wizard', 5, worldState);
+  if (worldState.combat_state?.active) return { handled: true, logType: 'feature_memorize_spell_combat', worldState, reply: 'Memorize Spell requires the calm after a Short Rest, not an initiative count with projectiles.' };
+  if (!/after a (?:short|long) rest/i.test(String(worldState.time_state?.scene_time || ''))) return { handled: true, logType: 'feature_memorize_spell_rest_required', worldState, reply: 'Finish a Short Rest first, then name the spell to prepare and the prepared spell it replaces.' };
+  const content = getContentBundle();
+  const text = String(message || '');
+  const match = text.match(/(?:prepare|memorize)\s+(.+?)\s+instead\s+of\s+(.+?)(?:[.!]|\s+after\b|$)/i);
+  const findSpell = (name) => (content.spells || []).find((spell) => normalizeId(spell.name) === normalizeId(name) || normalizeId(spell.id) === normalizeId(name));
+  const incoming = findSpell(match?.[1]);
+  const outgoing = findSpell(match?.[2]);
+  const spellbook = (characterSheet.spellcasting?.spellbook_spells || []).map(normalizeId);
+  const prepared = (characterSheet.spellcasting?.spells_prepared || []).map(normalizeId);
+  if (!incoming || !outgoing || !spellbook.includes(normalizeId(incoming.id)) || !prepared.includes(normalizeId(outgoing.id)) || Number(incoming.level || 0) < 1) {
+    return { handled: true, logType: 'feature_memorize_spell_invalid', worldState, reply: 'Memorize Spell needs one level 1+ spell from your spellbook and one currently prepared Wizard spell to replace. Name both clearly.' };
+  }
+  const nextPrepared = prepared.map((id) => id === normalizeId(outgoing.id) ? incoming.id : id);
+  const nextSheet = { ...characterSheet, spellcasting: { ...(characterSheet.spellcasting || {}), spells_prepared: [...new Set(nextPrepared)] } };
+  return { handled: true, logType: 'feature_memorize_spell', worldState, characterSheet: nextSheet, reply: `After the rest, **Memorize Spell** replaces ${outgoing.name} with ${incoming.name} in your prepared spells.` };
 }
 
 function resolvePatientDefense({ worldState = {}, characterSheet = {} } = {}) {
