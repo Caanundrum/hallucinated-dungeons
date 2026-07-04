@@ -2223,3 +2223,38 @@ Coverage judgment:
 Non-blocking observation:
 
 - Asking the GM in natural language to award XP produced `The Game Master encountered an error. Please try again.` The dedicated QA level-up endpoint worked. This does not invalidate Level 4, but unsupported XP-award narration should ideally fail gracefully instead of returning a generic GM error.
+
+## 2026-07-04 - Level 5 Production Verification
+
+Target implementation: `fe1c4f5` (`Implement complete level 5 progression`)
+
+Deployed backend release: `dde6ea202f363717ccbc8cdb0a95f4b5be12a6fa`
+
+Result: **Automated all-class PASS; live production Rogue PASS; live all-class verification BLOCKED by fixture state.**
+
+Automated gate:
+
+- Server tests: `649/649` pass.
+- The suite includes `all twelve classes apply one coherent level 5 package` plus Level 5 feature, resource, Extra Attack, reaction, spell-scaling, Pact-slot, and invocation coverage.
+- Client lint: pass.
+- Client production build: pass.
+- `git diff --check fe1c4f5^ fe1c4f5`: pass.
+
+Live production (`QA Rogue`, Human Rogue/Thief):
+
+- Advanced through the real Level 4-to-5 modal with no blockers.
+- Preview correctly showed HP `+7`, PB `+2 -> +3`, Sneak Attack `3d6`, Cunning Strike, and Uncanny Dodge.
+- Saved sheet correctly showed Level 5, XP `6500/14000`, HP preserved/increased from `15/31` to `22/38`, and PB `+3`.
+- Derived values recalculated correctly: attacks `+7`, proficient saves `+7/+4`, expertise `+10`, and other proficient skills increased with PB.
+- Browser warning/error log remained empty.
+
+Production fixture limitation:
+
+- Only `QA Rogue` was Level 4 and directly ready for a Level 5 production pass.
+- Existing Bard, Cleric, Druid, Fighter, Monk, Paladin, Ranger, Sorcerer, Warlock, and Wizard fixtures are Level 2 or 3 and require one or more earlier level-up flows first.
+- No Barbarian fixture is present in the production roster.
+- Therefore QA has **not** live-tested every class at Level 5. Automated coverage covers all twelve classes, but must not be represented as twelve live production passes.
+
+Recommended QA enablement:
+
+- Provide one Level 4 production QA fixture per class, or a protected QA-only seed/reset operation that creates known Level 4 class sheets. This allows all-class live verification without mutating historical fixtures through several unrelated levels before each release check.
