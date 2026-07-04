@@ -2192,3 +2192,34 @@ No immediate red flags found for:
 - raw markdown HTML injection
 
 The client uses `react-markdown`, which should escape raw HTML by default. Session tokens are stored in `localStorage`; acceptable for this app shape, but worth keeping in mind for future XSS hardening.
+
+## 2026-07-03 - Level 4 Production Verification
+
+Target commit: `542f7c7` (`Implement complete level 4 progression`)
+
+Result: **PASS for release continuation.**
+
+Automated gate:
+
+- Server tests: `630/630` pass.
+- Client lint: pass.
+- Client production build: pass.
+- `git diff --check 542f7c7^ 542f7c7`: pass.
+
+Live production vertical test (`QA Rogue`, Human Rogue/Thief):
+
+- QA level-up setup correctly exposed Level 4 at `2700/2700` XP.
+- Level Up modal blocked application until a feat and required subchoices were selected.
+- Ability Score Improvement correctly changed its preview after selecting `Increase One Score by 2`.
+- DEX correctly previewed `16 -> 18` and enabled `Apply Level Up` only after selection.
+- Saved sheet showed Level 4, XP `2700/6500`, and HP preserved as `15/31` after max HP increased by 7.
+- Derived values recalculated correctly: DEX `18 (+4)`, AC `15`, initiative `+4`, DEX save `+6`, Shortsword hit `+6` / damage `+4`, Dagger hit `+6` / damage `+4`, and DEX expertise skills `+8`.
+
+Coverage judgment:
+
+- The complete class/feat matrix and Grappler cross-engine behavior are covered by the passing 630-test server suite.
+- Production was intentionally sampled through the highest-risk shared path (ASI plus derived-stat recalculation) instead of mutating all twelve production characters through nearly identical Level 4 screens.
+
+Non-blocking observation:
+
+- Asking the GM in natural language to award XP produced `The Game Master encountered an error. Please try again.` The dedicated QA level-up endpoint worked. This does not invalidate Level 4, but unsupported XP-award narration should ideally fail gracefully instead of returning a generic GM error.
