@@ -7,22 +7,27 @@ function rollDamageFormula(formula = '1d6', rollDie = defaultRollDie, { crit = f
     .replace(/\s+/g, '')
     .replace(/spell_mod_min_1/g, String(Math.max(1, Number(spellMod || 0))))
     .replace(/spell_mod/g, String(spellMod));
-  const match = normalized.match(/(\d+)d(\d+)((?:[+-]\d+)*)/i);
-  if (!match) return { total: Number(normalized) || 0, rolls: [], modifier: 0 };
+  const terms = normalized.match(/[+-]?[^+-]+/g) || [];
+  const diceTerms = terms
+    .map((term) => ({ sign: term.startsWith('-') ? -1 : 1, match: term.replace(/^[+-]/, '').match(/^(\d+)d(\d+)$/i) }))
+    .filter((term) => term.match);
+  if (!diceTerms.length) return { total: Number(normalized) || 0, rolls: [], modifier: 0 };
 
-  const diceCount = Number(match[1]);
-  const dieSides = Number(match[2]);
-  const modifierText = match[3] || '';
-  const modifier = (modifierText.match(/[+-]\d+/g) || [])
+  const modifier = terms
+    .filter((term) => !/d/i.test(term))
     .reduce((sum, value) => sum + Number(value), 0);
-  const rollCount = crit ? diceCount * 2 : diceCount;
   const rerolls = [];
-  const rolls = Array.from({ length: rollCount }, () => {
-    const first = rollDie(dieSides);
-    if (!rerollOnes || first !== 1) return first;
-    const replacement = rollDie(dieSides);
-    rerolls.push({ from: first, to: replacement });
-    return replacement;
+  const rolls = diceTerms.flatMap(({ sign, match }) => {
+    const diceCount = Number(match[1]);
+    const dieSides = Number(match[2]);
+    const rollCount = crit ? diceCount * 2 : diceCount;
+    return Array.from({ length: rollCount }, () => {
+      const first = rollDie(dieSides);
+      if (!rerollOnes || first !== 1) return first * sign;
+      const replacement = rollDie(dieSides);
+      rerolls.push({ from: first, to: replacement });
+      return replacement * sign;
+    });
   });
   const adjustedRolls = minimumDieRoll
     ? rolls.map((roll) => Math.max(Number(minimumDieRoll), roll))

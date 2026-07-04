@@ -26,7 +26,7 @@ const content = {
   languages: readJson('languages.json'),
   tools: readJson('tools.json'),
   equipment: readJson('equipment.json'),
-  spells: readJson('spells.json'),
+  spells: [...readJson('spells.json'), ...readJson('spells_level_4_5.json')],
   feats: readJson('feats.json'),
   subclasses: readJson('subclasses.json'),
   eldritchInvocations: readJson('eldritch_invocations.json'),
@@ -36,6 +36,7 @@ const content = {
     readJson('level_3_advancement.json'),
     readJson('level_4_advancement.json'),
     readJson('level_5_advancement.json'),
+    require('../data/level_6_10_advancement'),
   ),
   itemEffects: readJson('item_effects.json'),
   abilityScoreMethods: [

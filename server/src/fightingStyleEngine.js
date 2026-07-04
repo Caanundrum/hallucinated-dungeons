@@ -7,7 +7,18 @@ const {
 } = require('./damageHealingEngine');
 
 function getFightingStyle(characterSheet = {}) {
-  return normalizeId(characterSheet.class_choices?.fighting_style);
+  return getFightingStyles(characterSheet)[0] || '';
+}
+
+function getFightingStyles(characterSheet = {}) {
+  return [...new Set([
+    normalizeId(characterSheet.class_choices?.fighting_style),
+    ...((characterSheet.class_choices?.additional_fighting_styles || []).map(normalizeId)),
+  ].filter(Boolean))];
+}
+
+function hasFightingStyle(characterSheet = {}, styleId = '') {
+  return getFightingStyles(characterSheet).includes(normalizeId(styleId));
 }
 
 function getFightingStyleArmorBonus({ styleId, wearingArmor = false } = {}) {
@@ -20,7 +31,7 @@ function getFightingStyleAttackBonus({ styleId, attack = {} } = {}) {
 
 function getRuntimeArmorClass({ characterSheet = {}, armorClass = null, defenseApplied = false } = {}) {
   const numericArmorClass = Number(armorClass ?? characterSheet.derived_stats?.armor_class ?? 10);
-  const hasDefense = getFightingStyle(characterSheet) === 'defense';
+  const hasDefense = hasFightingStyle(characterSheet, 'defense');
   const wearingArmor = Boolean(characterSheet.equipped?.armor);
   const sheetIncludesDefense = (characterSheet.derived_stats?.armor_class_breakdown || [])
     .some((entry) => entry.label === 'Defense Fighting Style');
@@ -33,18 +44,17 @@ function getRuntimeArmorClass({ characterSheet = {}, armorClass = null, defenseA
 }
 
 function getFightingStyleDamageBonus({ characterSheet = {}, attack = {}, message = '' } = {}) {
-  const styleId = getFightingStyle(characterSheet);
-  if (styleId === 'dueling' && isDuelingAttack({ characterSheet, attack, message })) {
+  if (hasFightingStyle(characterSheet, 'dueling') && isDuelingAttack({ characterSheet, attack, message })) {
     return { total: 2, label: 'Dueling' };
   }
-  if (styleId === 'thrown_weapon_fighting' && isThrownAttack(attack, message)) {
+  if (hasFightingStyle(characterSheet, 'thrown_weapon_fighting') && isThrownAttack(attack, message)) {
     return { total: 2, label: 'Thrown Weapon Fighting' };
   }
   return { total: 0, label: null };
 }
 
 function getFightingStyleSenses(characterSheet = {}) {
-  return getFightingStyle(characterSheet) === 'blind_fighting'
+  return hasFightingStyle(characterSheet, 'blind_fighting')
     ? [{ type: 'blindsight', range_feet: 10, source: 'Blind Fighting' }]
     : [];
 }
@@ -56,7 +66,7 @@ function getBlindFightingAttackOptions({
   target = {},
   spatialMode = null,
 } = {}) {
-  if (getFightingStyle(characterSheet) !== 'blind_fighting') return emptyAttackOptions();
+  if (!hasFightingStyle(characterSheet, 'blind_fighting')) return emptyAttackOptions();
   if (!isWithinBlindFightingRange({ attack, attacker, target, spatialMode })) return emptyAttackOptions();
 
   const attackerConditions = normalizeConditionSet(attacker.conditions);
@@ -74,11 +84,12 @@ function getBlindFightingAttackOptions({
 }
 
 function applyFightingStyleToAttack({ characterSheet = {}, attack = {}, message = '' } = {}) {
-  const styleId = getFightingStyle(characterSheet);
-  const expectedAttackBonus = getFightingStyleAttackBonus({ styleId, attack });
+  const expectedAttackBonus = hasFightingStyle(characterSheet, 'archery')
+    ? getFightingStyleAttackBonus({ styleId: 'archery', attack })
+    : 0;
   const includedAttackBonus = Number(attack.fightingStyleAttackBonus || 0);
   const bonusToApply = Math.max(0, expectedAttackBonus - includedAttackBonus);
-  const greatWeaponFighting = styleId === 'great_weapon_fighting' && isHeldWithTwoHands(attack, message, characterSheet);
+  const greatWeaponFighting = hasFightingStyle(characterSheet, 'great_weapon_fighting') && isHeldWithTwoHands(attack, message, characterSheet);
   return {
     ...attack,
     attackBonus: Number(attack.attackBonus || 0) + bonusToApply,
@@ -88,7 +99,7 @@ function applyFightingStyleToAttack({ characterSheet = {}, attack = {}, message 
 }
 
 function buildUnarmedFightingAttack({ characterSheet = {}, proficiency = 0 } = {}) {
-  if (getFightingStyle(characterSheet) !== 'unarmed_fighting') return null;
+  if (!hasFightingStyle(characterSheet, 'unarmed_fighting')) return null;
   const modifier = Number(characterSheet.abilities?.modifiers?.str || 0);
   const die = hasHeldWeaponOrShield(characterSheet) ? '1d6' : '1d8';
   return {
@@ -104,7 +115,7 @@ function buildUnarmedFightingAttack({ characterSheet = {}, proficiency = 0 } = {
 }
 
 function applyUnarmedFightingStartTurnDamage({ worldState = {}, characterSheet = {}, rollDie = defaultRollDie } = {}) {
-  if (getFightingStyle(characterSheet) !== 'unarmed_fighting' || !worldState.combat_state?.active) {
+  if (!hasFightingStyle(characterSheet, 'unarmed_fighting') || !worldState.combat_state?.active) {
     return { worldState, lines: [] };
   }
 
@@ -212,6 +223,8 @@ module.exports = {
   buildUnarmedFightingAttack,
   getBlindFightingAttackOptions,
   getFightingStyle,
+  getFightingStyles,
+  hasFightingStyle,
   getFightingStyleArmorBonus,
   getFightingStyleAttackBonus,
   getFightingStyleDamageBonus,

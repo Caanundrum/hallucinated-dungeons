@@ -72,6 +72,17 @@ const SPELL_OUTCOMES = {
   sleet_storm: { type: 'save_effect', save: 'dex', effect: 'The target falls Prone in the icy, heavily obscured area on a failed save.' },
   stinking_cloud: { type: 'save_effect', save: 'con', effect: 'The target loses its action retching on a failed save while inside the cloud.' },
   mass_healing_word: { type: 'healing', healing: '2d4+spell_mod' },
+  blight: { type: 'saving_throw', save: 'con', damage: '8d8', damage_type: 'necrotic', half_on_success: true },
+  ice_storm: { type: 'saving_throw', save: 'dex', damage: '2d8+4d6', damage_type: 'cold', half_on_success: true },
+  vitriolic_sphere: { type: 'saving_throw', save: 'dex', damage: '10d4', damage_type: 'acid', half_on_success: true },
+  cone_of_cold: { type: 'saving_throw', save: 'con', damage: '8d8', damage_type: 'cold', half_on_success: true },
+  flame_strike: { type: 'saving_throw', save: 'dex', damage: '10d6', damage_type: 'radiant', half_on_success: true },
+  insect_plague: { type: 'saving_throw', save: 'con', damage: '4d10', damage_type: 'piercing', half_on_success: true },
+  mass_cure_wounds: { type: 'healing', healing: '5d8+spell_mod' },
+  banishment: { type: 'save_effect', save: 'cha', effect: 'The target is banished to a harmless demiplane while the spell lasts.' },
+  charm_monster: { type: 'save_effect', save: 'wis', effect: 'The creature is Charmed by you while the spell lasts.' },
+  hold_monster: { type: 'save_effect', save: 'wis', effect: 'The creature is Paralyzed while the spell lasts, repeating the save at the end of each turn.' },
+  polymorph: { type: 'save_effect', save: 'wis', effect: 'The target assumes the declared eligible Beast form while the spell lasts.' },
 };
 
 const BONUS_DIE_RULES = {
@@ -189,7 +200,7 @@ function resolveSpellOutcome({ spellCast, characterSheet, worldState = {}, rollD
     return resolveMultiSpellAttack({ spell, rule, known, characterSheet, worldState: stateWithMessage, rollDie });
   }
   if (rule.type === 'automatic_damage') {
-    return resolveAutomaticDamageSpell({ spell, rule, worldState: stateWithMessage, rollDie });
+    return resolveAutomaticDamageSpell({ spell, rule, characterSheet, worldState: stateWithMessage, rollDie });
   }
   if (rule.type === 'saving_throw') {
     return resolveSavingThrowSpell({ spell, rule, known, characterSheet, worldState: stateWithMessage, rollDie });
@@ -267,9 +278,10 @@ function resolveSpellAttack({ spell, rule, known = {}, characterSheet, worldStat
   if (hit) {
     const damage = rollFormula(getScaledCantripDamage(rule.damage, spell, characterSheet), rollDie, { crit: criticalHit, empoweredRerolls: spell.metamagic?.empowered_rerolls });
     const damageType = spell.metamagic?.damage_type || rule.damage_type;
-    const applied = applyDamage({ target, amount: damage.total, damageType, source: spell.name });
+    const featureBonus = getSpellFeatureDamageBonus({ spell, characterSheet, damageType });
+    const applied = applyDamage({ target, amount: damage.total + featureBonus.amount, damageType, source: spell.name });
     Object.assign(target, applied.target);
-    lines.push(`${criticalHit ? '**Critical hit.** ' : ''}Hit for ${applied.amount} ${damageType} damage${formatDamageAdjustment(applied.adjustment)}. ${target.name}: (${applied.beforeHp} -> ${target.hp} HP).`);
+    lines.push(`${criticalHit ? '**Critical hit.** ' : ''}Hit for ${applied.amount} ${damageType} damage${featureBonus.amount ? ` including ${featureBonus.label} ${formatSigned(featureBonus.amount)}` : ''}${formatDamageAdjustment(applied.adjustment)}. ${target.name}: (${applied.beforeHp} -> ${target.hp} HP).`);
     const ancestry = applyGiantAncestryOnHit({
       message: worldState.__spell_message,
       target,
@@ -335,6 +347,7 @@ function resolveMultiSpellAttack({ spell, rule, known = {}, characterSheet, worl
   if (advantageMode) lines.push(`Spell attacks have ${advantageMode} from ${formatList(advantageSources)}.`);
   let total = 0;
   let hitCount = 0;
+  let featureBonusApplied = false;
   for (let index = 1; index <= attackCount; index += 1) {
     const roll = rollD20WithMode(rollDie, advantageMode);
     const attackTotal = roll.natural + attackBonus;
@@ -345,9 +358,11 @@ function resolveMultiSpellAttack({ spell, rule, known = {}, characterSheet, worl
       continue;
     }
     const damage = rollFormula(rule.damage, rollDie, { crit });
-    const applied = applyDamage({ target, amount: damage.total + agonizingBonus, damageType: rule.damage_type, source: spell.name });
+    const featureBonus = featureBonusApplied ? { amount: 0, label: '' } : getSpellFeatureDamageBonus({ spell, characterSheet, damageType: rule.damage_type });
+    const applied = applyDamage({ target, amount: damage.total + agonizingBonus + featureBonus.amount, damageType: rule.damage_type, source: spell.name });
     Object.assign(target, applied.target);
     hitCount += 1;
+    featureBonusApplied ||= featureBonus.amount > 0;
     total += applied.amount;
     lines.push(`Ray ${index}: ${roll.text}${formatSigned(attackBonus)} = ${attackTotal}; ${crit ? 'Critical hit, ' : ''}${applied.amount} ${rule.damage_type} damage${agonizingBonus ? ` including Agonizing Blast ${formatSigned(agonizingBonus)}` : ''}.`);
   }
@@ -378,7 +393,7 @@ function getPotentCantripMissDamage({ spell = {}, rule = {}, characterSheet = {}
   return { ...applied, amount: applied.amount };
 }
 
-function resolveAutomaticDamageSpell({ spell, rule, worldState, rollDie }) {
+function resolveAutomaticDamageSpell({ spell, rule, characterSheet, worldState, rollDie }) {
   const context = getSpellTargetContext({ spell, spellCastMessage: worldState.__spell_message, worldState });
   if (!context?.target) return noSpellTarget(worldState, spell);
   const { combat, target, activeCombat } = context;
@@ -387,11 +402,12 @@ function resolveAutomaticDamageSpell({ spell, rule, worldState, rollDie }) {
   if (spell.metamagic?.empowered_rerolls) {
     rolls = empowerAutomaticDamageRolls(rolls, rule.damage, spell.metamagic.empowered_rerolls, rollDie);
   }
-  const total = rolls.reduce((sum, roll) => sum + roll.total, 0);
+  const featureBonus = getSpellFeatureDamageBonus({ spell, characterSheet, damageType: rule.damage_type });
+  const total = rolls.reduce((sum, roll) => sum + roll.total, 0) + featureBonus.amount;
   const applied = applyDamage({ target, amount: total, damageType: rule.damage_type, source: spell.name });
   Object.assign(target, applied.target);
   const lines = [
-    `You cast **${spell.name}** at ${target.name}. The spell hits automatically for ${applied.amount} ${rule.damage_type} damage${formatDamageAdjustment(applied.adjustment)}. ${target.name}: (${applied.beforeHp} -> ${target.hp} HP).`,
+    `You cast **${spell.name}** at ${target.name}. The spell hits automatically for ${applied.amount} ${rule.damage_type} damage${featureBonus.amount ? ` including ${featureBonus.label} ${formatSigned(featureBonus.amount)}` : ''}${formatDamageAdjustment(applied.adjustment)}. ${target.name}: (${applied.beforeHp} -> ${target.hp} HP).`,
   ];
 
   return finishSpellAction({ spell, worldState, combat, lines, activeCombat });
@@ -424,8 +440,10 @@ function resolveSavingThrowSpell({ spell, rule, known = {}, characterSheet, worl
   const success = save.success;
   const damage = rollFormula(getScaledCantripDamage(rule.damage, spell, characterSheet), rollDie, { empoweredRerolls: spell.metamagic?.empowered_rerolls });
   const potentCantrip = success && Number(spell.level || 0) === 0 && isEvoker(characterSheet);
-  const appliedDamage = success && (rule.half_on_success || potentCantrip) ? Math.floor(damage.total / 2) : success ? 0 : damage.total;
   const damageType = spell.metamagic?.damage_type || rule.damage_type;
+  const featureBonus = getSpellFeatureDamageBonus({ spell, characterSheet, damageType });
+  const fullDamage = damage.total + featureBonus.amount;
+  const appliedDamage = success && (rule.half_on_success || potentCantrip) ? Math.floor(fullDamage / 2) : success ? 0 : fullDamage;
   const applied = applyDamage({ target, amount: appliedDamage, damageType, source: spell.name });
   Object.assign(target, applied.target);
 
@@ -436,6 +454,7 @@ function resolveSavingThrowSpell({ spell, rule, known = {}, characterSheet, worl
       : `Save fails. ${target.name} takes ${applied.amount} ${damageType} damage${formatDamageAdjustment(applied.adjustment)}. ${target.name}: (${applied.beforeHp} -> ${target.hp} HP).`,
   ];
   if (dcBonus) lines.push(`Spell save DC includes ${formatSigned(dcBonus)} from ${formatList(getActiveSpellSaveDcSources(worldState, characterSheet))}.`);
+  if (featureBonus.amount) lines.push(`${featureBonus.label} adds ${formatSigned(featureBonus.amount)} to one damage roll.`);
 
   return finishSpellAction({ spell, worldState, combat, lines, activeCombat });
 }
@@ -564,7 +583,6 @@ function resolveHealingSpell({ spell, rule, known = {}, characterSheet, worldSta
   const lines = [
     `You cast **${spell.name}** and restore ${healing.total + discipleBonus} HP${discipleBonus ? `, including +${discipleBonus} from **Disciple of Life**` : ''}. HP: (${healed.beforeHp} -> ${healed.afterHp}).`,
   ];
-
   return {
     handled: true,
     logType: 'spell_healing',
@@ -573,6 +591,28 @@ function resolveHealingSpell({ spell, rule, known = {}, characterSheet, worldSta
     reply: lines.join('\n\n'),
     consumesTurn: consumesCombatTurn(spell),
   };
+}
+
+function getSpellFeatureDamageBonus({ spell = {}, characterSheet = {}, damageType = '' } = {}) {
+  const level = getCharacterLevel(characterSheet);
+  const classId = normalizeId(characterSheet.identity?.class);
+  const spellClasses = new Set((spell.classes || []).map(normalizeId));
+  if (classId === 'sorcerer' && level >= 6) {
+    const affinity = normalizeId(characterSheet.class_choices?.draconic_affinity);
+    if (affinity && affinity === normalizeId(damageType)) {
+      return { amount: Number(characterSheet.abilities?.modifiers?.cha || 0), label: 'Elemental Affinity' };
+    }
+  }
+  if (Number(spell.level || 0) === 0 && classId === 'cleric' && level >= 7 && characterSheet.class_choices?.blessed_strikes === 'potent_spellcasting' && spellClasses.has('cleric')) {
+    return { amount: Number(characterSheet.abilities?.modifiers?.wis || 0), label: 'Potent Spellcasting' };
+  }
+  if (Number(spell.level || 0) === 0 && classId === 'druid' && level >= 7 && characterSheet.class_choices?.elemental_fury === 'potent_spellcasting' && spellClasses.has('druid')) {
+    return { amount: Number(characterSheet.abilities?.modifiers?.wis || 0), label: 'Potent Spellcasting' };
+  }
+  if (classId === 'wizard' && level >= 10 && isEvoker(characterSheet) && normalizeId(spell.school) === 'evocation') {
+    return { amount: Number(characterSheet.abilities?.modifiers?.int || 0), label: 'Empowered Evocation' };
+  }
+  return { amount: 0, label: '' };
 }
 
 function resolveUtilitySpell({ spell, worldState, characterSheet = {} }) {
@@ -943,6 +983,10 @@ function normalizeName(value) {
   return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
+function normalizeId(value) {
+  return normalizeName(value).replace(/\s+/g, '_');
+}
+
 function normalizeComparableId(value) {
   return normalizeName(value).replace(/\s+/g, '');
 }
@@ -1232,6 +1276,10 @@ function getSpellSaveDc(characterSheet = {}, known = {}) {
 function getProficiencyBonus(characterSheet = {}) {
   const level = Number(characterSheet.identity?.level || characterSheet.derived_stats?.level || 1);
   return Number(characterSheet.derived_stats?.proficiency_bonus || Math.floor((level - 1) / 4) + 2);
+}
+
+function getCharacterLevel(characterSheet = {}) {
+  return Number(characterSheet.identity?.level || characterSheet.derived_stats?.level || 1);
 }
 
 function consumesCombatTurn(spell = {}) {

@@ -87,3 +87,9 @@ test('damage formulas can treat low weapon dice as a minimum value', () => {
   assert.deepEqual(result.rolls, [3, 3]);
   assert.equal(result.total, 9);
 });
+
+test('damage formulas roll every dice group in a mixed expression', () => {
+  const result = rollDamageFormula('2d8+4d6+3', sequenceRolls([5, 6, 1, 2, 3, 4]));
+  assert.deepEqual(result.rolls, [5, 6, 1, 2, 3, 4]);
+  assert.equal(result.total, 24);
+});

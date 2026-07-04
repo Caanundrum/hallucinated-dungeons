@@ -36,6 +36,9 @@ function summarizeCharacterSheetForRules(characterSheet) {
   if ((characterSheet.resistances || []).length) {
     lines.push(`Damage resistances: ${characterSheet.resistances.join(', ')}`);
   }
+  if ((characterSheet.condition_immunities || []).length) {
+    lines.push(`Condition immunities: ${characterSheet.condition_immunities.join(', ')}`);
+  }
   const speciesChoices = formatSpeciesChoices(characterSheet.species_choices);
   if (speciesChoices) lines.push(`Species choices: ${speciesChoices}`);
   if ((characterSheet.species_spells || []).length) {

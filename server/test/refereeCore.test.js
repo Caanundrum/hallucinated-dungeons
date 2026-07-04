@@ -2838,6 +2838,34 @@ test('Arcane Recovery restores an expended level 1 wizard slot during a short re
   assert.match(result.reply, /Arcane Recovery restores one expended level 1 spell slot/);
 });
 
+test('Natural Recovery restores Druid slots up to half level on a short rest', () => {
+  const result = adjudicate({
+    message: 'We take a short rest.',
+    worldState: worldState({
+      player_stats: {
+        hp: 20,
+        max_hp: 20,
+        armor_class: 14,
+        spell_slots: { 1: 2, 2: 1, 3: 1 },
+        resources: {
+          natural_recovery: { name: 'Natural Recovery', remaining: 1, max: 1, reset: 'long_rest' },
+        },
+      },
+    }),
+    characterSheet: {
+      identity: { name: 'Moss', class: 'druid', class_name: 'Druid', level: 6 },
+      abilities: { modifiers: { con: 2, wis: 4 } },
+      derived_stats: { hp: 20, max_hp: 20, armor_class: 14 },
+      spellcasting: { ability: 'wis', slots_max: { 1: 4, 2: 3, 3: 3 }, slots: { 1: 2, 2: 1, 3: 1 } },
+      resources: {},
+    },
+  });
+
+  assert.equal(result.worldState.player_stats.spell_slots[3], 2);
+  assert.equal(result.worldState.player_stats.resources.natural_recovery.remaining, 0);
+  assert.match(result.reply, /Natural Recovery restores one level 3 slot/);
+});
+
 test('rogue Sneak Attack adds damage when a finesse attack has advantage', () => {
   const result = adjudicate({
     message: 'I attack the goblin.',

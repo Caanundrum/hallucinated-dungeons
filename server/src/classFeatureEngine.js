@@ -51,7 +51,7 @@ function resolveFeatureAction({ message = '', worldState = {}, characterSheet = 
   if (intent.id === 'wild_shape') return resolveWildShape({ message, worldState, characterSheet });
   if (intent.id === 'wild_resurgence') return resolveWildResurgence({ message, worldState, characterSheet });
   if (intent.id === 'bardic_inspiration') return resolveBardicInspiration({ message, worldState, characterSheet });
-  if (intent.id === 'patient_defense') return resolvePatientDefense({ worldState, characterSheet });
+  if (intent.id === 'patient_defense') return resolvePatientDefense({ worldState, characterSheet, rollDie });
   if (intent.id === 'step_of_the_wind') return resolveStepOfTheWind({ worldState, characterSheet });
   if (intent.id === 'uncanny_metabolism') return resolveUncannyMetabolism({ worldState, characterSheet, rollDie });
   if (intent.id === 'steady_aim') return resolveSteadyAim({ worldState, characterSheet });
@@ -60,6 +60,10 @@ function resolveFeatureAction({ message = '', worldState = {}, characterSheet = 
   if (intent.id === 'divine_sense') return resolveDivineSense({ worldState, characterSheet });
   if (intent.id === 'rest_subclass_choice') return resolveRestSubclassChoice({ message, worldState, characterSheet });
   if (intent.id === 'memorize_spell') return resolveMemorizeSpell({ message, worldState, characterSheet });
+  if (intent.id === 'wholeness_of_body') return resolveWholenessOfBody({ worldState, characterSheet, rollDie });
+  if (intent.id === 'tireless') return resolveTireless({ worldState, characterSheet, rollDie });
+  if (intent.id === 'abjure_foes') return resolveAbjureFoes({ worldState, characterSheet, rollDie });
+  if (intent.id === 'contact_patron') return resolveContactPatron({ worldState, characterSheet });
   if (intent.id === 'arcane_recovery') {
     return {
       handled: true,
@@ -99,6 +103,10 @@ function getFeatureIntent(message = '') {
   if (/\bpreserve\s+life\b/.test(text)) return { id: 'preserve_life' };
   if (/\bland['’]?s\s+aid\b|\blands\s+aid\b/.test(text)) return { id: 'lands_aid' };
   if (/\bdivine\s+sense\b/.test(text)) return { id: 'divine_sense' };
+  if (/\bwholeness\s+of\s+body\b/.test(text)) return { id: 'wholeness_of_body' };
+  if (/\btireless\b/.test(text) && /\b(?:use|activate|temporary|temp|hit points?|stamina)\b/.test(text)) return { id: 'tireless' };
+  if (/\babjure\s+foes\b/.test(text)) return { id: 'abjure_foes' };
+  if (/\bcontact\s+(?:my\s+)?patron\b/.test(text)) return { id: 'contact_patron' };
   if (/\b(?:choose|change|switch|attune)\b.*\b(?:arid|polar|temperate|tropical|colossus slayer|horde breaker)\b/.test(text)) return { id: 'rest_subclass_choice' };
   if (/\barcane\s+recovery\b/.test(text)) return { id: 'arcane_recovery' };
   if (/\bmemorize\s+spell\b|\b(?:prepare|memorize)\b.+\binstead\s+of\b.+\bafter\b.*\brest\b/.test(text)) return { id: 'memorize_spell' };
@@ -313,16 +321,22 @@ function resolveRage({ worldState = {}, characterSheet = {} } = {}) {
       { target: 'damage_resistance', damage_types: ['bludgeoning', 'piercing', 'slashing'], label: 'Rage' },
       { target: 'ability_check_advantage', ability: 'str', label: 'Rage' },
       { target: 'saving_throw_advantage', ability: 'str', label: 'Rage' },
-      { target: 'weapon_damage_bonus', value: 2, ability: 'str', label: 'Rage' },
+      { target: 'weapon_damage_bonus', value: Number(characterSheet.derived_stats?.rage_damage_bonus || 2), ability: 'str', label: 'Rage' },
     ],
   };
-  const nextState = addOrReplaceFeatureEffect(spent.worldState, effect, characterSheet);
+  let nextState = addOrReplaceFeatureEffect(spent.worldState, effect, characterSheet);
+  const level = getCharacterLevel(characterSheet);
+  if (level >= 6) nextState = clearPlayerConditions(nextState, ['charmed', 'frightened']);
+  if (level >= 7 && nextState.combat_state?.active) {
+    const pounce = grantMovement(nextState, Math.floor(Number(characterSheet.derived_stats?.speed || 30) / 2), 'Instinctive Pounce', characterSheet);
+    nextState = pounce.worldState;
+  }
 
   return {
     handled: true,
     logType: 'feature_rage',
     worldState: nextState,
-    reply: `You enter **Rage** as a Bonus Action. You gain physical damage resistance, Strength advantage, and +2 damage on Strength-based weapon attacks while it lasts. Rage uses left: ${remainingResourceText(nextState, characterSheet, 'rage')}.`,
+    reply: `You enter **Rage** as a Bonus Action. You gain physical damage resistance, Strength advantage, and +${Number(characterSheet.derived_stats?.rage_damage_bonus || 2)} damage on Strength-based weapon attacks while it lasts.${level >= 6 ? ' Mindless Rage clears Charmed and Frightened and keeps them off while the Rage lasts.' : ''}${level >= 7 && nextState.combat_state?.active ? ' Instinctive Pounce grants movement up to half your Speed.' : ''} Rage uses left: ${remainingResourceText(nextState, characterSheet, 'rage')}.`,
   };
 }
 
@@ -1125,7 +1139,60 @@ function resolveMemorizeSpell({ message = '', worldState = {}, characterSheet = 
   return { handled: true, logType: 'feature_memorize_spell', worldState, characterSheet: nextSheet, reply: `After the rest, **Memorize Spell** replaces ${outgoing.name} with ${incoming.name} in your prepared spells.` };
 }
 
-function resolvePatientDefense({ worldState = {}, characterSheet = {} } = {}) {
+function resolveWholenessOfBody({ worldState = {}, characterSheet = {}, rollDie = defaultRollDie } = {}) {
+  if (!isClass(characterSheet, 'monk')) return wrongClass('Wholeness of Body', 'Monk', worldState);
+  if (getCharacterLevel(characterSheet) < 6) return levelRequired('Wholeness of Body', 'Open Hand Monk', 6, worldState);
+  if (getMissingHp(worldState, characterSheet) <= 0) {
+    return { handled: true, logType: 'feature_wholeness_full_hp', worldState: mergeWorldResources(worldState, buildResourceState(characterSheet, worldState)), reply: 'Wholeness of Body is not spent at full HP.' };
+  }
+  const spent = spendFeatureCost({ worldState, characterSheet, actionResource: 'bonus_action', actionLabel: 'Wholeness of Body', resource: 'wholeness_of_body' });
+  if (!spent.ok) return spent.result;
+  const die = Number(String(characterSheet.derived_stats?.martial_arts_die || '1d8').match(/d(\d+)/)?.[1] || 8);
+  const wisdom = Number(characterSheet.abilities?.modifiers?.wis || 0);
+  const healed = healActiveCharacter(spent.worldState, characterSheet, rollDie(die) + wisdom);
+  return { handled: true, logType: 'feature_wholeness_of_body', worldState: healed.worldState, reply: `You use **Wholeness of Body** as a Bonus Action and regain ${healed.applied} HP. Uses left: ${remainingResourceText(healed.worldState, characterSheet, 'wholeness_of_body')}.` };
+}
+
+function resolveTireless({ worldState = {}, characterSheet = {}, rollDie = defaultRollDie } = {}) {
+  if (!isClass(characterSheet, 'ranger')) return wrongClass('Tireless', 'Ranger', worldState);
+  if (getCharacterLevel(characterSheet) < 10) return levelRequired('Tireless', 'Ranger', 10, worldState);
+  const spent = spendFeatureCost({ worldState, characterSheet, actionResource: 'action', actionLabel: 'Tireless', resource: 'tireless' });
+  if (!spent.ok) return spent.result;
+  const amount = Math.max(1, rollDie(8) + Number(characterSheet.abilities?.modifiers?.wis || 0));
+  const current = Number(spent.worldState.player_stats?.temp_hp || 0);
+  const nextState = { ...spent.worldState, player_stats: { ...(spent.worldState.player_stats || {}), temp_hp: Math.max(current, amount) } };
+  return { handled: true, logType: 'feature_tireless', worldState: nextState, reply: `You use **Tireless** as a Magic action and gain ${Math.max(current, amount)} temporary HP. Uses left: ${remainingResourceText(nextState, characterSheet, 'tireless')}.` };
+}
+
+function resolveAbjureFoes({ worldState = {}, characterSheet = {}, rollDie = defaultRollDie } = {}) {
+  if (!isClass(characterSheet, 'paladin')) return wrongClass('Abjure Foes', 'Paladin', worldState);
+  if (getCharacterLevel(characterSheet) < 9) return levelRequired('Abjure Foes', 'Paladin', 9, worldState);
+  const combat = cloneCombat(worldState.combat_state || {});
+  const targets = (combat.combatants || []).filter((entry) => !entry.is_player && Number(entry.hp || 0) > 0)
+    .slice(0, Math.max(1, Number(characterSheet.abilities?.modifiers?.cha || 0)));
+  if (!targets.length) return { handled: true, logType: 'feature_abjure_foes_no_targets', worldState, reply: 'Abjure Foes needs at least one established hostile creature. No Channel Divinity is spent.' };
+  const spent = spendFeatureCost({ worldState, characterSheet, actionResource: 'action', actionLabel: 'Abjure Foes', resource: 'channel_divinity' });
+  if (!spent.ok) return spent.result;
+  const dc = getSpellSaveDc(characterSheet);
+  const lines = [];
+  for (const target of targets) {
+    const save = resolveSavingThrow({ target, ability: 'wis', dc, bonus: Number(target.saves?.wis || 0), rollDie });
+    if (!save.success) target.conditions = addCondition(target.conditions, 'frightened');
+    lines.push(`${target.name} ${save.success ? 'resists' : 'is Frightened'} (${save.text} vs DC ${dc}).`);
+  }
+  const nextState = { ...spent.worldState, combat_state: { ...combat, active: spent.worldState.combat_state?.active || false } };
+  return { handled: true, logType: 'feature_abjure_foes', worldState: nextState, reply: `You use **Abjure Foes**, spending Channel Divinity. ${lines.join(' ')} Channel Divinity left: ${remainingResourceText(nextState, characterSheet, 'channel_divinity')}.` };
+}
+
+function resolveContactPatron({ worldState = {}, characterSheet = {} } = {}) {
+  if (!isClass(characterSheet, 'warlock')) return wrongClass('Contact Patron', 'Warlock', worldState);
+  if (getCharacterLevel(characterSheet) < 9) return levelRequired('Contact Patron', 'Warlock', 9, worldState);
+  const spent = spendFeatureCost({ worldState, characterSheet, actionResource: 'action', actionLabel: 'Contact Patron', resource: 'contact_patron' });
+  if (!spent.ok) return spent.result;
+  return { handled: true, logType: 'feature_contact_patron', worldState: spent.worldState, reply: `You use **Contact Patron** and cast Contact Other Plane without a spell slot. The feature automatically succeeds on the spell's saving throw; your patron is now reachable for the scene's question and answer. Uses left: ${remainingResourceText(spent.worldState, characterSheet, 'contact_patron')}.` };
+}
+
+function resolvePatientDefense({ worldState = {}, characterSheet = {}, rollDie = defaultRollDie } = {}) {
   const requirement = requireMonkFocus('Patient Defense', worldState, characterSheet);
   if (requirement) return requirement;
 
@@ -1138,12 +1205,18 @@ function resolvePatientDefense({ worldState = {}, characterSheet = {} } = {}) {
   });
   if (!spent.ok) return spent.result;
 
-  const dodging = setTurnFlag(spent.worldState, 'dodging', true, characterSheet);
+  let dodging = setTurnFlag(spent.worldState, 'dodging', true, characterSheet);
+  let heightenedNote = '';
+  if (getCharacterLevel(characterSheet) >= 10) {
+    const temp = rollDamageFormula('2d8', rollDie).total;
+    dodging = { ...dodging, player_stats: { ...(dodging.player_stats || {}), temp_hp: Math.max(Number(dodging.player_stats?.temp_hp || 0), temp) } };
+    heightenedNote = ` Heightened Focus grants ${temp} temporary HP.`;
+  }
   return {
     handled: true,
     logType: 'feature_patient_defense',
     worldState: dodging,
-    reply: `You spend 1 Focus Point for **Patient Defense** and take the Dodge action as a Bonus Action. Focus Points left: ${remainingResourceText(dodging, characterSheet, 'focus_points')}.`,
+    reply: `You spend 1 Focus Point for **Patient Defense** and take the Dodge action as a Bonus Action.${heightenedNote} Focus Points left: ${remainingResourceText(dodging, characterSheet, 'focus_points')}.`,
   };
 }
 
@@ -1167,7 +1240,7 @@ function resolveStepOfTheWind({ worldState = {}, characterSheet = {} } = {}) {
     handled: true,
     logType: 'feature_step_of_the_wind',
     worldState: dashed.worldState,
-    reply: `You spend 1 Focus Point for **Step of the Wind**. As a Bonus Action, you Dash and Disengage; your jump distance is doubled for the turn. Focus Points left: ${remainingResourceText(dashed.worldState, characterSheet, 'focus_points')}.`,
+    reply: `You spend 1 Focus Point for **Step of the Wind**. As a Bonus Action, you Dash and Disengage; your jump distance is doubled for the turn.${getCharacterLevel(characterSheet) >= 10 ? ' Heightened Focus also lets you carry one willing Large-or-smaller creature beside you without provoking Opportunity Attacks.' : ''} Focus Points left: ${remainingResourceText(dashed.worldState, characterSheet, 'focus_points')}.`,
   };
 }
 
@@ -1613,6 +1686,21 @@ function cleanTargetName(value = '') {
 
 function addCondition(conditions = [], condition) {
   return [...new Set([...(conditions || []), condition].filter(Boolean))];
+}
+
+function clearPlayerConditions(worldState = {}, conditions = []) {
+  const blocked = new Set(conditions.map(normalizeId));
+  const combat = cloneCombat(worldState.combat_state || {});
+  const player = (combat.combatants || []).find((entry) => entry.is_player);
+  if (player) player.conditions = (player.conditions || []).filter((entry) => !blocked.has(normalizeId(entry)));
+  return {
+    ...worldState,
+    combat_state: worldState.combat_state ? combat : worldState.combat_state,
+    player_stats: {
+      ...(worldState.player_stats || {}),
+      conditions: (worldState.player_stats?.conditions || []).filter((entry) => !blocked.has(normalizeId(entry))),
+    },
+  };
 }
 
 function getSpellcastingModifier(characterSheet = {}) {

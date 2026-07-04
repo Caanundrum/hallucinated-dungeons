@@ -66,6 +66,7 @@ const {
   getSubclassD20AdvantageSources,
   getWeaponCriticalThreshold,
   grantRemarkableAthleteMovement,
+  isChampion,
   isThief,
   isDevotionPaladin,
   isFiendWarlock,
@@ -165,6 +166,10 @@ function adjudicate({ message, worldState = {}, characterSheet = null, currentTu
   const state = normalizeWorldState(worldState);
   const intent = resolveIntent(text, { worldState: state });
   const sheet = characterSheet || {};
+
+  if (state.pending_midlevel_roll_feature) {
+    return resolvePendingMidlevelRollFeature({ message: text, worldState: state, characterSheet: sheet, rollDie });
+  }
 
   if (state.pending_tactical_mind) {
     return resolvePendingTacticalMind({ message: text, worldState: state, characterSheet: sheet, rollDie });
@@ -647,7 +652,11 @@ function resolvePendingRoll({ message, worldState, characterSheet, rollDie }) {
     };
   }
 
-  const result = rollPendingRequest(pending, rollDie);
+  const result = applyReliableTalent({
+    result: rollPendingRequest(pending, rollDie),
+    pending,
+    characterSheet,
+  });
 
   if (pending.kind === 'initiative') {
     return resolveInitiative({ pending, result, worldState, characterSheet, rollDie });
@@ -687,6 +696,21 @@ function rollPendingRequest(pending = {}, rollDie = defaultRollDie) {
   });
 }
 
+function applyReliableTalent({ result, pending = {}, characterSheet = {} } = {}) {
+  if (normalizeId(characterSheet.identity?.class) !== 'rogue' || getCharacterLevel(characterSheet) < 7) return result;
+  if (pending.kind !== 'skill_check' || Number(result?.natural || 0) >= 10) return result;
+  const skill = characterSheet.derived_stats?.skill_modifiers?.[normalizeId(pending.skill)];
+  if (!skill?.proficient) return result;
+  const increase = 10 - Number(result.natural || 0);
+  return {
+    ...result,
+    natural: 10,
+    total: Number(result.total || 0) + increase,
+    rollText: `${Number(result.total || 0) + increase} (${result.rollText}; Reliable Talent treats the d20 as 10)`,
+    reliableTalent: { original: result.natural, treatedAs: 10 },
+  };
+}
+
 function remindPendingRoll({ worldState }) {
   const pending = worldState.pending_roll;
   const tag = rollTagForPending(pending);
@@ -711,6 +735,15 @@ function resolveCheckRoll({ pending, result, worldState, characterSheet }) {
     nextState = consumeActiveEffects(nextState, resolvedPending.bonus_effect_ids, characterSheet);
   }
 
+  const midlevelFeature = maybePromptMidlevelRollFeature({
+    pending: resolvedPending,
+    result,
+    outcome,
+    worldState: nextState,
+    characterSheet,
+  });
+  if (midlevelFeature) return midlevelFeature;
+
   const tacticalMind = maybePromptTacticalMind({
     pending: resolvedPending,
     result,
@@ -727,6 +760,70 @@ function resolveCheckRoll({ pending, result, worldState, characterSheet }) {
     worldState: nextState,
     characterSheet,
   });
+}
+
+function maybePromptMidlevelRollFeature({ pending, result, outcome, worldState, characterSheet }) {
+  if (!['failure', 'near_miss'].includes(outcome)) return null;
+  const classId = normalizeId(characterSheet.identity?.class);
+  const level = getCharacterLevel(characterSheet);
+  const resources = buildResourceState(characterSheet, worldState);
+  let feature = null;
+  if (classId === 'fighter' && level >= 9 && pending.kind === 'saving_throw' && Number(resources.indomitable?.remaining || 0) > 0) {
+    feature = { id: 'indomitable', name: 'Indomitable', resource: 'indomitable' };
+  } else if (classId === 'warlock' && level >= 6 && ['skill_check', 'ability_check', 'saving_throw'].includes(pending.kind) && Number(resources.dark_ones_own_luck?.remaining || 0) > 0) {
+    feature = { id: 'dark_ones_own_luck', name: "Dark One's Own Luck", resource: 'dark_ones_own_luck' };
+  } else if (classId === 'bard' && level >= 7 && pending.kind === 'saving_throw' && /\b(?:charm|charmed|frighten|frightened|fear)\b/i.test(`${pending.intent || ''} ${pending.label || ''}`)) {
+    feature = { id: 'countercharm', name: 'Countercharm', actionResource: 'reaction' };
+  }
+  if (!feature) return null;
+  return {
+    handled: true,
+    logType: `referee_${feature.id}_prompt`,
+    worldState: { ...worldState, pending_midlevel_roll_feature: { feature, pending, result, outcome } },
+    reply: `${buildCheckResolutionLine(pending, result, outcome)}\n\n**${feature.name} is available.** Say **use ${feature.name}** or **decline ${feature.name}** before the result takes effect.`,
+  };
+}
+
+function resolvePendingMidlevelRollFeature({ message, worldState, characterSheet, rollDie = defaultRollDie }) {
+  const choice = worldState.pending_midlevel_roll_feature;
+  if (!choice?.feature || !choice.pending || !choice.result) return null;
+  const text = String(message || '').toLowerCase();
+  const decline = /\b(?:decline|skip|no|not now|save it|do not use|don't use|dont use)\b/.test(text);
+  const use = /\b(?:use|spend|apply|try)\b/.test(text);
+  if (!decline && !use) {
+    return { handled: true, logType: `referee_${choice.feature.id}_choice_required`, worldState, reply: `Choose **use ${choice.feature.name}** or **decline ${choice.feature.name}**.` };
+  }
+  let nextState = { ...worldState, pending_midlevel_roll_feature: null };
+  if (decline) {
+    return finalizeCheckResolution({ pending: choice.pending, result: choice.result, outcome: choice.outcome, worldState: nextState, characterSheet });
+  }
+  const spent = choice.feature.actionResource
+    ? spendTurnResource(nextState, choice.feature.actionResource, choice.feature.name, characterSheet)
+    : spendResource({ worldState: nextState, characterSheet, resource: choice.feature.resource });
+  if (!spent.ok) {
+    return finalizeCheckResolution({ pending: choice.pending, result: choice.result, outcome: choice.outcome, worldState: nextState, characterSheet });
+  }
+  nextState = spent.worldState;
+  let result;
+  let featureLine;
+  if (choice.feature.id === 'indomitable') {
+    const reroll = rollPendingRequest(choice.pending, rollDie);
+    const fighterBonus = getCharacterLevel(characterSheet);
+    result = { ...reroll, total: reroll.total + fighterBonus, rollText: `${reroll.total + fighterBonus} (${reroll.rollText}; Indomitable +${fighterBonus})` };
+    featureLine = `**Indomitable:** reroll ${reroll.rollText}, plus Fighter level ${fighterBonus}.`;
+  } else if (choice.feature.id === 'dark_ones_own_luck') {
+    const bonus = rollDie(10);
+    result = { ...choice.result, total: choice.result.total + bonus, rollText: `${choice.result.total + bonus} (${choice.result.rollText}; Dark One's Own Luck 1d10=${bonus})` };
+    featureLine = `**Dark One's Own Luck:** 1d10 = ${bonus}.`;
+  } else {
+    result = rollPendingRequest({ ...choice.pending, advantage_mode: 'advantage' }, rollDie);
+    featureLine = `**Countercharm:** you spend your Reaction and reroll the save with Advantage.`;
+  }
+  const margin = Number(result.total || 0) - Number(choice.pending.dc || DEFAULT_CHECK_DC);
+  const outcome = getRollOutcome({ pending: choice.pending, margin });
+  const finalized = finalizeCheckResolution({ pending: choice.pending, result, outcome, worldState: nextState, characterSheet });
+  const usesLine = choice.feature.resource ? ` Uses left: ${Number(spent.resources[choice.feature.resource]?.remaining || 0)}.` : '';
+  return { ...finalized, logType: `referee_${choice.feature.id}_resolution`, reply: `${featureLine}${usesLine}\n\n${finalized.reply}` };
 }
 
 function finalizeCheckResolution({ pending, result, outcome, worldState, characterSheet }) {
@@ -1480,11 +1577,17 @@ function completeShortRest(worldState, characterSheet = {}, rollDie = defaultRol
     ? getMaxSpellSlots(characterSheet)
     : worldState.player_stats?.spell_slots;
   const arcaneRecovery = applyArcaneRecovery({ characterSheet, worldState, resources: resourceResult.resources, spellSlots: nextSlots });
-  resourceResult = {
+  const naturalRecovery = applyNaturalRecovery({
+    characterSheet,
+    worldState,
     resources: arcaneRecovery.resources,
-    notes: [...resourceResult.notes, ...arcaneRecovery.notes],
+    spellSlots: arcaneRecovery.spellSlots,
+  });
+  resourceResult = {
+    resources: naturalRecovery.resources,
+    notes: [...resourceResult.notes, ...arcaneRecovery.notes, ...naturalRecovery.notes],
   };
-  nextSlots = arcaneRecovery.spellSlots;
+  nextSlots = naturalRecovery.spellSlots;
   const hitDice = getHitDiceState(characterSheet, worldState);
   const maxHp = Number(characterSheet?.derived_stats?.max_hp ?? worldState.player_stats?.max_hp ?? worldState.player_stats?.hp ?? 1);
   let hp = Number(worldState.player_stats?.hp ?? characterSheet?.derived_stats?.hp ?? maxHp);
@@ -1555,6 +1658,34 @@ function applyArcaneRecovery({ characterSheet = {}, worldState = {}, resources =
       1: Math.min(maxFirstLevel, currentFirstLevel + 1),
     },
     notes: ['Arcane Recovery restores one expended level 1 spell slot.'],
+  };
+}
+
+function applyNaturalRecovery({ characterSheet = {}, worldState = {}, resources = {}, spellSlots = {} } = {}) {
+  if (normalizeTargetPhrase(characterSheet.identity?.class) !== 'druid' || getCharacterLevel(characterSheet) < 6) {
+    return { resources, spellSlots, notes: [] };
+  }
+  const recovery = resources.natural_recovery;
+  if (!recovery || Number(recovery.remaining || 0) <= 0) return { resources, spellSlots, notes: [] };
+  const maxSlots = getMaxSpellSlots(characterSheet);
+  const currentSlots = { ...(spellSlots || worldState.player_stats?.spell_slots || {}) };
+  let budget = Math.ceil(getCharacterLevel(characterSheet) / 2);
+  const restored = [];
+  for (let slotLevel = Math.min(5, budget); slotLevel >= 1; slotLevel -= 1) {
+    const max = Number(maxSlots[slotLevel] || 0);
+    let current = Number(currentSlots[slotLevel] || 0);
+    while (budget >= slotLevel && current < max) {
+      current += 1;
+      budget -= slotLevel;
+      restored.push(slotLevel);
+    }
+    currentSlots[slotLevel] = current;
+  }
+  if (!restored.length) return { resources, spellSlots: currentSlots, notes: [] };
+  return {
+    resources: { ...resources, natural_recovery: { ...recovery, remaining: Number(recovery.remaining) - 1 } },
+    spellSlots: currentSlots,
+    notes: [`Natural Recovery restores ${restored.map((level) => `one level ${level} slot`).join(' and ')}.`],
   };
 }
 
@@ -1665,7 +1796,7 @@ function resolveInitiative({ pending, result, worldState, characterSheet, rollDi
     },
   };
   if (playerIndex === 0) {
-    nextState = beginPlayerTurn(nextState, characterSheet);
+    nextState = grantHeroicWarriorAtTurnStart(beginPlayerTurn(nextState, characterSheet), characterSheet);
   }
 
   const order = combatants.map((combatant) => `${combatant.name} (${combatant.initiative})`).join(', ');
@@ -2041,12 +2172,13 @@ function resolveMonkFlurryOfBlows({ message = '', worldState, characterSheet, ro
       reply: 'Flurry of Blows needs a valid Unarmed Strike profile, but this character sheet does not currently expose one.',
     };
   }
+  const strikeCount = getCharacterLevel(characterSheet) >= 10 ? 3 : 2;
   const lines = [
-    `You spend 1 Focus Point for **Flurry of Blows** and make two Unarmed Strikes as a Bonus Action. Focus Points left: ${Number(spentFocus.resources.focus_points?.remaining || 0)}.`,
+    `You spend 1 Focus Point for **Flurry of Blows** and make ${strikeCount === 3 ? 'three' : 'two'} Unarmed Strikes as a Bonus Action. Focus Points left: ${Number(spentFocus.resources.focus_points?.remaining || 0)}.`,
   ];
   const consumeEffectIds = [];
 
-  for (let index = 1; index <= 2 && target && Number(target.hp || 0) > 0; index += 1) {
+  for (let index = 1; index <= strikeCount && target && Number(target.hp || 0) > 0; index += 1) {
     const result = resolveExtraWeaponAttackRoll({
       attack,
       target,
@@ -2194,8 +2326,12 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
   combat = cloneCombatState(thrownWeaponSpent.worldState.combat_state);
   player = combat.combatants.find((combatant) => combatant.is_player);
   target = findCombatTarget(combat, message) || getLivingEnemy(combat);
-  const attack = applyFightingStyleToAttack({
-    attack: preparedAttack.attack,
+  const attack = applyTacticalMasteryToAttack({
+    attack: applyFightingStyleToAttack({
+      attack: preparedAttack.attack,
+      characterSheet,
+      message,
+    }),
     characterSheet,
     message,
   });
@@ -2326,7 +2462,8 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
     if (sneakAttack.total > 0 && combat.turn_resources) combat.turn_resources.sneak_attack_used = true;
     const frenzy = getFrenzyDamage({ characterSheet, worldState: attackState, combat, reckless, attack, rollDie });
     const colossus = getColossusSlayerDamage({ characterSheet, combat, target, attack, rollDie });
-    const totalDamage = damage.total + bonusDamage.total + flatBonusTotal + sneakAttack.total + frenzy.total + colossus.total;
+    const classStrike = getMidLevelClassStrikeDamage({ characterSheet, combat, attack, target, message, reckless, rollDie });
+    const totalDamage = damage.total + bonusDamage.total + flatBonusTotal + sneakAttack.total + frenzy.total + colossus.total + classStrike.total;
     const before = Number(target.hp || 0);
     target.hp = Math.max(0, before - totalDamage);
     const damageParts = [
@@ -2337,11 +2474,32 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
       sneakAttack.total ? `Sneak Attack ${sneakAttack.die}=${sneakAttack.total}` : '',
       frenzy.total ? `Frenzy ${frenzy.die}=${frenzy.total}` : '',
       colossus.total ? `Colossus Slayer 1d8=${colossus.total}` : '',
+      classStrike.total ? `${classStrike.label} ${classStrike.die}=${classStrike.total} ${classStrike.damageType}` : '',
     ].filter(Boolean);
     lines.push(`${isCrit ? '**Critical hit.** ' : ''}Hit for ${totalDamage} damage${damageParts.length > 1 ? ` (${damageParts.join(' + ')})` : ''}. ${target.name}: (${before} -> ${target.hp} HP).`);
     if (damage.note) lines.push(damage.note);
     if (frenzy.total) combat.turn_resources.frenzy_used = true;
     if (colossus.total) combat.turn_resources.colossus_slayer_used = true;
+    if (classStrike.total && combat.turn_resources) combat.turn_resources[classStrike.turnFlag] = true;
+    if (classStrike.effect === 'forceful_blow' && Number(target.hp) > 0) {
+      target.forced_movement = { feet: 15, direction: 'away_from_player', source: 'Brutal Strike: Forceful Blow' };
+      const follow = grantProtectedMovement(
+        { ...attackState, combat_state: combat },
+        Math.floor(Number(characterSheet.derived_stats?.speed || 30) / 2),
+        'Brutal Strike: Forceful Blow',
+        characterSheet,
+      );
+      attackState = follow.worldState;
+      combat = cloneCombatState(attackState.combat_state);
+      target = findCombatTarget(combat, target.name) || target;
+      lines.push(`**Forceful Blow:** ${target.name} is pushed 15 feet away, and you can follow up to half your Speed without provoking from it.`);
+    }
+    if (classStrike.effect === 'hamstring_blow' && Number(target.hp) > 0) {
+      target.speed_before_brutal_strike = Number(target.speed || 30);
+      target.speed = Math.max(0, Number(target.speed || 30) - 15);
+      target.brutal_strike_slow_expires_round = Number(combat.round || 1) + 1;
+      lines.push(`**Hamstring Blow:** ${target.name}'s Speed is reduced by 15 feet until the start of your next turn.`);
+    }
     if (attack.tavernBrawlerPush && Number(target.hp) > 0) {
       target.forced_movement = { feet: 5, direction: 'away_from_player', source: 'Tavern Brawler' };
       lines.push(`**Tavern Brawler** pushes ${target.name} 5 feet away, subject to available space in the scene.`);
@@ -2586,6 +2744,35 @@ function resolvePlayerAttack({ message = '', worldState, characterSheet, rollDie
     worldState: continued.worldState,
     reply: continued.reply,
   };
+}
+
+function getMidLevelClassStrikeDamage({ characterSheet = {}, combat = {}, attack = {}, target = {}, message = '', reckless = {}, rollDie = defaultRollDie } = {}) {
+  const classId = normalizeId(characterSheet.identity?.class);
+  const level = getCharacterLevel(characterSheet);
+  const choices = characterSheet.class_choices || {};
+  const resources = combat.turn_resources || {};
+  if (classId === 'barbarian' && level >= 9 && reckless.brutalStrike && !resources.brutal_strike_used) {
+    const effect = /\bhamstring\b/i.test(message) ? 'hamstring_blow' : 'forceful_blow';
+    return { total: rollDamageFormula('1d10', rollDie).total, die: '1d10', label: 'Brutal Strike', damageType: attack.damageType || attack.damage_type || 'weapon', turnFlag: 'brutal_strike_used', effect, target: target.name };
+  }
+  if (classId === 'cleric' && level >= 7 && normalizeId(choices.blessed_strikes) === 'divine_strike' && attack.isWeapon && !resources.divine_strike_used) {
+    return { total: rollDamageFormula('1d8', rollDie).total, die: '1d8', label: 'Divine Strike', damageType: /necrotic/i.test(message) ? 'necrotic' : 'radiant', turnFlag: 'divine_strike_used' };
+  }
+  if (classId === 'druid' && level >= 7 && normalizeId(choices.elemental_fury) === 'primal_strike' && !resources.primal_strike_used) {
+    const damageType = ['cold', 'fire', 'lightning', 'thunder'].find((type) => new RegExp(`\\b${type}\\b`, 'i').test(message)) || 'cold';
+    return { total: rollDamageFormula('1d8', rollDie).total, die: '1d8', label: 'Primal Strike', damageType, turnFlag: 'primal_strike_used' };
+  }
+  const invocations = new Set((choices.eldritch_invocations || []).map(normalizeId));
+  if (classId === 'warlock' && level >= 9 && invocations.has('lifedrinker') && /pact weapon/i.test(attack.name || '') && !resources.lifedrinker_used) {
+    return { total: rollDamageFormula('1d6', rollDie).total, die: '1d6', label: 'Lifedrinker', damageType: 'necrotic', turnFlag: 'lifedrinker_used' };
+  }
+  return { total: 0, die: '', label: '', damageType: '', turnFlag: '' };
+}
+
+function applyTacticalMasteryToAttack({ attack = {}, characterSheet = {}, message = '' } = {}) {
+  if (normalizeId(characterSheet.identity?.class) !== 'fighter' || getCharacterLevel(characterSheet) < 9 || !attack.mastery) return attack;
+  const declared = ['push', 'sap', 'slow'].find((mastery) => new RegExp(`\\b(?:tactical master(?:y)?[^.]*${mastery}|use ${mastery} mastery|replace[^.]*with ${mastery})\\b`, 'i').test(message));
+  return declared ? { ...attack, mastery: declared, tacticalMastery: true } : attack;
 }
 
 function resolveExtraWeaponAttackRoll({
@@ -2942,15 +3129,16 @@ function findCombatTarget(combat = {}, message = '') {
 }
 
 function advanceEnemyTurns({ worldState, characterSheet, rollDie = defaultRollDie, playerTurnNote, playerDodging = null, advanceRound = true }) {
+  const restoredState = applySelfRestorationAtTurnEnd(worldState, characterSheet);
   const defenderDodging = playerDodging ?? Boolean(worldState.combat_state?.turn_resources?.dodging);
   const playerTurnEnded = {
-    ...worldState,
-    combat_state: expireGiantAncestryEffects(expireMasteryEffects(worldState.combat_state, {
+    ...restoredState,
+    combat_state: expireGiantAncestryEffects(expireMasteryEffects(restoredState.combat_state, {
       timing: 'end_of_player_turn',
-      round: worldState.combat_state?.round,
+      round: restoredState.combat_state?.round,
     }), {
       timing: 'end_of_player_turn',
-      round: worldState.combat_state?.round,
+      round: restoredState.combat_state?.round,
     }),
   };
   const creatureTurns = resolveCreatureTurns({
@@ -2967,6 +3155,25 @@ function advanceEnemyTurns({ worldState, characterSheet, rollDie = defaultRollDi
     rollDie,
     playerTurnNote,
   });
+}
+
+function applySelfRestorationAtTurnEnd(worldState = {}, characterSheet = {}) {
+  if (normalizeId(characterSheet.identity?.class) !== 'monk' || getCharacterLevel(characterSheet) < 10) return worldState;
+  const removable = new Set(['charmed', 'frightened', 'poisoned']);
+  return {
+    ...worldState,
+    player_stats: {
+      ...(worldState.player_stats || {}),
+      conditions: (worldState.player_stats?.conditions || []).filter((condition) => !removable.has(normalizeId(condition?.id || condition))),
+    },
+    combat_state: worldState.combat_state ? {
+      ...worldState.combat_state,
+      combatants: (worldState.combat_state.combatants || []).map((combatant) => combatant.is_player ? {
+        ...combatant,
+        conditions: (combatant.conditions || []).filter((condition) => !removable.has(normalizeId(condition?.id || condition))),
+      } : combatant),
+    } : worldState.combat_state,
+  };
 }
 
 function resolvePendingReaction({ message, worldState, characterSheet, rollDie = defaultRollDie }) {
@@ -3064,7 +3271,10 @@ function finishCreatureTurns({ creatureTurns, worldState, characterSheet, rollDi
     },
   };
   const ticked = tickActiveEffects(nextState, { rounds: creatureTurns.roundsElapsed });
-  nextState = applyStartOfTurnEffects(beginPlayerTurn(ticked.worldState, characterSheet), characterSheet);
+  nextState = grantHeroicWarriorAtTurnStart(
+    applyStartOfTurnEffects(beginPlayerTurn(ticked.worldState, characterSheet), characterSheet),
+    characterSheet,
+  );
 
   if (player.hp > 0) {
     const unarmedStart = applyUnarmedFightingStartTurnDamage({ worldState: nextState, characterSheet, rollDie });
@@ -3117,6 +3327,17 @@ function finishCreatureTurns({ creatureTurns, worldState, characterSheet, rollDi
     worldState: nextState,
     reply: [lines.join('\n\n'), endLine].filter(Boolean).join('\n\n'),
   };
+}
+
+function grantHeroicWarriorAtTurnStart(worldState = {}, characterSheet = {}) {
+  if (!isChampion(characterSheet) || getCharacterLevel(characterSheet) < 10) return worldState;
+  const resources = buildResourceState(characterSheet, worldState);
+  const inspiration = resources.heroic_inspiration || { name: 'Heroic Inspiration', max: 1, reset: 'special' };
+  if (Number(inspiration.remaining || 0) >= 1) return mergeWorldResources(worldState, resources);
+  return mergeWorldResources(worldState, {
+    ...resources,
+    heroic_inspiration: { ...inspiration, remaining: 1, max: 1 },
+  });
 }
 
 function syncCreatureTurnState({ worldState, combat, player, pendingReaction = null }) {
@@ -3347,23 +3568,30 @@ function getSavingThrowModifier(characterSheet, ability, worldState = {}) {
   const conditionBreakdown = conditionModifier
     ? ` + ${formatConditionD20Sources(getPlayerConditionSubject(characterSheet, worldState)).join(' + ')}`
     : '';
+  const auraBonus = getAuraOfProtectionBonus(characterSheet);
+  const auraBreakdown = auraBonus ? ` + Aura of Protection ${formatSigned(auraBonus)}` : '';
   const saveData = characterSheet?.derived_stats?.saving_throw_modifiers?.[ability];
   if (saveData) {
     const baseTotal = Number(saveData.total || 0);
-    const total = baseTotal + activeTotal + conditionModifier;
+    const total = baseTotal + activeTotal + conditionModifier + auraBonus;
     const baseBreakdown = `${ability.toUpperCase()} ${saveData.proficient ? '+ proficiency' : 'only'} = ${formatSigned(baseTotal)}`;
     return {
       total,
-      breakdown: activeBonuses.length || conditionModifier ? `${baseBreakdown}${activeBreakdown}${conditionBreakdown} = ${formatSigned(total)}` : baseBreakdown,
+      breakdown: activeBonuses.length || conditionModifier || auraBonus ? `${baseBreakdown}${activeBreakdown}${conditionBreakdown}${auraBreakdown} = ${formatSigned(total)}` : baseBreakdown,
     };
   }
 
   const abilityMod = Number(characterSheet?.abilities?.modifiers?.[ability] || 0);
   const abilityBreakdown = `${ability.toUpperCase()} modifier ${formatSigned(abilityMod)}`;
   return {
-    total: abilityMod + activeTotal + conditionModifier,
-    breakdown: activeBonuses.length || conditionModifier ? `${abilityBreakdown}${activeBreakdown}${conditionBreakdown} = ${formatSigned(abilityMod + activeTotal + conditionModifier)}` : abilityBreakdown,
+    total: abilityMod + activeTotal + conditionModifier + auraBonus,
+    breakdown: activeBonuses.length || conditionModifier || auraBonus ? `${abilityBreakdown}${activeBreakdown}${conditionBreakdown}${auraBreakdown} = ${formatSigned(abilityMod + activeTotal + conditionModifier + auraBonus)}` : abilityBreakdown,
   };
+}
+
+function getAuraOfProtectionBonus(characterSheet = {}) {
+  if (normalizeId(characterSheet.identity?.class) !== 'paladin' || getCharacterLevel(characterSheet) < 6) return 0;
+  return Math.max(1, Number(characterSheet.abilities?.modifiers?.cha || 0));
 }
 
 function assessDc(text, check = {}, worldState = {}, inCombat, options = {}) {
@@ -4038,7 +4266,8 @@ function hasEldritchInvocation(characterSheet = {}, invocationId) {
 }
 
 function getRecklessAttackUse({ message = '', characterSheet = {}, attack = {} } = {}) {
-  if (!wantsRecklessAttack(message)) {
+  const brutalStrike = /\bbrutal\s+strike\b/i.test(message);
+  if (!wantsRecklessAttack(message) && !brutalStrike) {
     return { active: false, advantageMode: null, sources: [] };
   }
   if (!isClass(characterSheet, 'barbarian')) {
@@ -4061,8 +4290,9 @@ function getRecklessAttackUse({ message = '', characterSheet = {}, attack = {} }
   }
   return {
     active: true,
-    advantageMode: 'advantage',
-    sources: ['Reckless Attack'],
+    advantageMode: brutalStrike ? null : 'advantage',
+    sources: brutalStrike ? ['Brutal Strike forgoes Reckless Attack Advantage'] : ['Reckless Attack'],
+    brutalStrike,
   };
 }
 
@@ -4264,5 +4494,6 @@ module.exports = {
   advanceEnemyTurns,
   advanceNarrativeTime,
   finishPlayerCombatAction,
+  getSavingThrowModifier,
   rollDamage,
 };

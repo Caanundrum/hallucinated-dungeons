@@ -2258,3 +2258,38 @@ Production fixture limitation:
 Recommended QA enablement:
 
 - Provide one Level 4 production QA fixture per class, or a protected QA-only seed/reset operation that creates known Level 4 class sheets. This allows all-class live verification without mutating historical fixtures through several unrelated levels before each release check.
+
+## 2026-07-04 - Level 5 All-Class Production Closure
+
+QA enablement commit: `1b50e14` (`Add protected level 4 QA roster seed`)
+
+Result: **PASS. Previous live all-class fixture blocker is closed.**
+
+Setup and automated verification:
+
+- Protected `/qa/seed-level-four-roster` successfully created one Level 4, Level-5-ready fixture for each of the 12 classes in the active production session.
+- Server tests: `654/654` pass, including seed validity, all-class fixture coverage, real creation equipment/subclasses/spellcasting, and successful Level 5 choice completion.
+- Client lint: pass.
+- `git diff --check 1b50e14^ 1b50e14`: pass.
+
+Live production advancement results:
+
+- Barbarian: PASS. Level 5, HP `54/54`, PB `+3`, Speed `40 ft`, Greataxe `+7`, Extra Attack and Fast Movement.
+- Bard: PASS. Level 5, HP `42/42`, PB `+3`, spell attack `+7`, DC `15`, two additional spells, Font of Inspiration progression.
+- Cleric: PASS. Level 5, HP `50/50`, PB `+3`, spell attack `+7`, DC `15`, two additional spells, Sear Undead.
+- Druid: PASS. Level 5, HP `50/50`, PB `+3`, spell attack `+7`, DC `15`, two additional spells, Wild Resurgence.
+- Fighter: PASS. Level 5, HP `48/48`, PB `+3`, AC `19`, Longsword `+7`, Extra Attack.
+- Monk: PASS. Level 5, HP `37/37`, PB `+3`, Speed `40 ft`, Focus `5/5`, Shortsword `+7`, Extra Attack and Stunning Strike progression.
+- Paladin: PASS. Level 5, HP `48/48`, PB `+3`, Longsword `+7`, additional spell, Extra Attack and Faithful Steed.
+- Ranger: PASS. Level 5, HP `43/43`, PB `+3`, Longbow `+9` with Archery, additional spell, Extra Attack.
+- Rogue: PASS. Level 5, HP `37/37`, PB `+3`, attacks `+7`, expertise `+10`, Sneak Attack `3d6`, Cunning Strike and Uncanny Dodge.
+- Sorcerer: PASS. Level 5, HP `40/40`, PB `+3`, spell attack `+7`, DC `15`, two additional spells, Sorcerous Restoration.
+- Warlock: PASS. Level 5, HP `42/42`, PB `+3`, Pact Weapon `+7`, spell attack `+7`, DC `15`, two additional invocations, one additional spell, Level 3 Pact Magic progression.
+- Wizard: PASS. Level 5, HP `36/36`, PB `+3`, spell attack `+7`, DC `15`, two spellbook additions, two newly prepared spells, Memorize Spell.
+
+Final production roster check showed all twelve seeded fixtures at Level 5 with XP `6500/14000`. Browser warning/error log was empty.
+
+Coverage boundary:
+
+- Every class was live-tested through the production Level 4-to-5 modal and resulting persisted sheet.
+- Individual combat/rest mechanics remain primarily covered by the passing engine suite; this closure confirms every class's real production advancement, choices, persistence, derived values, and visible Level 5 feature/resource surface.

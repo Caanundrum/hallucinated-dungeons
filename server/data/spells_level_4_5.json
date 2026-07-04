@@ -1,0 +1,1163 @@
+[
+  {
+    "id": "animate_objects",
+    "name": "Animate Objects",
+    "level": 5,
+    "school": "transmutation",
+    "classes": [
+      "bard",
+      "sorcerer",
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "120 feet",
+    "duration": "Concentration, up to 1 minute",
+    "description": "Objects animate at your command.",
+    "attack_type": "utility",
+    "concentration": true
+  },
+  {
+    "id": "antilife_shell",
+    "name": "Antilife Shell",
+    "level": 5,
+    "school": "abjuration",
+    "classes": [
+      "druid"
+    ],
+    "casting_time": "Action",
+    "range": "Self",
+    "duration": "Concentration, up to 1 hour",
+    "description": "An aura extends from you in a 10-foot Emanation for the duration.",
+    "attack_type": "save",
+    "concentration": true
+  },
+  {
+    "id": "arcane_eye",
+    "name": "Arcane Eye",
+    "level": 4,
+    "school": "divination",
+    "classes": [
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "30 feet",
+    "duration": "Concentration, up to 1 hour",
+    "description": "You create an Invisible, invulnerable eye within range that hovers for the duration.",
+    "attack_type": "utility",
+    "concentration": true
+  },
+  {
+    "id": "arcane_hand",
+    "name": "Arcane Hand",
+    "level": 5,
+    "school": "evocation",
+    "classes": [
+      "sorcerer",
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "120 feet",
+    "duration": "Concentration, up to 1 minute",
+    "description": "You create a Large hand of shimmering magical en ergy in an unoccupied space that you can see within range.",
+    "attack_type": "spell_attack",
+    "concentration": true
+  },
+  {
+    "id": "aura_of_life",
+    "name": "Aura of Life",
+    "level": 4,
+    "school": "abjuration",
+    "classes": [
+      "cleric",
+      "paladin"
+    ],
+    "casting_time": "Action",
+    "range": "Self",
+    "duration": "Concentration, up to 10 minutes",
+    "description": "An aura radiates from you in a 30-foot Emanation for the duration.",
+    "attack_type": "utility",
+    "concentration": true
+  },
+  {
+    "id": "awaken",
+    "name": "Awaken",
+    "level": 5,
+    "school": "transmutation",
+    "classes": [
+      "bard",
+      "druid"
+    ],
+    "casting_time": "8 hours",
+    "range": "Touch",
+    "duration": "Instantaneous",
+    "description": "You spend the casting time tracing magical path ways within a precious gemstone, and then touch the target.",
+    "attack_type": "utility"
+  },
+  {
+    "id": "banishment",
+    "name": "Banishment",
+    "level": 4,
+    "school": "abjuration",
+    "classes": [
+      "cleric",
+      "paladin",
+      "sorcerer",
+      "warlock",
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "30 feet",
+    "duration": "Concentration, up to 1 minute",
+    "description": "One creature that you can see within range must succeed on a Charisma saving throw or be trans ported to a harmless demiplane for the duration.",
+    "attack_type": "save",
+    "concentration": true
+  },
+  {
+    "id": "black_tentacles",
+    "name": "Black Tentacles",
+    "level": 4,
+    "school": "conjuration",
+    "classes": [
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "90 feet",
+    "duration": "Concentration, up to 1 minute",
+    "description": "Squirming, ebony tentacles fill a 20-foot square on ground that you can see within range.",
+    "attack_type": "utility",
+    "concentration": true
+  },
+  {
+    "id": "blight",
+    "name": "Blight",
+    "level": 4,
+    "school": "necromancy",
+    "classes": [
+      "druid",
+      "sorcerer",
+      "warlock",
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "30 feet",
+    "duration": "Instantaneous",
+    "description": "A creature that you can see within range makes a Constitution saving throw, taking 8d8 Necrotic damage on a failed save or half as much damage on a successful one.",
+    "attack_type": "save"
+  },
+  {
+    "id": "charm_monster",
+    "name": "Charm Monster",
+    "level": 4,
+    "school": "enchantment",
+    "classes": [
+      "bard",
+      "druid",
+      "sorcerer",
+      "warlock",
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "30 feet",
+    "duration": "1 hour",
+    "description": "One creature you can see within range makes a Wisdom saving throw.",
+    "attack_type": "save"
+  },
+  {
+    "id": "cloudkill",
+    "name": "Cloudkill",
+    "level": 5,
+    "school": "conjuration",
+    "classes": [
+      "sorcerer",
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "120 feet",
+    "duration": "Concentration, up to 10 minutes",
+    "description": "You create a 20-foot-radius Sphere of yellow-green fog centered on a point within range.",
+    "attack_type": "save",
+    "concentration": true
+  },
+  {
+    "id": "commune",
+    "name": "Commune",
+    "level": 5,
+    "school": "divination",
+    "classes": [
+      "cleric"
+    ],
+    "casting_time": "1 minute or Ritual",
+    "range": "Self",
+    "duration": "1 minute",
+    "description": "You contact a deity or a divine proxy and ask up to three questions that can be answered with yes or no.",
+    "attack_type": "utility",
+    "ritual": true
+  },
+  {
+    "id": "commune_with_nature",
+    "name": "Commune with Nature",
+    "level": 5,
+    "school": "divination",
+    "classes": [
+      "druid",
+      "ranger"
+    ],
+    "casting_time": "1 minute or Ritual",
+    "range": "Self",
+    "duration": "Instantaneous",
+    "description": "You commune with nature spirits and gain knowl edge of the surrounding area.",
+    "attack_type": "utility",
+    "ritual": true
+  },
+  {
+    "id": "compulsion",
+    "name": "Compulsion",
+    "level": 4,
+    "school": "enchantment",
+    "classes": [
+      "bard"
+    ],
+    "casting_time": "Action",
+    "range": "30 feet",
+    "duration": "Concentration, up to 1 minute",
+    "description": "Each creature of your choice that you can see within range must succeed on a Wisdom saving throw or have the Charmed condition until the spell ends.",
+    "attack_type": "save",
+    "concentration": true
+  },
+  {
+    "id": "cone_of_cold",
+    "name": "Cone of Cold",
+    "level": 5,
+    "school": "evocation",
+    "classes": [
+      "druid",
+      "sorcerer",
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "Self",
+    "duration": "Instantaneous",
+    "description": "You unleash a blast of cold air.",
+    "attack_type": "save"
+  },
+  {
+    "id": "confusion",
+    "name": "Confusion",
+    "level": 4,
+    "school": "enchantment",
+    "classes": [
+      "bard",
+      "druid",
+      "sorcerer",
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "90 feet",
+    "duration": "Concentration, up to 1 minute",
+    "description": "Each creature in a 10-foot-radius Sphere centered on a point you choose within range must succeed on a Wisdom saving throw, or that target can’t take Bo nus Actions or Reactions and must roll 1d10 at the start of each of its turns to determine its behavior for that turn, consulting the table below.",
+    "attack_type": "save",
+    "concentration": true
+  },
+  {
+    "id": "conjure_elemental",
+    "name": "Conjure Elemental",
+    "level": 5,
+    "school": "conjuration",
+    "classes": [
+      "druid",
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "60 feet",
+    "duration": "Concentration, up to 10 minutes",
+    "description": "You conjure a Large, intangible spirit from the Ele mental Planes that appears in an unoccupied space within range.",
+    "attack_type": "utility",
+    "concentration": true
+  },
+  {
+    "id": "conjure_minor_elementals",
+    "name": "Conjure Minor Elementals",
+    "level": 4,
+    "school": "conjuration",
+    "classes": [
+      "druid",
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "Self",
+    "duration": "Concentration, up to 10 minutes",
+    "description": "You conjure spirits from the Elemental Planes that flit around you in a 15-foot Emanation for the duration.",
+    "attack_type": "utility",
+    "concentration": true
+  },
+  {
+    "id": "conjure_woodland_beings",
+    "name": "Conjure Woodland Beings",
+    "level": 4,
+    "school": "conjuration",
+    "classes": [
+      "druid",
+      "ranger"
+    ],
+    "casting_time": "Action",
+    "range": "Self",
+    "duration": "Concentration, up to 10 minutes",
+    "description": "You conjure nature spirits that flit around you in a 10-foot Emanation for the duration.",
+    "attack_type": "save",
+    "concentration": true
+  },
+  {
+    "id": "contact_other_plane",
+    "name": "Contact Other Plane",
+    "level": 5,
+    "school": "divination",
+    "classes": [
+      "warlock",
+      "wizard"
+    ],
+    "casting_time": "1 minute or Ritual",
+    "range": "Self",
+    "duration": "1 minute",
+    "description": "You mentally contact a demigod, the spirit of a longdead sage, or some other knowledgeable entity from another plane.",
+    "attack_type": "save",
+    "ritual": true
+  },
+  {
+    "id": "contagion",
+    "name": "Contagion",
+    "level": 5,
+    "school": "necromancy",
+    "classes": [
+      "cleric",
+      "druid"
+    ],
+    "casting_time": "Action",
+    "range": "Touch",
+    "duration": "7 days",
+    "description": "Your touch inflicts a magical contagion.",
+    "attack_type": "save"
+  },
+  {
+    "id": "control_water",
+    "name": "Control Water",
+    "level": 4,
+    "school": "transmutation",
+    "classes": [
+      "cleric",
+      "druid",
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "300 feet",
+    "duration": "Concentration, up to 10 minutes",
+    "description": "Until the spell ends, you control any water inside an area you choose that is a Cube up to 100 feet on a side, using one of the following effects.",
+    "attack_type": "utility",
+    "concentration": true
+  },
+  {
+    "id": "creation",
+    "name": "Creation",
+    "level": 5,
+    "school": "illusion",
+    "classes": [
+      "sorcerer",
+      "wizard"
+    ],
+    "casting_time": "1 minute",
+    "range": "30 feet",
+    "duration": "Special",
+    "description": "You pull wisps of shadow material from the Shad owfell to create an object within range.",
+    "attack_type": "utility"
+  },
+  {
+    "id": "death_ward",
+    "name": "Death Ward",
+    "level": 4,
+    "school": "abjuration",
+    "classes": [
+      "cleric",
+      "paladin"
+    ],
+    "casting_time": "Action",
+    "range": "Touch",
+    "duration": "8 hours",
+    "description": "You touch a creature and grant it a measure of pro tection from death.",
+    "attack_type": "utility"
+  },
+  {
+    "id": "dimension_door",
+    "name": "Dimension Door",
+    "level": 4,
+    "school": "conjuration",
+    "classes": [
+      "bard",
+      "sorcerer",
+      "warlock",
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "500 feet",
+    "duration": "Instantaneous",
+    "description": "You teleport to a location within range.",
+    "attack_type": "utility"
+  },
+  {
+    "id": "dispel_evil_and_good",
+    "name": "Dispel Evil and Good",
+    "level": 5,
+    "school": "abjuration",
+    "classes": [
+      "cleric",
+      "paladin"
+    ],
+    "casting_time": "Action",
+    "range": "Self",
+    "duration": "Concentration, up to 1 minute",
+    "description": "For the duration, Celestials, Elementals, Fey, Fiends, and Undead have Disadvantage on attack rolls against you.",
+    "attack_type": "utility",
+    "concentration": true
+  },
+  {
+    "id": "divination",
+    "name": "Divination",
+    "level": 4,
+    "school": "divination",
+    "classes": [
+      "cleric",
+      "druid",
+      "wizard"
+    ],
+    "casting_time": "Action or Ritual",
+    "range": "Self",
+    "duration": "Instantaneous",
+    "description": "This spell puts you in contact with a god or a god’s servants.",
+    "attack_type": "utility",
+    "ritual": true
+  },
+  {
+    "id": "dominate_beast",
+    "name": "Dominate Beast",
+    "level": 4,
+    "school": "enchantment",
+    "classes": [
+      "druid",
+      "ranger",
+      "sorcerer"
+    ],
+    "casting_time": "Action",
+    "range": "60 feet",
+    "duration": "Concentration, up to 1 minute",
+    "description": "One Beast you can see within range must succeed on a Wisdom saving throw or have the Charmed condition for the duration.",
+    "attack_type": "save",
+    "concentration": true
+  },
+  {
+    "id": "dominate_person",
+    "name": "Dominate Person",
+    "level": 5,
+    "school": "enchantment",
+    "classes": [
+      "bard",
+      "sorcerer",
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "60 feet",
+    "duration": "Concentration, up to 1 minute",
+    "description": "One Humanoid you can see within range must succeed on a Wisdom saving throw or have the Charmed condition for the duration.",
+    "attack_type": "save",
+    "concentration": true
+  },
+  {
+    "id": "dream",
+    "name": "Dream",
+    "level": 5,
+    "school": "illusion",
+    "classes": [
+      "bard",
+      "warlock",
+      "wizard"
+    ],
+    "casting_time": "1 minute",
+    "range": "Special",
+    "duration": "8 hours",
+    "description": "You target a creature you know on the same plane of existence.",
+    "attack_type": "utility"
+  },
+  {
+    "id": "fabricate",
+    "name": "Fabricate",
+    "level": 4,
+    "school": "transmutation",
+    "classes": [
+      "wizard"
+    ],
+    "casting_time": "10 minutes",
+    "range": "120 feet",
+    "duration": "Instantaneous",
+    "description": "You convert raw materials into products of the same material.",
+    "attack_type": "utility"
+  },
+  {
+    "id": "faithful_hound",
+    "name": "Faithful Hound",
+    "level": 4,
+    "school": "conjuration",
+    "classes": [
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "30 feet",
+    "duration": "8 hours",
+    "description": "You conjure a phantom watchdog in an unoccupied space that you can see within range.",
+    "attack_type": "utility"
+  },
+  {
+    "id": "fire_shield",
+    "name": "Fire Shield",
+    "level": 4,
+    "school": "evocation",
+    "classes": [
+      "druid",
+      "sorcerer",
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "Self",
+    "duration": "10 minutes",
+    "description": "Wispy flames wreathe your body for the duration, shedding Bright Light in a 10-foot radius and Dim Light for an additional 10 feet.",
+    "attack_type": "utility"
+  },
+  {
+    "id": "flame_strike",
+    "name": "Flame Strike",
+    "level": 5,
+    "school": "evocation",
+    "classes": [
+      "cleric"
+    ],
+    "casting_time": "Action",
+    "range": "60 feet",
+    "duration": "Instantaneous",
+    "description": "A vertical column of brilliant fire roars down from above.",
+    "attack_type": "save"
+  },
+  {
+    "id": "freedom_of_movement",
+    "name": "Freedom of Movement",
+    "level": 4,
+    "school": "abjuration",
+    "classes": [
+      "bard",
+      "cleric",
+      "druid",
+      "ranger"
+    ],
+    "casting_time": "Action",
+    "range": "Touch",
+    "duration": "1 hour",
+    "description": "You touch a willing creature.",
+    "attack_type": "utility"
+  },
+  {
+    "id": "geas",
+    "name": "Geas",
+    "level": 5,
+    "school": "enchantment",
+    "classes": [
+      "bard",
+      "cleric",
+      "druid",
+      "paladin",
+      "wizard"
+    ],
+    "casting_time": "1 minute",
+    "range": "60 feet",
+    "duration": "30 days",
+    "description": "You give a verbal command to a creature that you can see within range, ordering it to carry out some service or refrain from an action or a course of ac tivity as you decide.",
+    "attack_type": "save"
+  },
+  {
+    "id": "giant_insect",
+    "name": "Giant Insect",
+    "level": 4,
+    "school": "conjuration",
+    "classes": [
+      "druid"
+    ],
+    "casting_time": "Action",
+    "range": "60 feet",
+    "duration": "Concentration, up to 10 minutes",
+    "description": "You summon a giant centipede, spider, or wasp (chosen when you cast the spell).",
+    "attack_type": "utility",
+    "concentration": true
+  },
+  {
+    "id": "greater_invisibility",
+    "name": "Greater Invisibility",
+    "level": 4,
+    "school": "illusion",
+    "classes": [
+      "bard",
+      "sorcerer",
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "Touch",
+    "duration": "Concentration, up to 1 minute",
+    "description": "A creature you touch has the Invisible condition un til the spell ends.",
+    "attack_type": "utility",
+    "concentration": true
+  },
+  {
+    "id": "greater_restoration",
+    "name": "Greater Restoration",
+    "level": 5,
+    "school": "abjuration",
+    "classes": [
+      "bard",
+      "cleric",
+      "druid",
+      "paladin",
+      "ranger"
+    ],
+    "casting_time": "Action",
+    "range": "Touch",
+    "duration": "Instantaneous",
+    "description": "You touch a creature and magically remove one of the following effects from it: • 1 Exhaustion level • The Charmed or Petrified condition • A curse, including the target’s Attunement to a cursed magic item • Any reduction to one of the target’s ability scores • Any reduction to the target’s Hit Point maximum",
+    "attack_type": "utility"
+  },
+  {
+    "id": "guardian_of_faith",
+    "name": "Guardian of Faith",
+    "level": 4,
+    "school": "conjuration",
+    "classes": [
+      "cleric"
+    ],
+    "casting_time": "Action",
+    "range": "30 feet",
+    "duration": "8 hours",
+    "description": "A Large spectral guardian appears and hovers for the duration in an unoccupied space that you can see within range.",
+    "attack_type": "save"
+  },
+  {
+    "id": "hallow",
+    "name": "Hallow",
+    "level": 5,
+    "school": "abjuration",
+    "classes": [
+      "cleric"
+    ],
+    "casting_time": "24 hours",
+    "range": "Touch",
+    "duration": "Until dispelled",
+    "description": "You touch a point and infuse an area around it with holy or unholy power.",
+    "attack_type": "utility"
+  },
+  {
+    "id": "hallucinatory_terrain",
+    "name": "Hallucinatory Terrain",
+    "level": 4,
+    "school": "illusion",
+    "classes": [
+      "bard",
+      "druid",
+      "warlock",
+      "wizard"
+    ],
+    "casting_time": "10 minutes",
+    "range": "300 feet",
+    "duration": "24 hours",
+    "description": "You make natural terrain in a 150-foot Cube in range look, sound, and smell like another sort of natural terrain.",
+    "attack_type": "utility"
+  },
+  {
+    "id": "hold_monster",
+    "name": "Hold Monster",
+    "level": 5,
+    "school": "enchantment",
+    "classes": [
+      "bard",
+      "sorcerer",
+      "warlock",
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "90 feet",
+    "duration": "Concentration, up to 1 minute",
+    "description": "Choose a creature that you can see within range.",
+    "attack_type": "save",
+    "concentration": true
+  },
+  {
+    "id": "ice_storm",
+    "name": "Ice Storm",
+    "level": 4,
+    "school": "evocation",
+    "classes": [
+      "druid",
+      "sorcerer",
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "300 feet",
+    "duration": "Instantaneous",
+    "description": "Hail falls in a 20-foot-radius, 40-foot-high Cylinder centered on a point within range.",
+    "attack_type": "save"
+  },
+  {
+    "id": "insect_plague",
+    "name": "Insect Plague",
+    "level": 5,
+    "school": "conjuration",
+    "classes": [
+      "cleric",
+      "druid",
+      "sorcerer"
+    ],
+    "casting_time": "Action",
+    "range": "300 feet",
+    "duration": "Concentration, up to 10 minutes",
+    "description": "Swarming locusts fill a 20-foot-radius Sphere centered on a point you choose within range.",
+    "attack_type": "save",
+    "concentration": true
+  },
+  {
+    "id": "legend_lore",
+    "name": "Legend Lore",
+    "level": 5,
+    "school": "divination",
+    "classes": [
+      "bard",
+      "cleric",
+      "wizard"
+    ],
+    "casting_time": "10 minutes",
+    "range": "Self",
+    "duration": "Instantaneous",
+    "description": "Name or describe a famous person, place, or object.",
+    "attack_type": "utility"
+  },
+  {
+    "id": "locate_creature",
+    "name": "Locate Creature",
+    "level": 4,
+    "school": "divination",
+    "classes": [
+      "bard",
+      "cleric",
+      "druid",
+      "paladin",
+      "ranger",
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "Self",
+    "duration": "Concentration, up to 1 hour",
+    "description": "Describe or name a creature that is familiar to you.",
+    "attack_type": "utility",
+    "concentration": true
+  },
+  {
+    "id": "mass_cure_wounds",
+    "name": "Mass Cure Wounds",
+    "level": 5,
+    "school": "abjuration",
+    "classes": [
+      "bard",
+      "cleric",
+      "druid"
+    ],
+    "casting_time": "Action",
+    "range": "60 feet",
+    "duration": "Instantaneous",
+    "description": "A wave of healing energy washes out from a point you can see within range.",
+    "attack_type": "healing"
+  },
+  {
+    "id": "mislead",
+    "name": "Mislead",
+    "level": 5,
+    "school": "illusion",
+    "classes": [
+      "bard",
+      "warlock",
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "Self",
+    "duration": "Concentration, up to 1 hour",
+    "description": "You gain the Invisible condition at the same time that an illusory double of you appears where you are standing.",
+    "attack_type": "utility",
+    "concentration": true
+  },
+  {
+    "id": "modify_memory",
+    "name": "Modify Memory",
+    "level": 5,
+    "school": "enchantment",
+    "classes": [
+      "bard",
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "30 feet",
+    "duration": "Concentration, up to 1 minute",
+    "description": "You attempt to reshape another creature’s memories.",
+    "attack_type": "save",
+    "concentration": true
+  },
+  {
+    "id": "passwall",
+    "name": "Passwall",
+    "level": 5,
+    "school": "transmutation",
+    "classes": [
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "30 feet",
+    "duration": "1 hour",
+    "description": "A passage appears at a point that you can see on a wooden, plaster, or stone surface (such as a wall, ceiling, or floor) within range and lasts for the duration.",
+    "attack_type": "utility"
+  },
+  {
+    "id": "phantasmal_killer",
+    "name": "Phantasmal Killer",
+    "level": 4,
+    "school": "illusion",
+    "classes": [
+      "bard",
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "120 feet",
+    "duration": "Concentration, up to 1 minute",
+    "description": "You tap into the nightmares of a creature you can see within range and create an illusion of its deep est fears, visible only to that creature.",
+    "attack_type": "save",
+    "concentration": true
+  },
+  {
+    "id": "planar_binding",
+    "name": "Planar Binding",
+    "level": 5,
+    "school": "abjuration",
+    "classes": [
+      "bard",
+      "cleric",
+      "druid",
+      "warlock",
+      "wizard"
+    ],
+    "casting_time": "1 hour",
+    "range": "60 feet",
+    "duration": "24 hours",
+    "description": "You attempt to bind a Celestial, an Elemental, a Fey, or a Fiend to your service.",
+    "attack_type": "save"
+  },
+  {
+    "id": "polymorph",
+    "name": "Polymorph",
+    "level": 4,
+    "school": "transmutation",
+    "classes": [
+      "bard",
+      "druid",
+      "sorcerer",
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "60 feet",
+    "duration": "Concentration, up to 1 hour",
+    "description": "You attempt to transform a creature that you can see within range into a Beast.",
+    "attack_type": "save",
+    "concentration": true
+  },
+  {
+    "id": "private_sanctum",
+    "name": "Private Sanctum",
+    "level": 4,
+    "school": "abjuration",
+    "classes": [
+      "wizard"
+    ],
+    "casting_time": "10 minutes",
+    "range": "120 feet",
+    "duration": "24 hours",
+    "description": "You make an area within range magically secure.",
+    "attack_type": "utility"
+  },
+  {
+    "id": "raise_dead",
+    "name": "Raise Dead",
+    "level": 5,
+    "school": "necromancy",
+    "classes": [
+      "bard",
+      "cleric",
+      "paladin"
+    ],
+    "casting_time": "1 hour",
+    "range": "Touch",
+    "duration": "Instantaneous",
+    "description": "With a touch, you revive a dead creature if it has been dead no longer than 10 days and it wasn’t Undead when it died.",
+    "attack_type": "utility"
+  },
+  {
+    "id": "reincarnate",
+    "name": "Reincarnate",
+    "level": 5,
+    "school": "necromancy",
+    "classes": [
+      "druid"
+    ],
+    "casting_time": "1 hour",
+    "range": "Touch",
+    "duration": "Instantaneous",
+    "description": "You touch a dead Humanoid or a piece of one.",
+    "attack_type": "utility"
+  },
+  {
+    "id": "resilient_sphere",
+    "name": "Resilient Sphere",
+    "level": 4,
+    "school": "abjuration",
+    "classes": [
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "30 feet",
+    "duration": "Concentration, up to 1 minute",
+    "description": "A shimmering sphere encloses a Large or smaller creature or object within range.",
+    "attack_type": "save",
+    "concentration": true
+  },
+  {
+    "id": "scrying",
+    "name": "Scrying",
+    "level": 5,
+    "school": "divination",
+    "classes": [
+      "bard",
+      "cleric",
+      "druid",
+      "warlock",
+      "wizard"
+    ],
+    "casting_time": "10 minutes",
+    "range": "Self",
+    "duration": "Concentration, up to 10 minutes",
+    "description": "You can see and hear a creature you choose that is on the same plane of existence as you.",
+    "attack_type": "save",
+    "concentration": true
+  },
+  {
+    "id": "secret_chest",
+    "name": "Secret Chest",
+    "level": 4,
+    "school": "conjuration",
+    "classes": [
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "Touch",
+    "duration": "Until dispelled",
+    "description": "You hide a chest and all its contents on the Ethereal Plane.",
+    "attack_type": "utility"
+  },
+  {
+    "id": "seeming",
+    "name": "Seeming",
+    "level": 5,
+    "school": "illusion",
+    "classes": [
+      "bard",
+      "sorcerer",
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "30 feet",
+    "duration": "8 hours",
+    "description": "You give an illusory appearance to each creature of your choice that you can see within range.",
+    "attack_type": "save"
+  },
+  {
+    "id": "stone_shape",
+    "name": "Stone Shape",
+    "level": 4,
+    "school": "transmutation",
+    "classes": [
+      "cleric",
+      "druid",
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "Touch",
+    "duration": "Instantaneous",
+    "description": "You touch a stone object of Medium size or smaller or a section of stone no more than 5 feet in any di mension and form it into any shape you like.",
+    "attack_type": "utility"
+  },
+  {
+    "id": "stoneskin",
+    "name": "Stoneskin",
+    "level": 4,
+    "school": "transmutation",
+    "classes": [
+      "druid",
+      "ranger",
+      "sorcerer",
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "Touch",
+    "duration": "Concentration, up to 1 hour",
+    "description": "Until the spell ends, one willing creature you touch has Resistance to Bludgeoning, Piercing, and Slash ing damage.",
+    "attack_type": "utility",
+    "concentration": true
+  },
+  {
+    "id": "summon_dragon",
+    "name": "Summon Dragon",
+    "level": 5,
+    "school": "conjuration",
+    "classes": [
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "60 feet",
+    "duration": "Concentration, up to 1 hour",
+    "description": "You call forth a Dragon spirit.",
+    "attack_type": "utility",
+    "concentration": true
+  },
+  {
+    "id": "telekinesis",
+    "name": "Telekinesis",
+    "level": 5,
+    "school": "transmutation",
+    "classes": [
+      "sorcerer",
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "60 feet",
+    "duration": "Concentration, up to 10 minutes",
+    "description": "You gain the ability to move or manipulate crea tures or objects by thought.",
+    "attack_type": "save",
+    "concentration": true
+  },
+  {
+    "id": "telepathic_bond",
+    "name": "Telepathic Bond",
+    "level": 5,
+    "school": "divination",
+    "classes": [
+      "bard",
+      "wizard"
+    ],
+    "casting_time": "Action or Ritual",
+    "range": "30 feet",
+    "duration": "1 hour",
+    "description": "You forge a telepathic link among up to eight willing creatures of your choice within range, psychically linking each creature to all the others for the duration.",
+    "attack_type": "utility",
+    "ritual": true
+  },
+  {
+    "id": "teleportation_circle",
+    "name": "Teleportation Circle",
+    "level": 5,
+    "school": "conjuration",
+    "classes": [
+      "bard",
+      "sorcerer",
+      "warlock",
+      "wizard"
+    ],
+    "casting_time": "1 minute",
+    "range": "10 feet",
+    "duration": "1 round",
+    "description": "As you cast the spell, you draw a 5-foot-radius circle on the ground inscribed with sigils that link your location to a permanent teleportation circle of your choice whose sigil sequence you know and that is on the same plane of existence as you.",
+    "attack_type": "utility"
+  },
+  {
+    "id": "tree_stride",
+    "name": "Tree Stride",
+    "level": 5,
+    "school": "conjuration",
+    "classes": [
+      "druid",
+      "ranger"
+    ],
+    "casting_time": "Action",
+    "range": "Self",
+    "duration": "Concentration, up to 1 minute",
+    "description": "You gain the ability to enter a tree and move from inside it to inside another tree of the same kind within 500 feet.",
+    "attack_type": "utility",
+    "concentration": true
+  },
+  {
+    "id": "vitriolic_sphere",
+    "name": "Vitriolic Sphere",
+    "level": 4,
+    "school": "evocation",
+    "classes": [
+      "sorcerer",
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "150 feet",
+    "duration": "Instantaneous",
+    "description": "You point at a location within range, and a glow ing, 1-foot-diameter ball of acid streaks there and explodes in a 20-foot-radius Sphere.",
+    "attack_type": "save"
+  },
+  {
+    "id": "wall_of_fire",
+    "name": "Wall of Fire",
+    "level": 4,
+    "school": "evocation",
+    "classes": [
+      "druid",
+      "sorcerer",
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "120 feet",
+    "duration": "Concentration, up to 1 minute",
+    "description": "You create a wall of fire on a solid surface within range.",
+    "attack_type": "save",
+    "concentration": true
+  },
+  {
+    "id": "wall_of_force",
+    "name": "Wall of Force",
+    "level": 5,
+    "school": "evocation",
+    "classes": [
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "120 feet",
+    "duration": "Concentration, up to 10 minutes",
+    "description": "An Invisible wall of force springs into existence at a point you choose within range.",
+    "attack_type": "utility",
+    "concentration": true
+  },
+  {
+    "id": "wall_of_stone",
+    "name": "Wall of Stone",
+    "level": 5,
+    "school": "evocation",
+    "classes": [
+      "druid",
+      "sorcerer",
+      "wizard"
+    ],
+    "casting_time": "Action",
+    "range": "120 feet",
+    "duration": "Concentration, up to 10 minutes",
+    "description": "A nonmagical wall of solid stone springs into exis tence at a point you choose within range.",
+    "attack_type": "save",
+    "concentration": true
+  }
+]

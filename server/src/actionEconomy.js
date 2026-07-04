@@ -49,14 +49,21 @@ function beginPlayerTurn(worldState = {}, characterSheet = {}) {
 }
 
 function clearExpiredPlayerTurnConditions(combatant = {}) {
-  if (!combatant.stunning_strike_until_player_turn) return combatant;
-  return {
+  let next = combatant;
+  if (combatant.stunning_strike_until_player_turn) next = {
     ...combatant,
     conditions: (combatant.conditions || []).filter((condition) => !['stunned', 'stunning_strike_slowed', 'stunning_strike_advantage'].includes(condition)),
     stunning_strike_until_player_turn: undefined,
     speed_before_stunning_strike: undefined,
     speed: combatant.speed_before_stunning_strike ?? combatant.speed,
   };
+  if (next.speed_before_brutal_strike !== undefined) next = {
+    ...next,
+    speed: next.speed_before_brutal_strike,
+    speed_before_brutal_strike: undefined,
+    brutal_strike_slow_expires_round: undefined,
+  };
+  return next;
 }
 
 function spendTurnResource(worldState = {}, resource, label = 'that action', characterSheet = {}, options = {}) {

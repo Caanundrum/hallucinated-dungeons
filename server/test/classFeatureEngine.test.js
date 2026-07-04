@@ -877,3 +877,59 @@ test('Devotion Paladin Divine Sense spends Channel Divinity and tracks ten minut
   assert.equal(result.worldState.player_stats.resources.channel_divinity.remaining, 1);
   assert.equal(result.worldState.active_effects.find((effect) => effect.id === 'divine_sense').remaining_minutes, 10);
 });
+
+test('Open Hand Wholeness of Body heals and spends its long-rest use', () => {
+  const result = resolveFeatureAction({
+    message: 'I use Wholeness of Body.',
+    worldState: combatWorld({
+      player_stats: { hp: 5, max_hp: 20, resources: { wholeness_of_body: { name: 'Wholeness of Body', remaining: 3, max: 3, reset: 'long_rest' } } },
+      combat_state: {
+        ...combatWorld().combat_state,
+        combatants: [
+          { name: 'Ari', hp: 5, max_hp: 20, ac: 16, is_player: true },
+          { name: 'Goblin', hp: 8, max_hp: 8, ac: 12, is_player: false },
+        ],
+      },
+    }),
+    characterSheet: sheet('monk', { identity: { name: 'Ari', class: 'monk', level: 6, subclass: 'warrior_of_the_open_hand' }, derived_stats: { hp: 20, max_hp: 20, armor_class: 16, proficiency_bonus: 3, speed: 45 } }),
+    rollDie: sequenceRolls([5]),
+  });
+
+  assert.equal(result.worldState.player_stats.hp, 13);
+  assert.equal(result.worldState.player_stats.resources.wholeness_of_body.remaining, 2);
+});
+
+test('Ranger Tireless grants temporary HP and spends one use', () => {
+  const result = resolveFeatureAction({
+    message: 'I use Tireless for temporary hit points.',
+    worldState: combatWorld({ player_stats: { hp: 20, max_hp: 20, temp_hp: 0, resources: { tireless: { name: 'Tireless', remaining: 3, max: 3, reset: 'long_rest' } } } }),
+    characterSheet: sheet('ranger', { identity: { name: 'Ari', class: 'ranger', level: 10 } }),
+    rollDie: sequenceRolls([6]),
+  });
+
+  assert.equal(result.worldState.player_stats.temp_hp, 9);
+  assert.equal(result.worldState.player_stats.resources.tireless.remaining, 2);
+});
+
+test('Paladin Abjure Foes spends Channel Divinity and frightens a failed target', () => {
+  const result = resolveFeatureAction({
+    message: 'I use Abjure Foes.',
+    worldState: combatWorld({ player_stats: { hp: 12, max_hp: 12, resources: { channel_divinity: { name: 'Channel Divinity', remaining: 3, max: 3, reset: 'short_rest' } } } }),
+    characterSheet: sheet('paladin', { identity: { name: 'Ari', class: 'paladin', level: 9 }, derived_stats: { hp: 12, max_hp: 12, armor_class: 16, proficiency_bonus: 4, spell_save_dc: 15 } }),
+    rollDie: sequenceRolls([2]),
+  });
+
+  assert.equal(result.worldState.player_stats.resources.channel_divinity.remaining, 2);
+  assert(result.worldState.combat_state.combatants[1].conditions.includes('frightened'));
+});
+
+test('Warlock Contact Patron spends its once-per-long-rest use', () => {
+  const result = resolveFeatureAction({
+    message: 'I contact my patron.',
+    worldState: combatWorld({ player_stats: { hp: 12, max_hp: 12, resources: { contact_patron: { name: 'Contact Patron', remaining: 1, max: 1, reset: 'long_rest' } } } }),
+    characterSheet: sheet('warlock', { identity: { name: 'Ari', class: 'warlock', level: 9 } }),
+  });
+
+  assert.equal(result.worldState.player_stats.resources.contact_patron.remaining, 0);
+  assert.match(result.reply, /automatically succeeds/);
+});

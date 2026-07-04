@@ -128,7 +128,7 @@ function buildResourceState(characterSheet = {}, worldState = {}) {
     ...cloneResourceBlock(worldResources),
   };
 
-  if (!resources.heroic_inspiration && (hasHumanResourceful(characterSheet) || worldResources.heroic_inspiration)) {
+  if (!resources.heroic_inspiration && (hasHumanResourceful(characterSheet) || hasHeroicWarrior(characterSheet) || worldResources.heroic_inspiration)) {
     resources.heroic_inspiration = {
       ...RESOURCE_DEFINITIONS.heroic_inspiration,
       remaining: Number(worldResources.heroic_inspiration?.remaining ?? sheetResources.heroic_inspiration?.remaining ?? 0),
@@ -152,6 +152,13 @@ function buildResourceState(characterSheet = {}, worldState = {}) {
   applySpeciesResourceDefaults(resources, characterSheet, worldResources, sheetResources);
 
   return resources;
+}
+
+function hasHeroicWarrior(characterSheet = {}) {
+  const level = getCharacterLevel(characterSheet);
+  const subclass = normalizeId(characterSheet.identity?.subclass || characterSheet.identity?.subclass_name || characterSheet.class_choices?.subclass);
+  const hasFeature = (characterSheet.features || []).some((feature) => normalizeId(feature.id || feature.name) === 'heroic_warrior');
+  return level >= 10 && (subclass === 'champion' || hasFeature);
 }
 
 function getAutoD20RerollRules(characterSheet = {}) {

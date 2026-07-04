@@ -66,6 +66,51 @@ const SUPPORTED_LEVEL_UP_MECHANICS = new Set([
   'sorcerous_restoration',
   'eldritch_invocations_level_5',
   'memorize_spell',
+  'mindless_rage',
+  'magical_discoveries',
+  'blessed_healer',
+  'natural_recovery',
+  'additional_fighting_style',
+  'empowered_strikes',
+  'wholeness_of_body',
+  'aura_of_protection',
+  'roving',
+  'expertise_level_6',
+  'elemental_affinity',
+  'dark_ones_own_luck',
+  'sculpt_spells',
+  'feral_instinct',
+  'instinctive_pounce',
+  'countercharm',
+  'blessed_strikes',
+  'elemental_fury',
+  'evasion',
+  'aura_of_devotion',
+  'defensive_tactics',
+  'reliable_talent',
+  'sorcery_incarnate',
+  'eldritch_invocations_level_7',
+  'brutal_strike',
+  'expertise_level_9',
+  'indomitable',
+  'tactical_master',
+  'acrobatic_movement',
+  'abjure_foes',
+  'supreme_sneak',
+  'contact_patron',
+  'eldritch_invocations_level_9',
+  'berserker_retaliation',
+  'magical_secrets',
+  'divine_intervention',
+  'natures_ward',
+  'heroic_warrior',
+  'heightened_focus',
+  'self_restoration',
+  'aura_of_courage',
+  'tireless',
+  'metamagic_level_10',
+  'fiendish_resilience',
+  'empowered_evocation',
 ]);
 
 const METAMAGIC_OPTIONS = [
@@ -147,7 +192,7 @@ function getLevelUpPreview(characterSheet = {}, content = getContentBundle(), op
   ];
   const runtimeMechanics = [...new Set([
     ...(advancement?.runtime_mechanics || []),
-    ...(selectedSubclass?.runtime_mechanics || []),
+    ...getSubclassRuntimeMechanics(selectedSubclass, nextLevel),
   ])];
 
   const supportedMechanics = options.supportedMechanics || SUPPORTED_LEVEL_UP_MECHANICS;
@@ -280,13 +325,14 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
     nextLevel,
   );
   const invocationState = buildInvocationLevelUpState({ characterSheet, levelUpChoices, content });
+  const persistedClassChoices = getPersistedClassChoices(advancement.required_choices || [], levelUpChoices);
   const nextLanguages = mergeLanguages(
     characterSheet.languages || characterSheet.proficiencies?.languages || [],
     getLanguageChoiceIds(advancement.required_choices || [], levelUpChoices),
   );
   const currentFeatures = (characterSheet.features || []).filter((feature) => {
     const name = normalizeId(feature.name);
-    if (preview.classId === 'rogue' && [3, 5].includes(nextLevel) && name.startsWith('sneak_attack')) return false;
+    if (preview.classId === 'rogue' && (advancement.derived?.sneak_attack_dice || [3, 5].includes(nextLevel)) && name.startsWith('sneak_attack')) return false;
     if (preview.classId === 'monk' && nextLevel === 5 && name.startsWith('martial_arts')) return false;
     return true;
   });
@@ -317,7 +363,7 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
       } : null;
     }).filter(Boolean),
   ];
-  const nextDerivedStats = buildLeveledDerivedStats({
+  let nextDerivedStats = buildLeveledDerivedStats({
     currentDerived,
     characterSheet,
     content,
@@ -335,6 +381,12 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
     recalculateCore: Object.keys(abilityIncreases).length > 0
       || Number(currentDerived.proficiency_bonus || nextPb) !== nextPb,
   });
+  for (const additionalStyle of [
+    ...((characterSheet.class_choices?.additional_fighting_styles || [])),
+    ...(levelUpChoices.additional_fighting_style || []),
+  ]) {
+    nextDerivedStats = applyFightingStyleToDerivedStats(nextDerivedStats, characterSheet, additionalStyle);
+  }
   applyLevelThreeDerivedStats(nextDerivedStats, preview.classId, nextLevel, characterSheet, selectedSubclass);
   applyAdvancementDerivedStats(nextDerivedStats, advancement, characterSheet);
   applyInvocationDerivedStats(nextDerivedStats, invocationState.invocations);
@@ -350,6 +402,25 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
       pactWeaponAttack,
     ];
   }
+  const selectedAffinity = levelUpChoices.draconic_affinity?.[0];
+  const selectedFiendishResilience = levelUpChoices.fiendish_resilience?.[0];
+  const landType = levelUpChoices.land_type?.[0] || characterSheet.class_choices?.land_type;
+  const subclassId = normalizeId(selectedSubclass?.id || characterSheet.identity?.subclass || characterSheet.class_choices?.subclass);
+  const landResistance = preview.classId === 'druid' && subclassId === 'circle_of_the_land' && nextLevel >= 10
+    ? { arid: 'fire', polar: 'cold', temperate: 'lightning', tropical: 'poison' }[normalizeId(landType)]
+    : null;
+  const nextResistances = [...new Set([
+    ...(characterSheet.resistances || []),
+    ...(selectedAffinity ? [selectedAffinity] : []),
+    ...(selectedFiendishResilience ? [selectedFiendishResilience] : []),
+    ...(landResistance ? [landResistance] : []),
+  ])];
+  const nextConditionImmunities = [...new Set([
+    ...(characterSheet.condition_immunities || []),
+    ...(preview.classId === 'druid' && subclassId === 'circle_of_the_land' && nextLevel >= 10 ? ['poisoned'] : []),
+    ...(preview.classId === 'paladin' && subclassId === 'oath_of_devotion' && nextLevel >= 7 ? ['charmed'] : []),
+    ...(preview.classId === 'paladin' && nextLevel >= 10 ? ['frightened'] : []),
+  ])];
 
   return {
     ...characterSheet,
@@ -362,14 +433,19 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
       level_up_available: false,
     },
     derived_stats: nextDerivedStats,
+    resistances: nextResistances,
+    condition_immunities: nextConditionImmunities,
     features: dedupeFeatures(nextFeatures),
     resources: nextResources,
     general_feats: mergeGeneralFeats(characterSheet.general_feats, selectedGeneralFeat, nextLevel, abilityIncreases),
     expertise_skills: nextExpertiseSkills,
     class_choices: {
       ...(characterSheet.class_choices || {}),
+      ...persistedClassChoices,
       ...(selectedFightingStyle ? { fighting_style: selectedFightingStyle } : {}),
-      ...(levelUpChoices.metamagic?.length ? { metamagic: levelUpChoices.metamagic } : {}),
+      ...(levelUpChoices.metamagic?.length ? {
+        metamagic: [...new Set([...(characterSheet.class_choices?.metamagic || []), ...levelUpChoices.metamagic])],
+      } : {}),
       ...(invocationState.invocations.length ? { eldritch_invocations: invocationState.invocations } : {}),
       ...(levelUpChoices.land_type?.length ? { land_type: levelUpChoices.land_type[0] } : {}),
       ...(levelUpChoices.hunters_prey?.length ? { hunters_prey: levelUpChoices.hunters_prey[0] } : {}),
@@ -645,12 +721,13 @@ function getChoiceOptions({ choice = {}, characterSheet = {}, content = {}, clas
       ...(spellcasting.always_prepared_spells || []),
     ].map(normalizeId));
     const spellClass = normalizeId(choice.class_id || classId);
+    const spellClasses = new Set((choice.class_ids || [spellClass]).map(normalizeId));
     const minLevel = Number(choice.min_level ?? 0);
     const maxLevel = Number(choice.max_level ?? 1);
     const excluded = new Set((choice.exclude_ids || []).map(normalizeId));
     return (content.spells || [])
       .filter((spell) => Number(spell.level || 0) >= minLevel && Number(spell.level || 0) <= maxLevel)
-      .filter((spell) => spellClass === 'any' || (spell.classes || []).map(normalizeId).includes(spellClass))
+      .filter((spell) => spellClasses.has('any') || (spell.classes || []).map(normalizeId).some((entry) => spellClasses.has(entry)))
       .filter((spell) => !choice.ritual_only || spell.ritual)
       .filter((spell) => !prepared.has(normalizeId(spell.id)))
       .filter((spell) => !excluded.has(normalizeId(spell.id)))
@@ -744,7 +821,11 @@ function getChoiceOptions({ choice = {}, characterSheet = {}, content = {}, clas
           description: 'Learn two Druid cantrips, using Wisdom as your spellcasting ability for them.',
         }]
       : [];
-    return [...fighterStyles, ...extraStyles].map((style) => ({
+    const known = new Set([
+      normalizeId(characterSheet.class_choices?.fighting_style),
+      ...((characterSheet.class_choices?.additional_fighting_styles || []).map(normalizeId)),
+    ].filter(Boolean));
+    return [...fighterStyles, ...extraStyles].filter((style) => !known.has(normalizeId(style.id))).map((style) => ({
       id: style.id,
       name: style.name || titleCase(style.id),
       description: style.description || '',
@@ -795,6 +876,11 @@ function getChoiceOptions({ choice = {}, characterSheet = {}, content = {}, clas
       description: option.description || getLevelUpOptionDescription(choice.id, option.id),
       meta: option.meta || '',
     }));
+  }
+
+  if (choice.type === 'damage_type') {
+    return ['acid', 'bludgeoning', 'cold', 'fire', 'lightning', 'necrotic', 'piercing', 'poison', 'psychic', 'radiant', 'slashing', 'thunder']
+      .map((id) => ({ id, name: titleCase(id), description: `Gain resistance to ${titleCase(id)} damage.`, meta: 'Damage resistance' }));
   }
 
   return [];
@@ -953,7 +1039,7 @@ function applyLevelThreeDerivedStats(derived = {}, classId = '', level = 1, char
     derived.initiative_advantage_sources = [...new Set([...(derived.initiative_advantage_sources || []), 'Remarkable Athlete'])];
   }
   if (classId === 'rogue') {
-    derived.sneak_attack_dice = Number(level) >= 5 ? '3d6' : '2d6';
+    derived.sneak_attack_dice = `${Math.max(1, Math.ceil(Number(level) / 2))}d6`;
     derived.climb_speed = Number(derived.speed || 30);
     derived.jump_ability = 'dex';
   }
@@ -1008,6 +1094,16 @@ function getExpertiseChoiceIds(requiredChoices = [], selections = {}) {
   return requiredChoices
     .filter(isExpertiseChoice)
     .flatMap((choice) => selections[choice.id] || []);
+}
+
+function getPersistedClassChoices(requiredChoices = [], selections = {}) {
+  const persisted = {};
+  for (const choice of requiredChoices) {
+    if (!choice.persist_as || !isRequiredChoiceActive(choice, selections)) continue;
+    const selected = selections[choice.id] || [];
+    persisted[choice.persist_as] = choice.persist_as.endsWith('s') ? selected : selected[0];
+  }
+  return persisted;
 }
 
 function getSkillProficiencyChoiceIds(requiredChoices = [], selections = {}) {
@@ -1203,11 +1299,22 @@ function finalizeClassResources(resources = {}, classId = '', level = 1, charact
     resources.bardic_inspiration = {
       name: 'Bardic Inspiration',
       ...current,
-      die: '1d8',
+      die: Number(level) >= 10 ? '1d10' : '1d8',
       reset: 'short_rest',
       max,
       remaining: Math.max(0, max - spent),
     };
+  }
+  const abilityResources = {
+    tireless: 'wis',
+    dark_ones_own_luck: 'cha',
+    wholeness_of_body: 'wis',
+  };
+  for (const [resourceId, ability] of Object.entries(abilityResources)) {
+    const resource = resources[resourceId];
+    if (!resource || resource.max !== `${ability === 'wis' ? 'wisdom' : 'charisma'}_modifier`) continue;
+    const max = Math.max(1, Number(characterSheet.abilities?.modifiers?.[ability] || 0));
+    resources[resourceId] = { ...resource, max, remaining: max };
   }
   return resources;
 }
@@ -1218,6 +1325,9 @@ function mergeSpellcasting(current, advancementSpellcasting, levelUpChoices = {}
   const preparedAdditions = [
     ...(levelUpChoices.prepared_spells || []),
     ...(levelUpChoices.prepared_spell || []),
+  ];
+  const alwaysPreparedAdditions = [
+    ...(levelUpChoices.magical_discoveries || []),
   ];
   const spellbookAdditions = [
     ...(levelUpChoices.spellbook_spells || []),
@@ -1249,6 +1359,7 @@ function mergeSpellcasting(current, advancementSpellcasting, levelUpChoices = {}
       ...new Set([
         ...((current || {}).always_prepared_spells || []),
         ...(advancementSpellcasting.always_prepared_spells || advancementSpellcasting.always_prepared || []),
+        ...alwaysPreparedAdditions,
       ]),
     ],
     ...((current || {}).spellbook_spells || advancementSpellcasting.spellbook_spells_add ? {
@@ -1300,14 +1411,15 @@ function applySubclassSpellcasting(spellcasting, selectedSubclass = null, choice
   const land = normalizeId(choices.land_type?.[0] || characterSheet.class_choices?.land_type || '');
   const subclassSpells = {
     circle_of_the_land: {
-      arid: ['blur', 'burning_hands', 'fire_bolt', ...(level >= 5 ? ['fireball'] : [])],
-      polar: ['fog_cloud', 'hold_person', 'ray_of_frost', ...(level >= 5 ? ['sleet_storm'] : [])],
-      temperate: ['misty_step', 'shocking_grasp', 'sleep', ...(level >= 5 ? ['lightning_bolt'] : [])],
-      tropical: ['acid_splash', 'ray_of_sickness', 'web', ...(level >= 5 ? ['stinking_cloud'] : [])],
+      arid: ['blur', 'burning_hands', 'fire_bolt', ...(level >= 5 ? ['fireball'] : []), ...(level >= 7 ? ['blight'] : []), ...(level >= 9 ? ['wall_of_stone'] : [])],
+      polar: ['fog_cloud', 'hold_person', 'ray_of_frost', ...(level >= 5 ? ['sleet_storm'] : []), ...(level >= 7 ? ['ice_storm'] : []), ...(level >= 9 ? ['cone_of_cold'] : [])],
+      temperate: ['misty_step', 'shocking_grasp', 'sleep', ...(level >= 5 ? ['lightning_bolt'] : []), ...(level >= 7 ? ['freedom_of_movement'] : []), ...(level >= 9 ? ['tree_stride'] : [])],
+      tropical: ['acid_splash', 'ray_of_sickness', 'web', ...(level >= 5 ? ['stinking_cloud'] : []), ...(level >= 7 ? ['polymorph'] : []), ...(level >= 9 ? ['insect_plague'] : [])],
     }[land] || [],
-    life_domain: level >= 5 ? ['mass_healing_word', 'revivify'] : [],
-    draconic_sorcery: level >= 5 ? ['fear', 'fly'] : [],
-    fiend_patron: level >= 5 ? ['fireball', 'stinking_cloud'] : [],
+    life_domain: [...(level >= 5 ? ['mass_healing_word', 'revivify'] : []), ...(level >= 7 ? ['aura_of_life', 'death_ward'] : []), ...(level >= 9 ? ['greater_restoration', 'mass_cure_wounds'] : [])],
+    draconic_sorcery: [...(level >= 5 ? ['fear', 'fly'] : []), ...(level >= 7 ? ['arcane_eye', 'charm_monster'] : []), ...(level >= 9 ? ['legend_lore', 'summon_dragon'] : [])],
+    fiend_patron: [...(level >= 5 ? ['fireball', 'stinking_cloud'] : []), ...(level >= 7 ? ['fire_shield', 'wall_of_fire'] : []), ...(level >= 9 ? ['geas', 'insect_plague'] : [])],
+    oath_of_devotion: [...(level >= 9 ? ['beacon_of_hope', 'dispel_magic'] : [])],
   }[selectedSubclass.id] || [];
   return {
     ...spellcasting,
@@ -1544,11 +1656,37 @@ function applyAdvancementDerivedStats(derived = {}, advancement = {}, characterS
   const additions = advancement.derived || {};
   if (additions.martial_arts_die) derived.martial_arts_die = additions.martial_arts_die;
   if (additions.sneak_attack_dice) derived.sneak_attack_dice = additions.sneak_attack_dice;
+  for (const key of [
+    'aura_of_protection_range', 'aura_charmed_immunity', 'aura_frightened_immunity',
+    'empowered_strikes', 'evasion', 'reliable_talent_floor', 'acrobatic_movement',
+    'heightened_focus', 'self_restoration', 'rage_damage_bonus', 'wild_shape_known_forms',
+    'wild_shape_max_cr', 'wild_shape_fly_speed',
+  ]) {
+    if (additions[key] !== undefined) derived[key] = additions[key];
+  }
+  if (additions.initiative_advantage) {
+    derived.initiative_advantage_sources = [...new Set([...(derived.initiative_advantage_sources || []), additions.initiative_advantage])];
+  }
+  if (additions.climb_speed_equals_speed) derived.climb_speed = Number(derived.speed || 30);
+  if (additions.swim_speed_equals_speed) derived.swim_speed = Number(derived.speed || 30);
+  if (additions.unarmored_movement_bonus) {
+    const previous = Number(characterSheet.derived_stats?.unarmored_movement_bonus || 10);
+    const delta = Number(additions.unarmored_movement_bonus) - previous;
+    if (delta > 0 && !hasArmorOrShieldEquipped(characterSheet)) derived.speed = Number(derived.speed || 30) + delta;
+    derived.unarmored_movement_bonus = Number(additions.unarmored_movement_bonus);
+  }
   if ((advancement.runtime_mechanics || []).includes('extra_attack')) derived.attacks_per_action = 2;
   if ((advancement.runtime_mechanics || []).includes('fast_movement')) {
     derived.fast_movement = !hasHeavyArmorEquipped(characterSheet);
   }
   return derived;
+}
+
+function getSubclassRuntimeMechanics(subclass = null, level = 1) {
+  if (!subclass) return [];
+  const exact = subclass.level_runtime_mechanics?.[String(level)] || [];
+  if (exact.length) return exact;
+  return Number(level) === Number(subclass.unlock_level || 3) ? (subclass.runtime_mechanics || []) : [];
 }
 
 function applyInvocationDerivedStats(derived = {}, invocations = []) {
