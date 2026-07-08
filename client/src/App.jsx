@@ -1,3 +1,4 @@
+// Redeploy commit to force Vercel to rebuild and serve the clean pre-map stable code.
 import { useEffect, useRef, useState, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { socket } from './socket';
