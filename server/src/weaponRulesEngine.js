@@ -193,6 +193,7 @@ function consumeSapAfterAttack(actor = {}) {
 }
 
 function getSelectedWeaponMastery(characterSheet = {}, attack = {}) {
+  if (attack.tacticalMastery && attack.mastery) return attack.mastery;
   if (!attack.isWeapon || !attack.weaponId) return null;
   const selected = (characterSheet.weapon_masteries || [])
     .find((entry) => normalizeId(entry.weapon_id || entry.weaponId) === normalizeId(attack.weaponId));
