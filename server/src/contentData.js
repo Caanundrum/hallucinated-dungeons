@@ -37,6 +37,7 @@ const content = {
     readJson('level_4_advancement.json'),
     readJson('level_5_advancement.json'),
     require('../data/level_6_10_advancement'),
+    require('../data/level_11_20_advancement'),
   ),
   itemEffects: readJson('item_effects.json'),
   abilityScoreMethods: [

@@ -774,6 +774,8 @@ function maybePromptMidlevelRollFeature({ pending, result, outcome, worldState, 
     feature = { id: 'dark_ones_own_luck', name: "Dark One's Own Luck", resource: 'dark_ones_own_luck' };
   } else if (classId === 'bard' && level >= 7 && pending.kind === 'saving_throw' && /\b(?:charm|charmed|frighten|frightened|fear)\b/i.test(`${pending.intent || ''} ${pending.label || ''}`)) {
     feature = { id: 'countercharm', name: 'Countercharm', actionResource: 'reaction' };
+  } else if (classId === 'rogue' && level >= 20 && ['skill_check', 'ability_check'].includes(pending.kind) && Number(resources.stroke_of_luck?.remaining || 0) > 0) {
+    feature = { id: 'stroke_of_luck', name: 'Stroke of Luck', resource: 'stroke_of_luck' };
   }
   if (!feature) return null;
   return {
@@ -815,6 +817,10 @@ function resolvePendingMidlevelRollFeature({ message, worldState, characterSheet
     const bonus = rollDie(10);
     result = { ...choice.result, total: choice.result.total + bonus, rollText: `${choice.result.total + bonus} (${choice.result.rollText}; Dark One's Own Luck 1d10=${bonus})` };
     featureLine = `**Dark One's Own Luck:** 1d10 = ${bonus}.`;
+  } else if (choice.feature.id === 'stroke_of_luck') {
+    const dc = Number(choice.pending.dc || DEFAULT_CHECK_DC);
+    result = { ...choice.result, total: dc, rollText: `${dc} (Stroke of Luck automatically succeeds)` };
+    featureLine = `**Stroke of Luck:** turns the failed check into a success.`;
   } else {
     result = rollPendingRequest({ ...choice.pending, advantage_mode: 'advantage' }, rollDie);
     featureLine = `**Countercharm:** you spend your Reaction and reroll the save with Advantage.`;
@@ -1738,6 +1744,24 @@ function promptInitiative({ message, worldState, characterSheet, currentTurn = 0
   const initiative = baseInitiative + conditionModifier;
   const enemyName = inferEnemyName(worldState, message);
   const advantageSources = getSubclassD20AdvantageSources({ characterSheet, testType: 'initiative' });
+
+  let nextWorldState = worldState;
+  let perfectSelfNote = '';
+  if (characterSheet.identity?.class === 'monk' && getCharacterLevel(characterSheet) >= 15) {
+    const resources = buildResourceState(characterSheet, worldState);
+    if (Number(resources.focus_points?.remaining || 0) === 0) {
+      const updated = {
+        ...resources,
+        focus_points: {
+          ...(resources.focus_points || { name: 'Focus Points', max: getCharacterLevel(characterSheet), reset: 'short_rest' }),
+          remaining: 4
+        }
+      };
+      nextWorldState = mergeWorldResources(worldState, updated);
+      perfectSelfNote = ' **Perfect Self** triggers: you have no Focus Points, so you regain 4 Focus Points.';
+    }
+  }
+
   const pendingRoll = {
     id: `roll_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     kind: 'initiative',
@@ -1758,10 +1782,10 @@ function promptInitiative({ message, worldState, characterSheet, currentTurn = 0
     handled: true,
     logType: 'referee_initiative_prompt',
     worldState: {
-      ...worldState,
+      ...nextWorldState,
       pending_roll: pendingRoll,
     },
-    reply: `Combat begins. Roll initiative.${formatAdvantageModeText(pendingRoll.advantage_mode, advantageSources)} ${rollTagForPending(pendingRoll)}`,
+    reply: `Combat begins. Roll initiative.${perfectSelfNote}${formatAdvantageModeText(pendingRoll.advantage_mode, advantageSources)} ${rollTagForPending(pendingRoll)}`,
   };
 }
 
@@ -3277,6 +3301,11 @@ function finishCreatureTurns({ creatureTurns, worldState, characterSheet, rollDi
   );
 
   if (player.hp > 0) {
+    const survivorStart = applySurvivorAtTurnStart(nextState, characterSheet);
+    nextState = survivorStart.worldState;
+    lines.push(...survivorStart.lines);
+    player.hp = nextState.player_stats?.hp ?? player.hp;
+
     const unarmedStart = applyUnarmedFightingStartTurnDamage({ worldState: nextState, characterSheet, rollDie });
     nextState = unarmedStart.worldState;
     lines.push(...unarmedStart.lines);
@@ -3327,6 +3356,43 @@ function finishCreatureTurns({ creatureTurns, worldState, characterSheet, rollDi
     worldState: nextState,
     reply: [lines.join('\n\n'), endLine].filter(Boolean).join('\n\n'),
   };
+}
+
+function applySurvivorAtTurnStart(worldState = {}, characterSheet = {}) {
+  const level = getCharacterLevel(characterSheet);
+  const isChamp = isChampion(characterSheet);
+  if (!isChamp || level < 18) return { worldState, lines: [] };
+
+  const stats = worldState.player_stats || {};
+  const maxHp = Number(characterSheet?.derived_stats?.max_hp ?? stats.max_hp ?? 1);
+  const hp = Number(stats.hp ?? characterSheet?.derived_stats?.hp ?? maxHp);
+
+  if (hp > 0 && hp <= Math.floor(maxHp / 2)) {
+    const conMod = Number(characterSheet?.abilities?.modifiers?.con || 0);
+    const healAmount = 5 + conMod;
+    const newHp = Math.min(maxHp, hp + healAmount);
+    const healed = newHp - hp;
+    if (healed > 0) {
+      const combat = worldState.combat_state?.active ? JSON.parse(JSON.stringify(worldState.combat_state)) : null;
+      if (combat) {
+        const pEntry = combat.combatants?.find((entry) => entry.is_player);
+        if (pEntry) pEntry.hp = newHp;
+      }
+      const nextState = {
+        ...worldState,
+        combat_state: combat || worldState.combat_state,
+        player_stats: {
+          ...stats,
+          hp: newHp,
+        }
+      };
+      return {
+        worldState: nextState,
+        lines: [`**Survivor:** You are bloodied at the start of your turn. You regain ${healed} HP (${hp} -> ${newHp}).`]
+      };
+    }
+  }
+  return { worldState, lines: [] };
 }
 
 function grantHeroicWarriorAtTurnStart(worldState = {}, characterSheet = {}) {

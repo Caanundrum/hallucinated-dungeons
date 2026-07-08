@@ -111,6 +111,60 @@ const SUPPORTED_LEVEL_UP_MECHANICS = new Set([
   'metamagic_level_10',
   'fiendish_resilience',
   'empowered_evocation',
+  'relentless_rage',
+  'brutal_strike_2',
+  'berserker_presence',
+  'persistent_rage',
+  'brutal_strike_3',
+  'indomitable_might',
+  'primal_champion',
+  'peerless_skill',
+  'superior_inspiration',
+  'words_of_creation',
+  'improved_blessed_strikes',
+  'supreme_healing',
+  'greater_divine_intervention',
+  'natures_sanctuary',
+  'beast_spells',
+  'archdruid',
+  'extra_attack_2',
+  'indomitable_uses_2',
+  'superior_critical',
+  'action_surge_uses_2',
+  'indomitable_uses_3',
+  'survivor',
+  'extra_attack_3',
+  'fleet_step',
+  'deflect_energy',
+  'diamond_soul',
+  'perfect_self',
+  'quivering_palm',
+  'body_and_mind',
+  'radiant_smite',
+  'cleansing_touch',
+  'purity_of_spirit',
+  'holy_nimbus',
+  'hunter_multiattack',
+  'feral_senses',
+  'superior_hunters_defense',
+  'foe_slayer',
+  'use_magic_device',
+  'slippery_mind',
+  'thiefs_reflexes',
+  'elusive',
+  'stroke_of_luck',
+  'dragon_wings',
+  'draconic_presence',
+  'arcane_apotheosis',
+  'mystic_arcanum_level_11',
+  'eldritch_invocations_level_13',
+  'hurl_through_hell',
+  'eldritch_invocations_level_15',
+  'eldritch_invocations_level_17',
+  'eldritch_master',
+  'overchannel',
+  'spell_mastery',
+  'signature_spells',
 ]);
 
 const METAMAGIC_OPTIONS = [
@@ -284,6 +338,11 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
   const levelUpChoices = normalizeChoiceSelections(payload.choices || {});
   const abilityIncreases = getLevelUpAbilityIncreases(levelUpChoices);
   const nextAbilities = applyAbilityIncreases(characterSheet.abilities, abilityIncreases, nextLevel);
+  const nextSavingThrows = [...new Set([
+    ...(characterSheet.proficiencies?.saving_throws || classData?.saving_throws || []),
+    ...(preview.classId === 'monk' && nextLevel >= 14 ? ['str', 'dex', 'con', 'int', 'wis', 'cha'] : []),
+    ...(preview.classId === 'rogue' && nextLevel >= 14 ? ['wis', 'cha'] : []),
+  ])];
   const selectedGeneralFeatId = levelUpChoices.level_4_feat?.[0] || '';
   const selectedGeneralFeat = byId(content.feats || [], selectedGeneralFeatId);
   const selectedSubclass = getSelectedSubclass({
@@ -461,6 +520,7 @@ function buildLeveledSheet(characterSheet, classData, advancement, preview, payl
       ...(characterSheet.proficiencies || {}),
       skills: nextProficientSkills,
       languages: nextLanguages,
+      saving_throws: nextSavingThrows,
     },
     weapon_masteries: mergeWeaponMasteries(characterSheet.weapon_masteries, levelUpChoices.weapon_mastery, content),
     ...(nextSpellcasting ? {
@@ -1009,8 +1069,14 @@ function buildLeveledDerivedStats({
     nextDerived.armor_class_breakdown = armor.parts;
     nextDerived.initiative = initiative.total;
     nextDerived.initiative_breakdown = initiative.parts;
+    const baseSaves = characterSheet.proficiencies?.saving_throws || classData.saving_throws || [];
+    const actualSaves = [...new Set([
+      ...baseSaves,
+      ...(normalizeId(classData.id) === 'monk' && nextLevel >= 14 ? ['str', 'dex', 'con', 'int', 'wis', 'cha'] : []),
+      ...(normalizeId(classData.id) === 'rogue' && nextLevel >= 14 ? ['wis', 'cha'] : []),
+    ])];
     nextDerived.saving_throw_modifiers = buildSaveModifiers(
-      characterSheet.proficiencies?.saving_throws || classData.saving_throws || [],
+      actualSaves,
       abilityModifiers,
       nextPb,
     );
@@ -1035,7 +1101,7 @@ function buildLeveledDerivedStats({
 function applyLevelThreeDerivedStats(derived = {}, classId = '', level = 1, characterSheet = {}, selectedSubclass = null) {
   if (Number(level) < 3) return derived;
   if (classId === 'fighter') {
-    derived.weapon_critical_threshold = 19;
+    derived.weapon_critical_threshold = Number(level) >= 15 ? 18 : 19;
     derived.initiative_advantage_sources = [...new Set([...(derived.initiative_advantage_sources || []), 'Remarkable Athlete'])];
   }
   if (classId === 'rogue') {
@@ -1299,7 +1365,7 @@ function finalizeClassResources(resources = {}, classId = '', level = 1, charact
     resources.bardic_inspiration = {
       name: 'Bardic Inspiration',
       ...current,
-      die: Number(level) >= 10 ? '1d10' : '1d8',
+      die: Number(level) >= 15 ? '1d12' : (Number(level) >= 10 ? '1d10' : '1d8'),
       reset: 'short_rest',
       max,
       remaining: Math.max(0, max - spent),
@@ -1660,7 +1726,7 @@ function applyAdvancementDerivedStats(derived = {}, advancement = {}, characterS
     'aura_of_protection_range', 'aura_charmed_immunity', 'aura_frightened_immunity',
     'empowered_strikes', 'evasion', 'reliable_talent_floor', 'acrobatic_movement',
     'heightened_focus', 'self_restoration', 'rage_damage_bonus', 'wild_shape_known_forms',
-    'wild_shape_max_cr', 'wild_shape_fly_speed',
+    'wild_shape_max_cr', 'wild_shape_fly_speed', 'elusive',
   ]) {
     if (additions[key] !== undefined) derived[key] = additions[key];
   }
@@ -1676,6 +1742,8 @@ function applyAdvancementDerivedStats(derived = {}, advancement = {}, characterS
     derived.unarmored_movement_bonus = Number(additions.unarmored_movement_bonus);
   }
   if ((advancement.runtime_mechanics || []).includes('extra_attack')) derived.attacks_per_action = 2;
+  if ((advancement.runtime_mechanics || []).includes('extra_attack_2')) derived.attacks_per_action = 3;
+  if ((advancement.runtime_mechanics || []).includes('extra_attack_3')) derived.attacks_per_action = 4;
   if ((advancement.runtime_mechanics || []).includes('fast_movement')) {
     derived.fast_movement = !hasHeavyArmorEquipped(characterSheet);
   }

@@ -44,6 +44,21 @@ function advanceToTen(startingSheet, content) {
   return { sheet, history };
 }
 
+function advanceToTwenty(startingSheet, content) {
+  let { sheet, history } = advanceToTen(startingSheet, content);
+  for (let targetLevel = 11; targetLevel <= 20; targetLevel += 1) {
+    sheet = setCharacterXp(sheet, getXpThreshold(targetLevel), { sourceId: `test:${sheet.identity.class}:level_${targetLevel}` });
+    const choices = completeChoices(sheet, content);
+    const preview = getLevelUpPreview(sheet, content, { choices });
+    assert.equal(preview.canApply, true, `${sheet.identity.class} L${targetLevel}: ${preview.blockers.map((entry) => entry.message).join(' | ')}`);
+    const result = applyLevelUp({ characterSheet: sheet, content, payload: { choices } });
+    assert.equal(result.ok, true, `${sheet.identity.class} L${targetLevel}`);
+    sheet = result.characterSheet;
+    history.set(targetLevel, sheet);
+  }
+  return { sheet, history };
+}
+
 test('all twelve classes advance coherently through every level from 6 to 10', () => {
   const content = getContentBundle();
   const roster = buildQaLevelFourRoster({ sessionId: SESSION_ID, campaignId: CAMPAIGN_ID, content });
@@ -56,6 +71,26 @@ test('all twelve classes advance coherently through every level from 6 to 10', (
     assert.equal(history.size, 6, fixture.classId);
     for (let level = 5; level <= 10; level += 1) assert.equal(history.get(level).identity.level, level, `${fixture.classId} L${level}`);
     if (fixture.classId === 'druid') assert.equal(history.get(6).resources.wild_shape.max, 3);
+  }
+});
+
+test('all twelve classes advance coherently through every level from 11 to 20', () => {
+  const content = getContentBundle();
+  const roster = buildQaLevelFourRoster({ sessionId: SESSION_ID, campaignId: CAMPAIGN_ID, content });
+
+  for (const fixture of roster) {
+    const { sheet, history } = advanceToTwenty(fixture.characterSheet, content);
+    assert.equal(sheet.identity.level, 20, fixture.classId);
+    assert.equal(sheet.derived_stats.proficiency_bonus, 6, fixture.classId);
+    assert.equal(history.size, 16, fixture.classId);
+    for (let level = 11; level <= 20; level += 1) assert.equal(history.get(level).identity.level, level, `${fixture.classId} L${level}`);
+    if (fixture.classId === 'fighter') {
+      assert.equal(sheet.derived_stats.attacks_per_action, 4);
+      assert.equal(sheet.derived_stats.weapon_critical_threshold, 18);
+    }
+    if (fixture.classId === 'rogue') {
+      assert.equal(sheet.derived_stats.sneak_attack_dice, '10d6');
+    }
   }
 });
 
@@ -140,4 +175,45 @@ test('spent resources and spell slots stay spent while level 6 through 10 capaci
   assert.equal(sheet.resources.sorcery_points.remaining, 7);
   assert.equal(sheet.spellcasting.slots_max[1], 4);
   assert.equal(sheet.spellcasting.slots[1], 1);
+});
+
+test('levels 11 through 20 apply the class tables and subclass milestones', () => {
+  const content = getContentBundle();
+  const results = new Map(buildQaLevelFourRoster({ sessionId: SESSION_ID, campaignId: CAMPAIGN_ID, content })
+    .map((fixture) => [fixture.classId, advanceToTwenty(fixture.characterSheet, content).sheet]));
+
+  assert.equal(results.get('barbarian').resources.rage.max, 6);
+  assert.equal(results.get('barbarian').derived_stats.rage_damage_bonus, 4);
+  assert(results.get('barbarian').features.some((entry) => entry.name === 'Primal Champion'));
+
+  assert.equal(results.get('bard').resources.bardic_inspiration.die, '1d12');
+  assert.equal(results.get('bard').spellcasting.prepared_spells_count, 22);
+
+  assert.equal(results.get('cleric').spellcasting.slots_max[9], 1);
+  assert(results.get('cleric').features.some((entry) => entry.name === 'Greater Divine Intervention'));
+
+  assert.equal(results.get('druid').derived_stats.wild_shape_max_cr, 2);
+  assert(results.get('druid').features.some((entry) => entry.name === 'Archdruid'));
+
+  assert.equal(results.get('fighter').derived_stats.attacks_per_action, 4);
+  assert.equal(results.get('fighter').derived_stats.weapon_critical_threshold, 18);
+  assert.equal(results.get('fighter').resources.indomitable.max, 3);
+  assert.equal(results.get('fighter').resources.action_surge.max, 2);
+
+  assert.equal(results.get('monk').resources.focus_points.max, 20);
+  assert.equal(results.get('monk').derived_stats.unarmored_movement_bonus, 30);
+
+  assert.equal(results.get('paladin').resources.lay_on_hands.max, 100);
+  assert.equal(results.get('paladin').derived_stats.aura_of_protection_range, 30);
+
+  assert.equal(results.get('rogue').derived_stats.sneak_attack_dice, '10d6');
+  assert(results.get('rogue').features.some((entry) => entry.name === 'Stroke of Luck'));
+
+  assert.equal(results.get('sorcerer').resources.sorcery_points.max, 20);
+
+  assert.equal(results.get('warlock').spellcasting.slots_max[5], 4);
+  assert(results.get('warlock').features.some((entry) => entry.name === 'Eldritch Master'));
+
+  assert.equal(results.get('wizard').spellcasting.prepared_spells_count, 22);
+  assert(results.get('wizard').features.some((entry) => entry.name === 'Signature Spells'));
 });

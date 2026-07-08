@@ -10,9 +10,10 @@
         { "id": "frenzy", "name": "Frenzy", "description": "Reckless Attack can add extra damage to the first Strength-based hit on your turn while Rage is active." }
       ],
       "6": [{ "id": "mindless_rage", "name": "Mindless Rage", "description": "While raging, you are immune to Charmed and Frightened, and entering Rage ends either condition." }],
-      "10": [{ "id": "retaliation", "name": "Retaliation", "description": "When a creature within 5 feet damages you, use your Reaction to make one melee attack against it." }]
+      "10": [{ "id": "retaliation", "name": "Retaliation", "description": "When a creature within 5 feet damages you, use your Reaction to make one melee attack against it." }],
+      "14": [{ "id": "intimidating_presence", "name": "Intimidating Presence", "description": "As a Bonus Action, force a creature within 30 feet to make a Wisdom save or be Frightened." }]
     },
-    "level_runtime_mechanics": { "6": ["mindless_rage"], "10": ["berserker_retaliation"] },
+    "level_runtime_mechanics": { "6": ["mindless_rage"], "10": ["berserker_retaliation"], "14": ["berserker_presence"] },
     "runtime_mechanics": ["barbarian_level_3"],
     "mechanics_status": "implemented"
   },
@@ -27,9 +28,10 @@
         { "id": "bonus_proficiencies", "name": "Bonus Proficiencies", "description": "Gain proficiency in three additional skills." },
         { "id": "cutting_words", "name": "Cutting Words", "description": "Use Bardic Inspiration and a Reaction to reduce a nearby creature's successful attack roll, ability check, or damage roll." }
       ],
-      "6": [{ "id": "magical_discoveries", "name": "Magical Discoveries", "description": "Learn two always-prepared spells from the Cleric, Druid, or Wizard spell lists." }]
+      "6": [{ "id": "magical_discoveries", "name": "Magical Discoveries", "description": "Learn two always-prepared spells from the Cleric, Druid, or Wizard spell lists." }],
+      "14": [{ "id": "peerless_skill", "name": "Peerless Skill", "description": "When you fail an ability check or attack roll, add a Bardic Inspiration die to the total." }]
     },
-    "level_runtime_mechanics": { "6": ["magical_discoveries"] },
+    "level_runtime_mechanics": { "6": ["magical_discoveries"], "14": ["peerless_skill"] },
     "runtime_mechanics": ["bard_level_3"],
     "mechanics_status": "implemented"
   },
@@ -45,9 +47,10 @@
         { "id": "life_domain_spells", "name": "Life Domain Spells", "description": "Gain the level-appropriate Life Domain spells as always-prepared spells." },
         { "id": "preserve_life", "name": "Preserve Life", "description": "Spend Channel Divinity to divide a pool of healing among Bloodied creatures nearby." }
       ],
-      "6": [{ "id": "blessed_healer", "name": "Blessed Healer", "description": "A slotted healing spell cast on another creature also heals you for 2 plus the slot level." }]
+      "6": [{ "id": "blessed_healer", "name": "Blessed Healer", "description": "A slotted healing spell cast on another creature also heals you for 2 plus the slot level." }],
+      "17": [{ "id": "supreme_healing", "name": "Supreme Healing", "description": "When you roll dice to heal, use the maximum value instead of rolling." }]
     },
-    "level_runtime_mechanics": { "6": ["blessed_healer"] },
+    "level_runtime_mechanics": { "6": ["blessed_healer"], "17": ["supreme_healing"] },
     "runtime_mechanics": ["cleric_level_3"],
     "mechanics_status": "implemented"
   },
@@ -63,9 +66,10 @@
         { "id": "lands_aid", "name": "Land's Aid", "description": "Spend Wild Shape to harm nearby foes while restoring an ally's Hit Points." }
       ],
       "6": [{ "id": "natural_recovery", "name": "Natural Recovery", "description": "Cast one Circle Spell free per Long Rest and recover limited spell-slot levels after one Short Rest." }],
-      "10": [{ "id": "natures_ward", "name": "Nature's Ward", "description": "Become immune to Poisoned and gain resistance tied to your current Circle land." }]
+      "10": [{ "id": "natures_ward", "name": "Nature's Ward", "description": "Become immune to Poisoned and gain resistance tied to your current Circle land." }],
+      "14": [{ "id": "natures_sanctuary", "name": "Nature's Sanctuary", "description": "Beasts and plants must make a Wisdom save to attack you." }]
     },
-    "level_runtime_mechanics": { "6": ["natural_recovery"], "10": ["natures_ward"] },
+    "level_runtime_mechanics": { "6": ["natural_recovery"], "10": ["natures_ward"], "14": ["natures_sanctuary"] },
     "runtime_mechanics": ["druid_level_3"],
     "mechanics_status": "implemented"
   },
@@ -81,9 +85,11 @@
         { "id": "remarkable_athlete", "name": "Remarkable Athlete", "description": "Gain Advantage on Initiative and Strength (Athletics) checks." }
       ],
       "7": [{ "id": "additional_fighting_style", "name": "Additional Fighting Style", "description": "Gain a second Fighting Style feat." }],
-      "10": [{ "id": "heroic_warrior", "name": "Heroic Warrior", "description": "At the start of each combat turn, gain Heroic Inspiration if you do not already have it." }]
+      "10": [{ "id": "heroic_warrior", "name": "Heroic Warrior", "description": "At the start of each combat turn, gain Heroic Inspiration if you do not already have it." }],
+      "15": [{ "id": "superior_critical", "name": "Superior Critical", "description": "Score a critical hit on a weapon/unarmed attack roll of 18-20." }],
+      "18": [{ "id": "survivor", "name": "Survivor", "description": "Regain 5 + Constitution modifier HP at the start of your turn if bloodied." }]
     },
-    "level_runtime_mechanics": { "7": ["additional_fighting_style"], "10": ["heroic_warrior"] },
+    "level_runtime_mechanics": { "7": ["additional_fighting_style"], "10": ["heroic_warrior"], "15": ["superior_critical"], "18": ["survivor"] },
     "runtime_mechanics": ["fighter_level_3"],
     "mechanics_status": "implemented"
   },
@@ -97,9 +103,11 @@
       "3": [
         { "id": "open_hand_technique", "name": "Open Hand Technique", "description": "Flurry of Blows hits can prevent reactions, push a target, or knock it Prone." }
       ],
-      "6": [{ "id": "wholeness_of_body", "name": "Wholeness of Body", "description": "Use a Bonus Action to heal for one Martial Arts die plus Wisdom modifier, a limited number of times per Long Rest." }]
+      "6": [{ "id": "wholeness_of_body", "name": "Wholeness of Body", "description": "Use a Bonus Action to heal for one Martial Arts die plus Wisdom modifier, a limited number of times per Long Rest." }],
+      "11": [{ "id": "fleet_step", "name": "Fleet Step", "description": "When you use Step of the Wind, you can also use Patient Defense as part of the same Bonus Action." }],
+      "17": [{ "id": "quivering_palm", "name": "Quivering Palm", "description": "Spend Focus Points to set up lethal vibrations in a hit target." }]
     },
-    "level_runtime_mechanics": { "6": ["wholeness_of_body"] },
+    "level_runtime_mechanics": { "6": ["wholeness_of_body"], "11": ["fleet_step"], "17": ["quivering_palm"] },
     "runtime_mechanics": ["monk_level_3"],
     "mechanics_status": "implemented"
   },
@@ -114,9 +122,11 @@
         { "id": "oath_of_devotion_spells", "name": "Oath of Devotion Spells", "description": "Gain the level-appropriate oath spells as always-prepared spells." },
         { "id": "sacred_weapon", "name": "Sacred Weapon", "description": "Spend Channel Divinity to empower a held weapon with divine accuracy and light." }
       ],
-      "7": [{ "id": "aura_of_devotion", "name": "Aura of Devotion", "description": "You and allies in Aura of Protection are immune to Charmed." }]
+      "7": [{ "id": "aura_of_devotion", "name": "Aura of Devotion", "description": "You and allies in Aura of Protection are immune to Charmed." }],
+      "15": [{ "id": "purity_of_spirit", "name": "Purity of Spirit", "description": "You are permanently affected by Protection from Evil and Good." }],
+      "20": [{ "id": "holy_nimbus", "name": "Holy Nimbus", "description": "As an action, emit sunlight to deal radiant damage to enemies and gain saving throw advantages." }]
     },
-    "level_runtime_mechanics": { "7": ["aura_of_devotion"] },
+    "level_runtime_mechanics": { "7": ["aura_of_devotion"], "15": ["purity_of_spirit"], "20": ["holy_nimbus"] },
     "runtime_mechanics": ["paladin_level_3"],
     "mechanics_status": "implemented"
   },
@@ -131,9 +141,11 @@
         { "id": "hunters_lore", "name": "Hunter's Lore", "description": "Hunter's Mark reveals useful weaknesses, resistances, and immunities of the marked creature." },
         { "id": "hunters_prey", "name": "Hunter's Prey", "description": "Choose a specialized offensive technique and change that choice after a rest." }
       ],
-      "7": [{ "id": "defensive_tactics", "name": "Defensive Tactics", "description": "Choose Escape the Horde or Multiattack Defense and change it after a rest." }]
+      "7": [{ "id": "defensive_tactics", "name": "Defensive Tactics", "description": "Choose Escape the Horde or Multiattack Defense and change it after a rest." }],
+      "11": [{ "id": "multiattack", "name": "Multiattack", "description": "You always have Conjure Barrage prepared and can cast it once for free per Long Rest." }],
+      "15": [{ "id": "superior_hunters_defense", "name": "Superior Hunter's Defense", "description": "Choose Evasion, Stand Against the Tide, or Uncanny Dodge subclass defense." }]
     },
-    "level_runtime_mechanics": { "7": ["defensive_tactics"] },
+    "level_runtime_mechanics": { "7": ["defensive_tactics"], "11": ["hunter_multiattack"], "15": ["superior_hunters_defense"] },
     "runtime_mechanics": ["ranger_level_3"],
     "mechanics_status": "implemented"
   },
@@ -148,9 +160,11 @@
         { "id": "fast_hands", "name": "Fast Hands", "description": "Use a Bonus Action for certain Sleight of Hand checks, Utilize actions, and eligible magic items." },
         { "id": "second_story_work", "name": "Second-Story Work", "description": "Gain a Climb Speed and use Dexterity for longer jumps." }
       ],
-      "9": [{ "id": "supreme_sneak", "name": "Supreme Sneak", "description": "Spend 1d6 of Sneak Attack to remain hidden when ending the turn behind sufficient cover." }]
+      "9": [{ "id": "supreme_sneak", "name": "Supreme Sneak", "description": "Spend 1d6 of Sneak Attack to remain hidden when ending the turn behind sufficient cover." }],
+      "13": [{ "id": "use_magic_device", "name": "Use Magic Device", "description": "You ignore all class, race, and level requirements on the use of magic items." }],
+      "17": [{ "id": "thiefs_reflexes", "name": "Thief's Reflexes", "description": "Take two turns during the first round of any combat." }]
     },
-    "level_runtime_mechanics": { "9": ["supreme_sneak"] },
+    "level_runtime_mechanics": { "9": ["supreme_sneak"], "13": ["use_magic_device"], "17": ["thiefs_reflexes"] },
     "runtime_mechanics": ["rogue_level_3"],
     "mechanics_status": "implemented"
   },
@@ -165,9 +179,11 @@
         { "id": "draconic_resilience", "name": "Draconic Resilience", "description": "Increase maximum Hit Points and gain a natural Armor Class formula while unarmored." },
         { "id": "draconic_spells", "name": "Draconic Spells", "description": "Gain the level-appropriate draconic spells as always-prepared spells." }
       ],
-      "6": [{ "id": "elemental_affinity", "name": "Elemental Affinity", "description": "Choose an elemental resistance and add Charisma to one matching spell damage roll." }]
+      "6": [{ "id": "elemental_affinity", "name": "Elemental Affinity", "description": "Choose an elemental resistance and add Charisma to one matching spell damage roll." }],
+      "14": [{ "id": "dragon_wings", "name": "Dragon Wings", "description": "As a Bonus Action, manifest draconic wings to gain a Fly Speed equal to your Speed." }],
+      "18": [{ "id": "draconic_presence", "name": "Draconic Presence", "description": "Force nearby creatures to make a Wisdom save or be Frightened or Charmed." }]
     },
-    "level_runtime_mechanics": { "6": ["elemental_affinity"] },
+    "level_runtime_mechanics": { "6": ["elemental_affinity"], "14": ["dragon_wings"], "18": ["draconic_presence"] },
     "runtime_mechanics": ["sorcerer_level_3"],
     "mechanics_status": "implemented"
   },
@@ -183,9 +199,10 @@
         { "id": "fiend_spells", "name": "Fiend Spells", "description": "Gain the level-appropriate Fiend Patron spells as always-prepared spells." }
       ],
       "6": [{ "id": "dark_ones_own_luck", "name": "Dark One's Own Luck", "description": "Add 1d10 to an ability check or saving throw after seeing the roll, a limited number of times per Long Rest." }],
-      "10": [{ "id": "fiendish_resilience", "name": "Fiendish Resilience", "description": "Choose a non-Force damage resistance after a Short or Long Rest." }]
+      "10": [{ "id": "fiendish_resilience", "name": "Fiendish Resilience", "description": "Choose a non-Force damage resistance after a Short or Long Rest." }],
+      "14": [{ "id": "hurl_through_hell", "name": "Hurl Through Hell", "description": "Once per Long Rest when you hit a creature with an attack, banish it temporarily to deal 10d10 psychic damage." }]
     },
-    "level_runtime_mechanics": { "6": ["dark_ones_own_luck"], "10": ["fiendish_resilience"] },
+    "level_runtime_mechanics": { "6": ["dark_ones_own_luck"], "10": ["fiendish_resilience"], "14": ["hurl_through_hell"] },
     "runtime_mechanics": ["warlock_level_3"],
     "mechanics_status": "implemented"
   },
@@ -201,9 +218,10 @@
         { "id": "potent_cantrip", "name": "Potent Cantrip", "description": "Damaging cantrips still deal partial damage when an attack misses or a target succeeds on its save." }
       ],
       "6": [{ "id": "sculpt_spells", "name": "Sculpt Spells", "description": "Protect selected creatures from your Evocation area spells, granting automatic saves and no damage." }],
-      "10": [{ "id": "empowered_evocation", "name": "Empowered Evocation", "description": "Add Intelligence modifier to one damage roll of each Wizard Evocation spell." }]
+      "10": [{ "id": "empowered_evocation", "name": "Empowered Evocation", "description": "Add Intelligence modifier to one damage roll of each Wizard Evocation spell." }],
+      "14": [{ "id": "overchannel", "name": "Overchannel", "description": "Maximize the damage of a Wizard spell of 1st through 5th level." }]
     },
-    "level_runtime_mechanics": { "6": ["sculpt_spells"], "10": ["empowered_evocation"] },
+    "level_runtime_mechanics": { "6": ["sculpt_spells"], "10": ["empowered_evocation"], "14": ["overchannel"] },
     "runtime_mechanics": ["wizard_level_3"],
     "mechanics_status": "implemented"
   }

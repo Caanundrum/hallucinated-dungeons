@@ -193,3 +193,99 @@ test('Tactical Master replaces a mastered weapon property for the declared attac
 
   assert.match(result.reply, /Slow mastery/);
 });
+
+test('Stroke of Luck turns a failed ability check into a success', () => {
+  const rogue = sheet({ classId: 'rogue', level: 20 });
+  rogue.resources.stroke_of_luck = { name: 'Stroke of Luck', remaining: 1, max: 1, reset: 'short_rest' };
+  const prompted = resolveRefereeAction({
+    message: '[ROLL REQUEST: midlevel_roll]',
+    worldState: pendingWorld({ kind: 'skill_check', skill: 'stealth', ability: 'dex', modifier: 6, dc: 25 }),
+    characterSheet: rogue,
+    rollDie: () => 3,
+  });
+  assert.match(prompted.reply, /Stroke of Luck is available/);
+
+  const resolved = resolveRefereeAction({
+    message: 'I use Stroke of Luck.',
+    worldState: prompted.worldState,
+    characterSheet: rogue,
+    rollDie: () => 3,
+  });
+  assert.match(resolved.reply, /Stroke of Luck automatically succeeds/);
+  assert.equal(resolved.worldState.player_stats.resources.stroke_of_luck.remaining, 0);
+});
+
+test('Perfect Self restores Focus Points when rolling initiative with 0', () => {
+  const monk = sheet({ classId: 'monk', level: 15 });
+  monk.resources.focus_points = { name: 'Focus Points', remaining: 0, max: 15, reset: 'short_rest' };
+  const prompted = resolveRefereeAction({
+    message: 'I attack the Goblin',
+    worldState: { combat_state: { active: false } },
+    characterSheet: monk,
+    rollDie: () => 10,
+  });
+  assert.match(prompted.reply, /Perfect Self\*\* triggers: you have no Focus Points, so you regain 4 Focus Points/);
+  assert.equal(prompted.worldState.player_stats.resources.focus_points.remaining, 4);
+});
+
+test('Survivor heals the Fighter at the start of their turn if bloodied', () => {
+  const champion = sheet({ classId: 'fighter', level: 18, subclass: 'champion' });
+  champion.abilities.modifiers.con = 4;
+  champion.derived_stats.max_hp = 100;
+  champion.derived_stats.hp = 20;
+
+  const world = {
+    combat_state: {
+      active: true,
+      round: 1,
+      turn_index: 0,
+      combatants: [
+        { name: 'Midlevel Test', hp: 20, max_hp: 100, ac: 16, is_player: true },
+        { name: 'Goblin', hp: 50, max_hp: 50, ac: 12, speed: 30, is_player: false },
+      ],
+    },
+    player_stats: { hp: 20, max_hp: 100, armor_class: 16 },
+  };
+
+  const nextState = resolveRefereeAction({
+    message: 'I end my turn.',
+    worldState: world,
+    characterSheet: champion,
+    rollDie: () => 10,
+  });
+
+  assert.match(nextState.reply, /Survivor:\*\* You are bloodied at the start of your turn. You regain 9 HP/);
+  assert.equal(nextState.worldState.player_stats.hp, 29);
+});
+
+test('Fleet Step triggers Dodge flag on Step of the Wind', () => {
+  const monk = sheet({ classId: 'monk', level: 11, subclass: 'warrior_of_the_open_hand' });
+  monk.resources.focus_points = { name: 'Focus Points', remaining: 11, max: 11, reset: 'short_rest' };
+
+  const result = resolveRefereeAction({
+    message: 'I use Step of the Wind.',
+    worldState: combatWorld(),
+    characterSheet: monk,
+    rollDie: () => 10,
+  });
+
+  assert.match(result.reply, /Fleet Step\*\* also grants the Dodge action/);
+  assert.equal(result.worldState.combat_state.turn_resources.dodging, true);
+});
+
+test('Eldritch Master restores Pact Magic slots outside combat', () => {
+  const warlock = sheet({ classId: 'warlock', level: 20 });
+  warlock.spellcasting = { pact_slot_level: 5, slots: { 5: 0 } };
+  warlock.resources.eldritch_master = { name: 'Eldritch Master', remaining: 1, max: 1, reset: 'long_rest' };
+
+  const result = resolveRefereeAction({
+    message: 'I activate Eldritch Master.',
+    worldState: { combat_state: { active: false }, time_state: { elapsed_minutes: 10 } },
+    characterSheet: warlock,
+    rollDie: () => 10,
+  });
+
+  assert.match(result.reply, /regain all expended Pact Magic slots/);
+  assert.equal(result.worldState.player_stats.spell_slots[5], 4);
+  assert.equal(result.worldState.player_stats.resources.eldritch_master.remaining, 0);
+});

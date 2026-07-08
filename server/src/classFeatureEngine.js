@@ -29,6 +29,7 @@ const {
   isDevotionPaladin,
   isLandDruid,
   isLifeCleric,
+  isOpenHandMonk,
 } = require('./subclassFeatureEngine');
 
 function resolveFeatureAction({ message = '', worldState = {}, characterSheet = {}, rollDie = defaultRollDie } = {}) {
@@ -64,6 +65,7 @@ function resolveFeatureAction({ message = '', worldState = {}, characterSheet = 
   if (intent.id === 'tireless') return resolveTireless({ worldState, characterSheet, rollDie });
   if (intent.id === 'abjure_foes') return resolveAbjureFoes({ worldState, characterSheet, rollDie });
   if (intent.id === 'contact_patron') return resolveContactPatron({ worldState, characterSheet });
+  if (intent.id === 'eldritch_master') return resolveEldritchMaster({ worldState, characterSheet });
   if (intent.id === 'arcane_recovery') {
     return {
       handled: true,
@@ -107,6 +109,7 @@ function getFeatureIntent(message = '') {
   if (/\btireless\b/.test(text) && /\b(?:use|activate|temporary|temp|hit points?|stamina)\b/.test(text)) return { id: 'tireless' };
   if (/\babjure\s+foes\b/.test(text)) return { id: 'abjure_foes' };
   if (/\bcontact\s+(?:my\s+)?patron\b/.test(text)) return { id: 'contact_patron' };
+  if (/\beldritch\s+master\b/.test(text)) return { id: 'eldritch_master' };
   if (/\b(?:choose|change|switch|attune)\b.*\b(?:arid|polar|temperate|tropical|colossus slayer|horde breaker)\b/.test(text)) return { id: 'rest_subclass_choice' };
   if (/\barcane\s+recovery\b/.test(text)) return { id: 'arcane_recovery' };
   if (/\bmemorize\s+spell\b|\b(?:prepare|memorize)\b.+\binstead\s+of\b.+\bafter\b.*\brest\b/.test(text)) return { id: 'memorize_spell' };
@@ -1192,6 +1195,59 @@ function resolveContactPatron({ worldState = {}, characterSheet = {} } = {}) {
   return { handled: true, logType: 'feature_contact_patron', worldState: spent.worldState, reply: `You use **Contact Patron** and cast Contact Other Plane without a spell slot. The feature automatically succeeds on the spell's saving throw; your patron is now reachable for the scene's question and answer. Uses left: ${remainingResourceText(spent.worldState, characterSheet, 'contact_patron')}.` };
 }
 
+function resolveEldritchMaster({ worldState = {}, characterSheet = {} } = {}) {
+  if (!isClass(characterSheet, 'warlock')) return wrongClass('Eldritch Master', 'Warlock', worldState);
+  if (getCharacterLevel(characterSheet) < 20) return levelRequired('Eldritch Master', 'Warlock', 20, worldState);
+  if (worldState.combat_state?.active) {
+    return {
+      handled: true,
+      logType: 'feature_eldritch_master_combat_blocked',
+      worldState,
+      reply: 'Eldritch Master requires 1 minute, so it cannot be completed during active combat.',
+    };
+  }
+
+  const resources = buildResourceState(characterSheet, worldState);
+  const master = resources.eldritch_master;
+  if (Number(master?.remaining || 0) <= 0) {
+    return {
+      handled: true,
+      logType: 'feature_eldritch_master_unavailable',
+      worldState: mergeWorldResources(worldState, resources),
+      reply: 'Eldritch Master has already been used and returns after a Long Rest.',
+    };
+  }
+
+  const slotLevel = Number(characterSheet.spellcasting?.pact_slot_level || 5);
+  const maxSlots = 4;
+  const slots = { ...(worldState.player_stats?.spell_slots || characterSheet.spellcasting?.slots || {}) };
+  const current = Number(slots[String(slotLevel)] || 0);
+  if (current >= maxSlots) {
+    return {
+      handled: true,
+      logType: 'feature_eldritch_master_slots_full',
+      worldState: mergeWorldResources(worldState, resources),
+      reply: `Your Pact Magic slots are already full (${current}/${maxSlots}), so Eldritch Master is not spent.`,
+    };
+  }
+
+  const nextResources = {
+    ...resources,
+    eldritch_master: { ...master, remaining: Number(master.remaining) - 1 },
+  };
+  const elapsed = Number(worldState.time_state?.elapsed_minutes || 0) + 1;
+  return {
+    handled: true,
+    logType: 'feature_eldritch_master',
+    worldState: mergeWorldResources({
+      ...worldState,
+      time_state: { ...(worldState.time_state || {}), elapsed_minutes: elapsed, scene_time: 'after a one-minute Eldritch Master rite' },
+      player_stats: { ...(worldState.player_stats || {}), spell_slots: { ...slots, [slotLevel]: maxSlots } },
+    }, nextResources),
+    reply: `You spend 1 minute entreating your patron for **Eldritch Master** and regain all expended Pact Magic slots. Pact slots: ${maxSlots}/${maxSlots}. Uses left: ${nextResources.eldritch_master.remaining}/${nextResources.eldritch_master.max}.`,
+  };
+}
+
 function resolvePatientDefense({ worldState = {}, characterSheet = {}, rollDie = defaultRollDie } = {}) {
   const requirement = requireMonkFocus('Patient Defense', worldState, characterSheet);
   if (requirement) return requirement;
@@ -1236,11 +1292,16 @@ function resolveStepOfTheWind({ worldState = {}, characterSheet = {} } = {}) {
   const speed = Number(characterSheet.derived_stats?.speed || spent.worldState.player_stats?.speed || 30);
   const disengaged = setTurnFlag(spent.worldState, 'disengaged', true, characterSheet);
   const dashed = grantMovement(disengaged, speed, 'Step of the Wind', characterSheet);
+  let fleetStepNote = '';
+  if (isOpenHandMonk(characterSheet) && getCharacterLevel(characterSheet) >= 11) {
+    dashed.worldState = setTurnFlag(dashed.worldState, 'dodging', true, characterSheet);
+    fleetStepNote = ' **Fleet Step** also grants the Dodge action for the turn.';
+  }
   return {
     handled: true,
     logType: 'feature_step_of_the_wind',
     worldState: dashed.worldState,
-    reply: `You spend 1 Focus Point for **Step of the Wind**. As a Bonus Action, you Dash and Disengage; your jump distance is doubled for the turn.${getCharacterLevel(characterSheet) >= 10 ? ' Heightened Focus also lets you carry one willing Large-or-smaller creature beside you without provoking Opportunity Attacks.' : ''} Focus Points left: ${remainingResourceText(dashed.worldState, characterSheet, 'focus_points')}.`,
+    reply: `You spend 1 Focus Point for **Step of the Wind**. As a Bonus Action, you Dash and Disengage; your jump distance is doubled for the turn.${getCharacterLevel(characterSheet) >= 10 ? ' Heightened Focus also lets you carry one willing Large-or-smaller creature beside you without provoking Opportunity Attacks.' : ''}${fleetStepNote} Focus Points left: ${remainingResourceText(dashed.worldState, characterSheet, 'focus_points')}.`,
   };
 }
 
